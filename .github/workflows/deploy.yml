@@ -1,0 +1,66 @@
+# Production: push lên main → CI → build → GitHub Pages.
+# Fitora chỉ là frontend. Database / Edge Function nằm trong repo Note_mytasks
+# (cùng project Supabase) và được deploy bởi workflow của repo đó.
+#
+# Cấu hình một lần: Settings → Pages → Source = "GitHub Actions";
+# Settings → Secrets and variables → Actions → Variables:
+#   VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY (anon/publishable key, KHÔNG phải service_role).
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build site
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Chặn secret lọt vào biến VITE_*
+        run: node .github/scripts/check-public-env.mjs --strict
+
+      - run: npm run build
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  pages:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

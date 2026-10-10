@@ -1,0 +1,469 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===================================================================== */
+/* Ember Glass — tokens                                                   */
+/* ===================================================================== */
+:root {
+  --bg: #120906;
+  --bg-2: #180a06;
+  --card: rgba(255, 255, 255, 0.06);
+  --card-strong: rgba(20, 12, 8, 0.82);
+  --line: rgba(255, 255, 255, 0.1);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --text: #ede4d8;
+  --muted: rgba(235, 220, 205, 0.6);
+  --muted-2: rgba(235, 220, 205, 0.4);
+  --gold: #edb40b;
+  --gold-soft: rgba(237, 180, 11, 0.16);
+  --ember: #e1500a;
+  --danger: #e10600;
+  --danger-text: #ff6b5e;
+  --ok: #7fd18b;
+
+  --protein: #ff7a59;
+  --carbs: #edb40b;
+  --fat: #7fb2ff;
+  --fiber: #7fd18b;
+  --water: #5ec8f2;
+  --burn: #ff4d2e;
+
+  --radius-card: 24px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Shell metrics (consumed by Page / BottomNav / overlays) */
+  --topbar-h: 64px;
+  --bottomnav-h: 72px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  color-scheme: dark;
+}
+
+/* ===================================================================== */
+/* Base                                                                   */
+/* ===================================================================== */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+  body {
+    margin: 0;
+    font-family: 'Albert Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    color: var(--text);
+    background-color: #070402;
+    /* Warm coffee page background (desktop surround) */
+    background-image:
+      radial-gradient(60% 50% at 15% 10%, rgba(225, 80, 10, 0.22) 0%, transparent 60%),
+      radial-gradient(50% 45% at 85% 20%, rgba(237, 180, 11, 0.1) 0%, transparent 60%),
+      radial-gradient(70% 60% at 70% 95%, rgba(122, 29, 0, 0.3) 0%, transparent 65%),
+      radial-gradient(55% 55% at 10% 90%, rgba(60, 28, 14, 0.55) 0%, transparent 70%);
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior: none;
+  }
+  ::selection {
+    background: rgba(237, 180, 11, 0.35);
+    color: #fff;
+  }
+  :focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+  }
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+  img {
+    max-width: 100%;
+  }
+}
+
+/* ===================================================================== */
+/* Glass system                                                           */
+/* ===================================================================== */
+@layer components {
+  /* Liquid-glass control (buttons): faint fill + inset highlight */
+  .glass {
+    position: relative;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+      inset 0 0 18px rgba(255, 255, 255, 0.04),
+      0 6px 18px rgba(0, 0, 0, 0.25);
+    -webkit-backdrop-filter: blur(2px) saturate(1.3);
+    backdrop-filter: blur(2px) saturate(1.3);
+    transition:
+      transform 0.18s var(--ease-out),
+      background-color 0.2s ease,
+      border-color 0.2s ease;
+  }
+  .glass::before {
+    /* specular rim */
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 40%, rgba(255, 255, 255, 0) 70%, rgba(255, 255, 255, 0.12));
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+  .glass:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .glass:active {
+    transform: scale(0.96);
+  }
+  .glass.circle {
+    border-radius: 9999px;
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .glass.pill {
+    border-radius: 9999px;
+    min-height: 44px;
+    padding: 0 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .glass.square {
+    border-radius: 16px;
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  /* Content card */
+  .glass-card {
+    background: var(--card);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: var(--radius-card);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 10px 30px rgba(0, 0, 0, 0.18);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+    backdrop-filter: blur(14px) saturate(1.2);
+  }
+
+  /* Dense chrome: bottom nav, sheets, toasts */
+  .glass-strong {
+    background: rgba(20, 20, 30, 0.8);
+    border: 1px solid var(--line);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    backdrop-filter: blur(16px) saturate(1.4);
+  }
+
+  /* Display type */
+  .display {
+    font-weight: 800;
+    letter-spacing: -0.05em;
+    line-height: 0.9;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.06em;
+    line-height: 0.78;
+    font-weight: 800;
+  }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* Gradient text for big numbers */
+  .text-gradient {
+    background: linear-gradient(180deg, #fff6e6 0%, #ede4d8 45%, rgba(237, 228, 216, 0.6) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .text-gradient-gold {
+    background: linear-gradient(180deg, #ffe48a 0%, #edb40b 50%, #c27c06 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .text-gradient-ember {
+    background: linear-gradient(180deg, #ffb37a 0%, #ff6a1f 50%, #e1500a 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .text-gradient-cool {
+    background: linear-gradient(180deg, #d6f3ff 0%, #5ec8f2 60%, #3a8fc0 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .text-gradient-fade {
+    background: linear-gradient(180deg, rgba(237, 228, 216, 0.9) 0%, rgba(237, 228, 216, 0.08) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* In-app background: --bg + soft ember glow at the top */
+  .app-bg {
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(120% 45% at 50% -8%, rgba(225, 80, 10, 0.28) 0%, rgba(122, 29, 0, 0.12) 40%, transparent 70%),
+      radial-gradient(80% 30% at 100% 0%, rgba(237, 180, 11, 0.07) 0%, transparent 70%);
+  }
+
+  .menu-ember {
+    background: linear-gradient(160deg, #1a0500 0%, #7a1d00 40%, #e1500a 100%);
+  }
+
+  .skeleton {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.11) 50%, rgba(255, 255, 255, 0.05) 100%);
+    background-size: 200% 100%;
+    animation: fitora-shimmer 1.6s linear infinite;
+  }
+
+  /* Form field shell shared by Input / NumberField */
+  .field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 52px;
+    padding: 0 16px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--line);
+    transition:
+      border-color 0.2s ease,
+      background-color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+  .field:focus-within {
+    border-color: rgba(237, 180, 11, 0.7);
+    background: rgba(255, 255, 255, 0.07);
+    box-shadow: 0 0 0 4px rgba(237, 180, 11, 0.12);
+  }
+  .field[data-invalid='true'] {
+    border-color: rgba(255, 107, 94, 0.8);
+  }
+  .field input,
+  .field textarea,
+  .field select {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    outline: none;
+    font-size: 16px; /* ≥16px: no iOS zoom on focus */
+    padding: 14px 0;
+  }
+  .field input::placeholder,
+  .field textarea::placeholder {
+    color: var(--muted-2);
+  }
+}
+
+/* ===================================================================== */
+/* Utilities                                                              */
+/* ===================================================================== */
+@layer utilities {
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .pt-safe {
+    padding-top: var(--safe-top);
+  }
+  .pb-safe {
+    padding-bottom: var(--safe-bottom);
+  }
+  .pl-safe {
+    padding-left: var(--safe-left);
+  }
+  .pr-safe {
+    padding-right: var(--safe-right);
+  }
+  .mb-safe {
+    margin-bottom: var(--safe-bottom);
+  }
+  .h-dvh-safe {
+    height: 100vh;
+    height: 100dvh;
+  }
+  .tap {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@keyframes fitora-shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+/* ===================================================================== */
+/* Phone frame (desktop ≥ 768px) — see AppFrame                           */
+/* ===================================================================== */
+@media (min-width: 768px) {
+  .fitora-frame {
+    position: relative;
+    height: min(92vh, 900px);
+    aspect-ratio: 390 / 844;
+    border-radius: 54px;
+    padding: 11px;
+    background: linear-gradient(145deg, #1d1612 0%, #050302 45%, #120c09 100%);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.15),
+      0 0 0 3px #000,
+      inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+      0 50px 120px -20px rgba(0, 0, 0, 0.85),
+      0 0 90px -10px rgba(225, 80, 10, 0.25);
+  }
+  .fitora-frame__screen {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 44px;
+    overflow: hidden;
+    isolation: isolate;
+    /* Re-anchor the safe-area insets inside the frame: status bar + home indicator */
+    --safe-top: 46px;
+    --safe-bottom: 20px;
+    --safe-left: 0px;
+    --safe-right: 0px;
+  }
+  .fitora-frame__island {
+    position: absolute;
+    top: 11px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 116px;
+    height: 34px;
+    border-radius: 20px;
+    background: #000;
+    z-index: 90;
+    pointer-events: none;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  }
+  .fitora-frame__island::after {
+    content: '';
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    width: 10px;
+    height: 10px;
+    margin-top: -5px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #2a3550 0%, #0a0d16 60%);
+  }
+  .fitora-frame__btn {
+    position: absolute;
+    width: 4px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, #2a221d, #0d0907);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
+  .fitora-frame__home {
+    position: absolute;
+    bottom: 7px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 128px;
+    height: 5px;
+    border-radius: 3px;
+    background: rgba(237, 228, 216, 0.6);
+    z-index: 90;
+    pointer-events: none;
+  }
+  .fitora-frame__status {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 46px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 32px 0 36px;
+    font-size: 15px;
+    font-weight: 600;
+    z-index: 85;
+    pointer-events: none;
+  }
+
+}
+
+/* ===================================================================== */
+/* Reduced motion                                                         */
+/* ===================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Mobile: the app owns the viewport; each Page scrolls inside it. */
+@media (max-width: 767px) {
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+}
