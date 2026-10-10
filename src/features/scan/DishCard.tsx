@@ -1,0 +1,183 @@
+import clsx from 'clsx';
+import { ChevronDown, Pencil, Trash2 } from 'lucide-react';
+import { useId } from 'react';
+import { Chip } from '@/components/ui/Chip';
+import { GlassButton } from '@/components/ui/GlassButton';
+import { MACROS } from '@/components/ui/MacroBar';
+import { NumberField } from '@/components/ui/NumberField';
+import { formatGrams, formatNumber } from '@/lib/format';
+import { confidenceLevel, macroShares, SCAN_UNITS, setGrams, setQuantity, setUnit, type ScanDish } from './scale';
+
+const CONF = {
+  high: { label: 'Chắc chắn', cls: 'border-ok/40 bg-ok/10 text-ok' },
+  medium: { label: 'Khá chắc', cls: 'border-gold/40 bg-gold/10 text-gold' },
+  low: { label: 'Cần kiểm tra', cls: 'border-[var(--danger-text)]/40 bg-danger/10 text-[var(--danger-text)]' },
+} as const;
+
+export function ConfidenceBadge({ value }: { value: number | null }) {
+  const lvl = confidenceLevel(value);
+  if (!lvl || value === null) {
+    return <span className="inline-flex min-h-[24px] items-center rounded-full border border-line bg-white/[0.04] px-2.5 text-[11px] font-bold text-muted">Tự nhập</span>;
+  }
+  const c = CONF[lvl];
+  return (
+    <span
+      className={clsx('inline-flex min-h-[24px] items-center gap-1 whitespace-nowrap rounded-full border px-2.5 text-[11px] font-bold', c.cls)}
+      title={`Độ tin cậy ${Math.round(value * 100)}%`}
+    >
+      <span className="tabular">{Math.round(value * 100)}%</span>
+      <span className="opacity-80">· {c.label}</span>
+    </span>
+  );
+}
+
+/** Three thin bars: grams + share of this dish's energy per macro. */
+export function MacroMini({ dish }: { dish: Pick<ScanDish, 'protein_g' | 'carbs_g' | 'fat_g'> }) {
+  const s = macroShares(dish);
+  const share = { protein_g: s.protein, carbs_g: s.carbs, fat_g: s.fat };
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      {MACROS.map((m) => (
+        <div key={m.key} className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex items-baseline justify-between gap-1 text-[12px]">
+            <span className="truncate font-semibold text-muted">{m.label}</span>
+            <span className="tabular font-bold text-text">{formatGrams(dish[m.key])}</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.07]" role="img" aria-label={`${m.label} ${formatNumber(share[m.key] * 100)}% năng lượng`}>
+            <div className="h-full rounded-full transition-[width] duration-500 ease-out" style={{ width: `${share[m.key] * 100}%`, background: m.color }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function UnitSelect({ value, onChange, id, label = 'Đơn vị' }: { value: string; onChange: (u: string) => void; id?: string; label?: string }) {
+  const auto = useId();
+  const fid = id ?? auto;
+  const options = (SCAN_UNITS as readonly string[]).includes(value) ? SCAN_UNITS : [value, ...SCAN_UNITS];
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={fid} className="pl-1 text-[13px] font-semibold text-muted">
+        {label}
+      </label>
+      <div className="field relative !pr-3">
+        <select id={fid} value={value} onChange={(e) => onChange(e.target.value)} className="scan-select">
+          {options.map((u) => (
+            <option key={u} value={u}>
+              {u}
+            </option>
+          ))}
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-3 h-4 w-4 text-muted" aria-hidden="true" />
+      </div>
+    </div>
+  );
+}
+
+interface DishCardProps {
+  dish: ScanDish;
+  index: number;
+  onChange: (d: ScanDish) => void;
+  onRemove: () => void;
+}
+
+export function DishCard({ dish, index, onChange, onRemove }: DishCardProps) {
+  const nameId = useId();
+  const isGrams = dish.unit === 'g';
+  const nameMissing = !dish.name.trim();
+  const extra = dish.ingredients.length - 6;
+
+  return (
+    <article
+      className="glass-card animate-fade-slide-up p-4"
+      style={{ animationDelay: `${Math.min(index, 5) * 80}ms` }}
+      aria-label={dish.name || `Món ${index + 1}`}
+    >
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+            <span className="eyebrow !text-[10px]">Món {index + 1}</span>
+            <ConfidenceBadge value={dish.confidence} />
+          </div>
+          <label htmlFor={nameId} className="sr-only">
+            Tên món
+          </label>
+          <div
+            className={clsx(
+              'group flex items-center gap-2 rounded-xl border border-transparent px-1 transition-colors focus-within:border-gold/60 focus-within:bg-white/[0.05]',
+              nameMissing && '!border-[var(--danger-text)]/70',
+            )}
+          >
+            <input
+              id={nameId}
+              value={dish.name}
+              maxLength={120}
+              placeholder="Tên món"
+              onChange={(e) => onChange({ ...dish, name: e.target.value })}
+              className="min-h-[44px] w-full min-w-0 bg-transparent text-[20px] font-extrabold tracking-[-0.03em] text-text outline-none placeholder:text-muted"
+            />
+            <Pencil className="h-4 w-4 shrink-0 text-muted group-focus-within:text-gold" aria-hidden="true" />
+          </div>
+        </div>
+        <GlassButton label={`Xóa ${dish.name || 'món này'}`} onClick={onRemove} className="mt-6 shrink-0 text-muted hover:text-[var(--danger-text)]">
+          <Trash2 className="h-[18px] w-[18px]" />
+        </GlassButton>
+      </div>
+
+      {dish.ingredients.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Thành phần">
+          {dish.ingredients.slice(0, 6).map((ing, i) => (
+            <Chip key={`${ing}-${i}`} size="sm">
+              {ing}
+            </Chip>
+          ))}
+          {extra > 0 && <Chip size="sm">+{extra}</Chip>}
+        </div>
+      )}
+
+      <div className="mt-4 grid grid-cols-[1fr_112px] gap-2.5">
+        <NumberField
+          label={isGrams ? 'Khối lượng' : 'Số lượng'}
+          value={dish.quantity}
+          onChange={(v) => onChange(setQuantity(dish, v ?? 0))}
+          min={isGrams ? 1 : 0.25}
+          max={isGrams ? 5000 : 50}
+          step={isGrams ? 10 : 0.5}
+          decimals={isGrams ? 0 : 2}
+          stepper
+          error={dish.quantity > 0 ? undefined : 'Phải lớn hơn 0'}
+        />
+        <UnitSelect value={dish.unit} onChange={(u) => onChange(setUnit(dish, u))} />
+      </div>
+
+      <div className="mt-3 flex items-end gap-3">
+        {!isGrams ? (
+          <NumberField
+            label="Tổng khối lượng"
+            value={dish.grams}
+            onChange={(v) => onChange(setGrams(dish, v ?? 0))}
+            min={0}
+            max={5000}
+            decimals={0}
+            unit="g"
+            wrapperClassName="w-[132px] shrink-0"
+          />
+        ) : (
+          <span className="flex-1" />
+        )}
+        <div className="ml-auto flex min-w-0 flex-col items-end pb-1" aria-live="polite">
+          <span className="eyebrow !text-[10px]">Năng lượng</span>
+          <span className="mt-1 flex items-baseline gap-1">
+            <span className="num text-[40px] text-gradient-gold">{formatNumber(dish.kcal)}</span>
+            <span className="text-sm font-semibold text-muted">kcal</span>
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-4 border-t border-line pt-3.5">
+        <MacroMini dish={dish} />
+      </div>
+    </article>
+  );
+}

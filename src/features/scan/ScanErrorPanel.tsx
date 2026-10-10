@@ -1,0 +1,94 @@
+import { Camera, CloudOff, LogIn, PencilLine, RefreshCw, Search, TriangleAlert, Utensils, WifiOff, type LucideIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Button } from '@/components/ui/Button';
+import { AI_ERROR_MESSAGES } from '@/services/ai';
+import type { AiErrorCode } from '@/types/db';
+
+const META: Record<AiErrorCode, { icon: LucideIcon; title: string }> = {
+  not_food: { icon: Utensils, title: 'Chưa thấy món ăn' },
+  quota_exceeded: { icon: TriangleAlert, title: 'Hết lượt quét hôm nay' },
+  bad_request: { icon: TriangleAlert, title: 'Ảnh chưa dùng được' },
+  ai_unavailable: { icon: CloudOff, title: 'AI đang bận' },
+  network: { icon: WifiOff, title: 'Mất kết nối' },
+  unauthorized: { icon: LogIn, title: 'Phiên đã hết hạn' },
+};
+
+interface Props {
+  code: AiErrorCode;
+  message?: string;
+  photoUrl: string | null;
+  manualHref: string;
+  onRetake: () => void;
+  onRetry: () => void;
+  onManual: () => void;
+}
+
+/** Friendly full-screen error after a scan, with the next best action first. */
+export function ScanErrorPanel({ code, message, photoUrl, manualHref, onRetake, onRetry, onManual }: Props) {
+  const { icon: Icon, title } = META[code] ?? META.ai_unavailable;
+  const canRetrySame = code === 'ai_unavailable' || code === 'network';
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col bg-black" role="alertdialog" aria-labelledby="scan-err-title" aria-describedby="scan-err-msg">
+      {photoUrl && <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-35 blur-[2px]" />}
+      <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/50 to-black/90" aria-hidden="true" />
+      <div className="relative mt-auto px-5" style={{ paddingBottom: 'calc(var(--safe-bottom) + 24px)' }}>
+        <div className="glass-strong animate-fade-slide-up rounded-[28px] p-6">
+          <div className="relative mb-4 inline-grid">
+            <span className="absolute inset-0 rounded-[20px] bg-ember/40 blur-xl" aria-hidden="true" />
+            <span className="glass relative grid h-14 w-14 place-items-center rounded-[20px] text-gold">
+              <Icon className="h-7 w-7" aria-hidden="true" />
+            </span>
+          </div>
+          <h2 id="scan-err-title" className="display text-[30px] text-text">
+            {title}
+          </h2>
+          <p id="scan-err-msg" className="mt-2 text-[15px] leading-relaxed text-muted">
+            {message || AI_ERROR_MESSAGES[code]}
+          </p>
+
+          <div className="mt-5 flex flex-col gap-2.5">
+            {code === 'unauthorized' ? (
+              <Link to="/login" className="inline-flex min-h-[56px] items-center justify-center gap-2 rounded-full bg-gold font-bold text-[#1a0e02]">
+                <LogIn className="h-5 w-5" aria-hidden="true" /> Đăng nhập lại
+              </Link>
+            ) : code === 'quota_exceeded' ? (
+              <Link to={manualHref} className="inline-flex min-h-[56px] items-center justify-center gap-2 rounded-full bg-gold font-bold text-[#1a0e02]">
+                <Search className="h-5 w-5" aria-hidden="true" /> Tìm thủ công
+              </Link>
+            ) : canRetrySame ? (
+              <Button size="lg" block onClick={onRetry} icon={<RefreshCw className="h-5 w-5" />}>
+                Thử lại
+              </Button>
+            ) : (
+              <Button size="lg" block onClick={onRetake} icon={<Camera className="h-5 w-5" />}>
+                {code === 'bad_request' ? 'Chọn ảnh khác' : 'Chụp lại'}
+              </Button>
+            )}
+
+            {code !== 'quota_exceeded' && code !== 'unauthorized' && (
+              <div className="grid grid-cols-2 gap-2.5">
+                {canRetrySame ? (
+                  <Button variant="secondary" onClick={onRetake} icon={<Camera className="h-4 w-4" />}>
+                    Ảnh khác
+                  </Button>
+                ) : (
+                  <Button variant="secondary" onClick={onManual} icon={<PencilLine className="h-4 w-4" />}>
+                    Tự nhập
+                  </Button>
+                )}
+                <Link to={manualHref} className="glass pill text-[15px] font-semibold">
+                  <Search className="h-4 w-4" aria-hidden="true" /> Tìm thủ công
+                </Link>
+              </div>
+            )}
+            {code === 'quota_exceeded' && (
+              <Button variant="ghost" onClick={onManual} icon={<PencilLine className="h-4 w-4" />}>
+                Tự nhập món cho ảnh này
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
