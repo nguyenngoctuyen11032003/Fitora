@@ -1,0 +1,21 @@
+{
+  "name": "fitora-e2e",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end tests for Fitora against a LOCAL Supabase stack (never the hosted project).",
+  "scripts": {
+    "backend:start": "node scripts/backend.mjs start",
+    "backend:stop": "node scripts/backend.mjs stop",
+    "backend:status": "node scripts/backend.mjs status",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@supabase/supabase-js": "^2.117.3",
+    "@types/node": "^26.6.4",
+    "pg": "^8.23.1",
+    "typescript": "^5.9.3"
+  }
+}
