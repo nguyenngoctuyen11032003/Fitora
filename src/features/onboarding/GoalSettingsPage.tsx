@@ -1,7 +1,7 @@
 // /goals — edit body data, activity and goal; the plan recomputes live.
 import clsx from 'clsx';
 import { Check, RotateCcw } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Page } from '@/components/shell/Page';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -20,12 +20,17 @@ import {
   computePlan,
   draftToPatch,
   hasErrors,
+  previewPlan,
   profileToDraft,
   validateActivity,
   validateBasics,
   validateBody,
   validateGoal,
+  validatePlan,
+  patchDiff,
+  savedPatch,
   type GoalDraft,
+  type Plan,
   type StepErrors,
 } from './logic';
 import { ActivityStep, BasicsStep, BodyStep, GoalStep, PlanStep } from './steps';
@@ -56,7 +61,7 @@ function GoalsSkeleton() {
 
 export default function GoalSettingsPage() {
   const toast = useToast();
-  const { fit, loading: profileLoading, setFit } = useProfile();
+  const { fit, loading: profileLoading, setFit, refresh } = useProfile();
   const weightQ = useAsync(() => latestWeight(), []);
 
   const [base, setBase] = useState<{ draft: GoalDraft; weight: number | null } | null>(null);
@@ -74,15 +79,56 @@ export default function GoalSettingsPage() {
     setDraft(d);
   }, [base, fit, profileLoading, weightQ.loading, weightQ.data, weightQ.error, toast]);
 
-  const plan = useMemo(() => (draft ? computePlan(draft) : null), [draft]);
-  const basePatch = useMemo(() => {
-    if (!base) return null;
-    const p = computePlan(base.draft);
-    return p ? JSON.stringify(draftToPatch(base.draft, p)) : null;
-  }, [base]);
+  // Live preview only from in-range inputs; while a field is half-typed or invalid the
+  // last good plan stays on screen (instead of absurd numbers or an empty page).
+  const plan = useMemo(() => (draft ? previewPlan(draft) : null), [draft]);
+  const lastPlan = useRef<Plan | null>(null);
+  if (plan) lastPlan.current = plan;
+  const shownPlan = plan ?? lastPlan.current ?? (draft ? computePlan(draft) : null);
+  // Compare with what is actually SAVED (not with the initial draft): a suggested plan is
+  // recomputed from the latest weigh-in, so it may already differ when the page opens.
+  const saved = useMemo(() => savedPatch(fit), [fit]);
+  const changedKeys = useMemo(() => (draft && plan ? patchDiff(draftToPatch(draft, plan), saved) : []), [draft, plan, saved]);
+  const baseChangedKeys = useMemo(() => {
+    const p = base ? computePlan(base.draft) : null;
+    return base && p ? patchDiff(draftToPatch(base.draft, p), saved) : [];
+  }, [base, saved]);
+  // Targets refreshed only because the inputs moved on (new weigh-in, birthday) since the last save.
+  const refreshed = Boolean(base && draft === base.draft && baseChangedKeys.length > 0);
 
   const weightChanged = Boolean(draft && base && draft.weight_kg !== base.weight);
-  const dirty = Boolean(draft && plan && (weightChanged || JSON.stringify(draftToPatch(draft, plan)) !== basePatch));
+  // An invalid edit (no plan) still counts as a change, so the footer stays and Save explains what is wrong.
+  const dirty = Boolean(draft && (plan ? weightChanged || changedKeys.length > 0 : base && draft !== base.draft));
+  const pageRef = useRef<HTMLElement>(null);
+
+  // Dirty-state guard: reload / close tab, and in-app exits (header back button, links).
+  useEffect(() => {
+    if (!dirty || saving) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    const onClick = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement | null)?.closest?.('a[href], button[aria-label="Quay lại"]');
+      if (!el || (el instanceof HTMLAnchorElement && el.target === '_blank')) return;
+      if (!window.confirm('Bạn có thay đổi chưa lưu. Rời trang và bỏ các thay đổi này?')) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    document.addEventListener('click', onClick, true);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      document.removeEventListener('click', onClick, true);
+    };
+  }, [dirty, saving]);
+
+  // Live: a target pointing the wrong way for the goal is flagged while typing.
+  const shownErrors = useMemo<StepErrors>(() => {
+    const target = draft && draft.target_weight_kg != null ? validateGoal(draft).target : undefined;
+    return target && !errors.target ? { ...errors, target } : errors;
+  }, [draft, errors]);
 
   const update = useCallback((patch: Partial<GoalDraft>) => {
     setDraft((d) => (d ? applyPatch(d, patch) : d));
@@ -95,11 +141,24 @@ export default function GoalSettingsPage() {
   };
 
   const save = async () => {
-    if (!draft || !plan) return;
-    const e = { ...validateBasics(draft), ...validateBody(draft), ...validateActivity(draft), ...validateGoal(draft) };
-    if (hasErrors(e)) {
+    if (!draft || saving) return;
+    const e = {
+      ...validateBasics(draft),
+      ...validateBody(draft),
+      ...validateActivity(draft),
+      ...validateGoal(draft),
+      ...validatePlan(plan),
+    };
+    if (hasErrors(e) || !plan) {
       setErrors(e);
-      toast.error('Vui lòng kiểm tra lại các trường được đánh dấu.');
+      toast.error(e.plan ?? 'Vui lòng kiểm tra lại các trường được đánh dấu.');
+      // Bring the first message into view (sections are stacked on a long page).
+      requestAnimationFrame(() => {
+        const root = pageRef.current ?? document;
+        const field = root.querySelector<HTMLElement>('input[aria-invalid="true"]');
+        (field ?? root.querySelector<HTMLElement>('[role="alert"]'))?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        field?.focus({ preventScroll: true });
+      });
       return;
     }
     setSaving(true);
@@ -132,15 +191,19 @@ export default function GoalSettingsPage() {
   const loading = !draft && (profileLoading || weightQ.loading);
 
   const footer =
-    draft && plan && dirty ? (
+    draft && dirty ? (
       <div className="glass-strong flex items-center gap-3 rounded-[22px] p-2 pl-4 animate-fade-slide-up">
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col" aria-live="polite">
           <span className="text-[11px] font-semibold text-muted">Mục tiêu mới</span>
-          <span className="tabular truncate text-[17px] font-extrabold tracking-[-0.03em] text-text">
-            {formatNumber(plan.kcal)} <span className="text-[12px] font-semibold text-muted">kcal/ngày</span>
-          </span>
+          {plan ? (
+            <span className="tabular truncate text-[17px] font-extrabold tracking-[-0.03em] text-text">
+              {formatNumber(plan.kcal)} <span className="text-[12px] font-semibold text-muted">kcal/ngày</span>
+            </span>
+          ) : (
+            <span className="truncate text-[13px] font-semibold text-[var(--danger-text)]">Kiểm tra lại số liệu</span>
+          )}
         </div>
-        <Button variant="ghost" size="sm" onClick={discard} disabled={saving} aria-label="Hoàn tác thay đổi" className="!px-3">
+        <Button variant="ghost" size="sm" onClick={discard} disabled={saving || Boolean(base && draft === base.draft)} aria-label="Hoàn tác thay đổi" className="!px-3 min-w-[44px]">
           <RotateCcw className="h-4 w-4" />
         </Button>
         <Button size="sm" onClick={save} loading={saving} icon={<Check className="h-4 w-4" />}>
@@ -150,31 +213,48 @@ export default function GoalSettingsPage() {
     ) : undefined;
 
   return (
-    <Page topBar={false} footer={footer} label="Mục tiêu">
+    <Page ref={pageRef} topBar={false} footer={footer} label="Mục tiêu">
       <ScreenHeader back eyebrow="Mục tiêu & kế hoạch" title="Mục tiêu" subtitle="Thay đổi bên dưới — kế hoạch được tính lại ngay." className="mb-6" />
 
       {loading ? (
         <GoalsSkeleton />
-      ) : !draft || !plan ? (
+      ) : !draft || !shownPlan ? (
         <EmptyState
           title="Chưa có dữ liệu mục tiêu"
           description="Không tải được hồ sơ của bạn. Kiểm tra kết nối rồi thử lại."
           action={
-            <Button variant="secondary" onClick={() => void weightQ.reload()}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                if (!fit) void refresh();
+                void weightQ.reload();
+              }}
+            >
               Thử lại
             </Button>
           }
         />
       ) : (
         <div className={clsx('flex flex-col gap-8', !dirty && 'pb-2')}>
-          <PlanStep draft={draft} plan={plan} onChange={update} compact />
+          {refreshed && (
+            <p role="status" className="-mb-4 rounded-2xl border border-[rgba(237,180,11,0.35)] bg-[rgba(237,180,11,0.08)] px-4 py-3 text-[13px] leading-snug text-[rgba(237,228,216,0.9)]">
+              Kế hoạch đã được tính lại theo cân nặng mới nhất ({formatNumber(draft.weight_kg ?? 0, 1)} kg)
+              {fit?.calorie_target ? <> — kế hoạch đã lưu là {formatNumber(fit.calorie_target)} kcal</> : null}. Nhấn <b>Lưu</b> để áp dụng.
+            </p>
+          )}
+          {!plan && (
+            <p role="status" className="-mb-4 rounded-2xl border border-line bg-white/[0.04] px-4 py-3 text-[13px] leading-snug text-muted">
+              Đang hiển thị kế hoạch gần nhất — hoàn tất chiều cao, cân nặng và ngày sinh hợp lệ để tính lại.
+            </p>
+          )}
+          <PlanStep draft={draft} plan={shownPlan} onChange={update} compact error={errors.plan} />
 
           <Section title="Mục tiêu chính">
-            <GoalStep draft={draft} onChange={update} errors={errors} plan={plan} compact />
+            <GoalStep draft={draft} onChange={update} errors={shownErrors} plan={plan} compact />
           </Section>
 
           <Section title="Cơ thể">
-            <BodyStep draft={draft} onChange={update} errors={errors} compact />
+            <BodyStep draft={draft} onChange={update} errors={shownErrors} compact />
             {weightChanged && (
               <p className="-mt-1 pl-1 text-[13px] text-[rgba(237,180,11,0.9)]">Khi lưu, cân nặng này được ghi nhận cho hôm nay.</p>
             )}

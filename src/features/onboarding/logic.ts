@@ -9,7 +9,9 @@ import {
   calcBMR,
   calcTDEE,
   goalCalories,
+  isCalorieFloored,
   macroKcal,
+  MIN_KCAL,
   suggestMacros,
   type BmiCategory,
   type Macros,
@@ -45,6 +47,9 @@ export const LIMITS = {
 
 /** kcal stored in 1 kg of body fat (approx.). */
 export const KCAL_PER_KG = 7700;
+
+/** Beyond ~5 years an ETA is meaningless (tiny deficit vs a large gap) — hide it. */
+export const MAX_ETA_WEEKS = 260;
 
 export const EMPTY_DRAFT: GoalDraft = {
   sex: null,
@@ -114,6 +119,10 @@ export interface Plan {
   delta: number;
   /** Estimated weeks to reach the target weight (null if n/a). */
   weeksToTarget: number | null;
+  /** Suggested deficit was cut short by the safety floor (1200 nữ / 1500 nam) or by TDEE. */
+  floored: boolean;
+  /** Safety floor for this sex (kcal). */
+  minKcal: number;
 }
 
 /** True when the draft has everything needed to compute a plan. */
@@ -136,7 +145,7 @@ export function computePlan(d: GoalDraft, today: Date = new Date()): Plan | null
   const tdee = calcTDEE(bmr, activity);
   const pace = goal === 'lose' ? d.goal_pace : null;
   const kcal = goalCalories(tdee, goal, pace, sex);
-  const suggested = { kcal, ...suggestMacros(kcal, goal, kg) };
+  const suggested = { kcal, ...suggestMacros(kcal, goal, kg, cm) };
   const eff = d.custom ?? suggested;
   const macros: Macros = { protein_g: eff.protein_g, carbs_g: eff.carbs_g, fat_g: eff.fat_g };
   const delta = eff.kcal - tdee;
@@ -147,7 +156,8 @@ export function computePlan(d: GoalDraft, today: Date = new Date()): Plan | null
     const diff = t - kg;
     // Only meaningful when the energy balance points toward the target.
     if ((diff < 0 && delta < 0) || (diff > 0 && delta > 0)) {
-      weeksToTarget = Math.ceil(Math.abs(diff) / ((Math.abs(delta) * 7) / KCAL_PER_KG));
+      const weeks = Math.ceil(Math.abs(diff) / ((Math.abs(delta) * 7) / KCAL_PER_KG));
+      weeksToTarget = weeks <= MAX_ETA_WEEKS ? weeks : null;
     }
   }
 
@@ -166,7 +176,83 @@ export function computePlan(d: GoalDraft, today: Date = new Date()): Plan | null
     steps: d.steps ?? suggestSteps(activity, goal),
     delta,
     weeksToTarget,
+    floored: d.custom === null && isCalorieFloored(tdee, goal, pace, sex),
+    minKcal: MIN_KCAL[sex],
   };
+}
+
+/**
+ * Plan for a live preview: only computed when the inputs are in range, so a
+ * half-typed height ("17" on the way to "170") never flashes an absurd target.
+ */
+export function previewPlan(d: GoalDraft, today: Date = new Date()): Plan | null {
+  if (hasErrors(validateBasics(d, today)) || hasErrors(validateBody(d))) return null;
+  return computePlan(d, today);
+}
+
+/** Calendar estimate for an ETA in weeks, e.g. "tháng 3/2027" (null if n/a). */
+export function targetDateLabel(weeks: number | null | undefined, today: Date = new Date()): string | null {
+  if (!weeks || weeks <= 0 || !Number.isFinite(weeks)) return null;
+  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + weeks * 7);
+  return `tháng ${d.getMonth() + 1}/${d.getFullYear()}`;
+}
+
+/**
+ * Starting slider values by sex (≈ Vietnamese adult averages). Used by the
+ * onboarding wizard while the body step still shows untouched defaults.
+ */
+export const SEX_DEFAULTS: Record<Sex, { height_cm: number; weight_kg: number }> = {
+  male: { height_cm: 168, weight_kg: 63 },
+  female: { height_cm: 157, weight_kg: 52 },
+};
+
+/** True when height & weight are still one of the untouched defaults. */
+export function hasDefaultBody(d: GoalDraft): boolean {
+  const presets = [{ height_cm: EMPTY_DRAFT.height_cm, weight_kg: EMPTY_DRAFT.weight_kg }, ...Object.values(SEX_DEFAULTS)];
+  return presets.some((p) => p.height_cm === d.height_cm && p.weight_kg === d.weight_kg);
+}
+
+/**
+ * Validate a draft restored from storage (older app versions, manual edits or a
+ * corrupted value must never crash the wizard or inject out-of-range numbers).
+ * Returns null when nothing usable is found.
+ */
+export function sanitizeDraft(raw: unknown): GoalDraft | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const num = (v: unknown, lo: number, hi: number): number | null =>
+    typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi ? v : null;
+  const pick = <T extends string>(v: unknown, allowed: readonly T[]): T | null =>
+    typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : null;
+  const birth = typeof r.birth_date === 'string' && isValidISODate(r.birth_date.slice(0, 10)) ? r.birth_date.slice(0, 10) : null;
+  let custom: GoalDraft['custom'] = null;
+  if (r.custom && typeof r.custom === 'object') {
+    const c = r.custom as Record<string, unknown>;
+    const kcal = num(c.kcal, 0, 20000);
+    const p = num(c.protein_g, LIMITS.macro.min, LIMITS.macro.max);
+    const cb = num(c.carbs_g, LIMITS.macro.min, LIMITS.macro.max);
+    const f = num(c.fat_g, LIMITS.macro.min, LIMITS.macro.max);
+    if (kcal !== null && p !== null && cb !== null && f !== null) custom = { kcal, protein_g: p, carbs_g: cb, fat_g: f };
+  }
+  return {
+    sex: pick<Sex>(r.sex, ['male', 'female']),
+    birth_date: birth,
+    height_cm: num(r.height_cm, LIMITS.height.min, LIMITS.height.max) ?? EMPTY_DRAFT.height_cm,
+    weight_kg: num(r.weight_kg, LIMITS.weight.min, LIMITS.weight.max) ?? EMPTY_DRAFT.weight_kg,
+    activity_level: pick<ActivityLevel>(r.activity_level, ['sedentary', 'light', 'moderate', 'active', 'very_active']),
+    goal: pick<Goal>(r.goal, ['lose', 'gain', 'maintain', 'recomp']),
+    goal_pace: pick<GoalPace>(r.goal_pace, ['slow', 'medium', 'fast']) ?? 'medium',
+    target_weight_kg: num(r.target_weight_kg, LIMITS.weight.min, LIMITS.weight.max),
+    custom,
+    water_ml: num(r.water_ml, LIMITS.water.min, LIMITS.water.max),
+    steps: num(r.steps, LIMITS.steps.min, LIMITS.steps.max),
+  };
+}
+
+/** Index of the first wizard step (0–3) whose data is invalid, or -1. */
+export function firstInvalidStep(d: GoalDraft, today: Date = new Date()): number {
+  const checks = [validateBasics(d, today), validateBody(d), validateActivity(d), validateGoal(d)];
+  return checks.findIndex(hasErrors);
 }
 
 /** Share of kcal from each macro, in whole % (sums to ~100). */
@@ -192,25 +278,62 @@ export function scaleMacrosToKcal(m: Macros, kcal: number): Macros & { kcal: num
     return { kcal: k, protein_g: Math.round((k * 0.25) / 4), carbs_g: Math.round((k * 0.5) / 4), fat_g: Math.round((k * 0.25) / 9) };
   }
   const r = k / cur;
-  const protein_g = Math.round(m.protein_g * r);
-  const fat_g = Math.round(m.fat_g * r);
-  const carbs_g = Math.max(0, Math.round((k - protein_g * 4 - fat_g * 9) / 4));
-  return { kcal: k, protein_g, carbs_g, fat_g };
+  const mx = LIMITS.macro.max;
+  const protein_g = clamp(Math.round(m.protein_g * r), 0, mx);
+  const fat_g = clamp(Math.round(m.fat_g * r), 0, mx);
+  const carbs_g = clamp(Math.round((k - protein_g * 4 - fat_g * 9) / 4), 0, mx);
+  const out = { protein_g, carbs_g, fat_g };
+  // Per-macro DB caps (1000 g) can make k unreachable → report the real total.
+  const real = macroKcal(out);
+  return { kcal: Math.abs(real - k) <= 4 ? k : real, ...out };
 }
 
-/** Change one macro (grams); kcal follows from 4/4/9 (clamped to the DB range). */
+/**
+ * Change one macro (grams); kcal is ALWAYS the true 4/4/9 total so the target
+ * and the macros never disagree. It may fall outside 800–6000 while the user is
+ * editing — {@link validatePlan} blocks saving in that case.
+ */
 export function setMacro(m: Macros, key: keyof Macros, grams: number): Macros & { kcal: number } {
   const next: Macros = { ...m, [key]: clamp(Math.round(grams), LIMITS.macro.min, LIMITS.macro.max) };
-  return { ...next, kcal: clamp(macroKcal(next), LIMITS.kcal.min, LIMITS.kcal.max) };
+  return { ...next, kcal: macroKcal(next) };
+}
+
+/** Plan-level checks before saving (custom totals out of the allowed range). */
+export function validatePlan(plan: Plan | null): StepErrors {
+  if (!plan) return {};
+  if (plan.kcal < LIMITS.kcal.min || plan.kcal > LIMITS.kcal.max)
+    return {
+      plan: `Tổng calo từ đạm, tinh bột, chất béo đang là ${Math.round(plan.kcal).toLocaleString('vi-VN')} kcal — cần trong khoảng ${LIMITS.kcal.min.toLocaleString('vi-VN')}–${LIMITS.kcal.max.toLocaleString('vi-VN')} kcal.`,
+    };
+  return {};
+}
+
+/** Earliest / latest birth dates allowed (age 13–100), as 'YYYY-MM-DD'. */
+export function birthDateBounds(today: Date = new Date()): { min: string; max: string } {
+  const iso = (y: number) =>
+    `${String(y).padStart(4, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  // Born on today's date LIMITS.age.min years ago → exactly that age today.
+  const max = iso(today.getFullYear() - LIMITS.age.min);
+  // Oldest still "≤ 100": the day after today's date 101 years ago.
+  const oldest = new Date(today.getFullYear() - LIMITS.age.max - 1, today.getMonth(), today.getDate() + 1);
+  const min = `${oldest.getFullYear()}-${String(oldest.getMonth() + 1).padStart(2, '0')}-${String(oldest.getDate()).padStart(2, '0')}`;
+  return { min, max: isValidISODate(max) ? max : iso(today.getFullYear() - LIMITS.age.min).replace(/-29$/, '-28') };
+}
+
+function isValidISODate(s: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return false;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return d.getFullYear() === Number(m[1]) && d.getMonth() === Number(m[2]) - 1 && d.getDate() === Number(m[3]);
 }
 
 /** Draft from a saved profile (+ latest weight if known). */
-export function profileToDraft(p: FitProfile | null, latestWeightKg?: number | null): GoalDraft {
+export function profileToDraft(p: FitProfile | null, latestWeightKg?: number | null, today: Date = new Date()): GoalDraft {
   if (!p) return { ...EMPTY_DRAFT };
   const weight = latestWeightKg ?? p.start_weight_kg ?? EMPTY_DRAFT.weight_kg;
   const draft: GoalDraft = {
     sex: p.sex,
-    birth_date: p.birth_date,
+    birth_date: p.birth_date ? p.birth_date.slice(0, 10) : null,
     height_cm: p.height_cm != null ? Number(p.height_cm) : EMPTY_DRAFT.height_cm,
     weight_kg: weight != null ? Number(weight) : null,
     activity_level: p.activity_level,
@@ -221,22 +344,57 @@ export function profileToDraft(p: FitProfile | null, latestWeightKg?: number | n
     water_ml: null,
     steps: null,
   };
-  const plan = computePlan(draft);
-  if (plan && p.calorie_target != null && p.protein_g != null && p.carbs_g != null && p.fat_g != null) {
-    const saved = { kcal: p.calorie_target, protein_g: p.protein_g, carbs_g: p.carbs_g, fat_g: p.fat_g };
-    const s = plan.suggested;
-    const same = saved.kcal === s.kcal && saved.protein_g === s.protein_g && saved.carbs_g === s.carbs_g && saved.fat_g === s.fat_g;
-    if (p.macro_custom || !same) draft.custom = saved;
+  const plan = computePlan(draft, today);
+  // Only a MANUAL plan is kept as-is. A suggested plan (macro_custom = false)
+  // follows the current inputs, so a newer weigh-in or a birthday recomputes it
+  // (the /goals page then offers to save the refreshed numbers).
+  if (plan && p.macro_custom && p.calorie_target != null && p.protein_g != null && p.carbs_g != null && p.fat_g != null) {
+    draft.custom = {
+      kcal: Number(p.calorie_target),
+      protein_g: Number(p.protein_g),
+      carbs_g: Number(p.carbs_g),
+      fat_g: Number(p.fat_g),
+    };
   }
-  if (plan && p.water_target_ml !== plan.water_ml) draft.water_ml = p.water_target_ml;
-  if (plan && p.step_target !== plan.steps) draft.steps = p.step_target;
+  if (plan && p.water_target_ml != null && p.water_target_ml !== plan.water_ml) draft.water_ml = Number(p.water_target_ml);
+  if (plan && p.step_target != null && p.step_target !== plan.steps) draft.steps = Number(p.step_target);
   return draft;
+}
+
+/** The fields of a saved profile that {@link draftToPatch} writes, normalised the same way (for dirty checks). */
+export function savedPatch(p: FitProfile | null): FitProfilePatch | null {
+  if (!p) return null;
+  const n = (v: number | string | null | undefined) => (v == null ? null : Number(v));
+  return {
+    sex: p.sex,
+    birth_date: p.birth_date ? p.birth_date.slice(0, 10) : null,
+    height_cm: n(p.height_cm),
+    activity_level: p.activity_level,
+    goal: p.goal,
+    goal_pace: p.goal === 'lose' ? (p.goal_pace ?? 'medium') : null,
+    target_weight_kg: p.goal === 'maintain' ? null : n(p.target_weight_kg),
+    calorie_target: n(p.calorie_target),
+    protein_g: n(p.protein_g),
+    carbs_g: n(p.carbs_g),
+    fat_g: n(p.fat_g),
+    macro_custom: Boolean(p.macro_custom),
+    water_target_ml: n(p.water_target_ml) as number,
+    step_target: n(p.step_target) as number,
+  };
+}
+
+/** Keys whose values differ between two patches (order-independent). */
+export function patchDiff(a: FitProfilePatch | null, b: FitProfilePatch | null): (keyof FitProfilePatch)[] {
+  if (!a || !b) return a === b ? [] : ['calorie_target'];
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)] as (keyof FitProfilePatch)[]);
+  return [...keys].filter((k) => (a[k] ?? null) !== (b[k] ?? null));
 }
 
 /** Profile patch to persist (null if the draft is incomplete). */
 export function draftToPatch(d: GoalDraft, plan: Plan): FitProfilePatch {
   const target =
     d.goal === 'maintain' || d.target_weight_kg == null ? null : Math.round(clamp(d.target_weight_kg, 20, 400) * 10) / 10;
+  const g = (v: number) => clamp(Math.round(v), LIMITS.macro.min, LIMITS.macro.max);
   return {
     sex: d.sex,
     birth_date: d.birth_date,
@@ -246,26 +404,31 @@ export function draftToPatch(d: GoalDraft, plan: Plan): FitProfilePatch {
     goal_pace: d.goal === 'lose' ? d.goal_pace : null,
     target_weight_kg: target,
     calorie_target: clamp(Math.round(plan.kcal), LIMITS.kcal.min, LIMITS.kcal.max),
-    protein_g: plan.macros.protein_g,
-    carbs_g: plan.macros.carbs_g,
-    fat_g: plan.macros.fat_g,
+    protein_g: g(plan.macros.protein_g),
+    carbs_g: g(plan.macros.carbs_g),
+    fat_g: g(plan.macros.fat_g),
     macro_custom: plan.custom,
-    water_target_ml: Math.round(plan.water_ml),
-    step_target: Math.round(plan.steps),
+    water_target_ml: clamp(Math.round(plan.water_ml), LIMITS.water.min, LIMITS.water.max),
+    step_target: clamp(Math.round(plan.steps), LIMITS.steps.min, LIMITS.steps.max),
   };
 }
 
 /** Validation messages per step (Vietnamese). Empty object = valid. */
-export type StepErrors = Partial<Record<'sex' | 'birth_date' | 'height' | 'weight' | 'activity' | 'goal' | 'target', string>>;
+export type StepErrors = Partial<
+  Record<'sex' | 'birth_date' | 'height' | 'weight' | 'activity' | 'goal' | 'target' | 'plan', string>
+>;
 
 export function validateBasics(d: GoalDraft, today: Date = new Date()): StepErrors {
   const e: StepErrors = {};
   if (!d.sex) e.sex = 'Chọn giới tính để tính BMR chính xác.';
   if (!d.birth_date) e.birth_date = 'Nhập ngày sinh của bạn.';
+  else if (!isValidISODate(d.birth_date.slice(0, 10))) e.birth_date = 'Ngày sinh chưa hợp lệ.';
   else {
+    const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const age = calcAge(d.birth_date, today);
-    if (age < LIMITS.age.min) e.birth_date = `Fitora dành cho người từ ${LIMITS.age.min} tuổi trở lên.`;
-    else if (age > LIMITS.age.max) e.birth_date = 'Ngày sinh chưa hợp lệ.';
+    if (d.birth_date.slice(0, 10) > todayIso) e.birth_date = 'Ngày sinh không thể ở tương lai.';
+    else if (age < LIMITS.age.min) e.birth_date = `Fitora dành cho người từ ${LIMITS.age.min} tuổi trở lên.`;
+    else if (age > LIMITS.age.max) e.birth_date = `Ngày sinh chưa hợp lệ (tuổi tối đa ${LIMITS.age.max}).`;
   }
   return e;
 }
@@ -292,10 +455,41 @@ export function validateGoal(d: GoalDraft): StepErrors {
   const w = d.weight_kg;
   if (t != null && d.goal && d.goal !== 'maintain') {
     if (t < LIMITS.weight.min || t > LIMITS.weight.max) e.target = `Cân nặng mục tiêu từ ${LIMITS.weight.min} đến ${LIMITS.weight.max} kg.`;
-    else if (w != null && d.goal === 'lose' && t >= w) e.target = 'Mục tiêu giảm cân nên thấp hơn cân nặng hiện tại.';
-    else if (w != null && d.goal === 'gain' && t <= w) e.target = 'Mục tiêu tăng cân nên cao hơn cân nặng hiện tại.';
+    else if (w != null && d.goal === 'lose' && t >= w)
+      e.target = `Cân nặng mục tiêu phải thấp hơn hiện tại (${fmtKg(w)} kg). Đã đạt mục tiêu? Hãy chọn Giữ cân.`;
+    else if (w != null && d.goal === 'gain' && t <= w)
+      e.target = `Cân nặng mục tiêu phải cao hơn hiện tại (${fmtKg(w)} kg). Đã đạt mục tiêu? Hãy chọn Giữ cân.`;
   }
   return e;
+}
+
+const fmtKg = (v: number) => (Math.round(v * 10) / 10).toLocaleString('vi-VN', { maximumFractionDigits: 1 });
+
+/**
+ * Non-blocking health hints for the chosen goal (Vietnamese). Uses Asian BMI
+ * cut-offs: losing weight while already underweight, or aiming for a target
+ * below BMI 18.5, deserves a warning.
+ */
+export function goalWarnings(d: GoalDraft): string[] {
+  const out: string[] = [];
+  const w = d.weight_kg;
+  const h = d.height_cm;
+  if (!w || !h || !d.goal) return out;
+  const bmi = calcBMI(w, h);
+  const m = h / 100;
+  const healthyMin = Math.ceil(18.5 * m * m * 10) / 10;
+  if ((d.goal === 'lose' || d.goal === 'recomp') && bmi > 0 && bmi < 18.5) {
+    out.push(`BMI hiện tại ${bmi.toLocaleString('vi-VN')} đã dưới ngưỡng khỏe mạnh — không nên giảm thêm. Cân nhắc Giữ cân hoặc Tăng cân.`);
+  } else if (d.goal !== 'maintain' && d.target_weight_kg != null && d.target_weight_kg < healthyMin) {
+    out.push(`Cân nặng mục tiêu tương ứng BMI ${calcBMI(d.target_weight_kg, h).toLocaleString('vi-VN')}, dưới ngưỡng khỏe mạnh (từ ${fmtKg(healthyMin)} kg với chiều cao của bạn).`);
+  }
+  return out;
+}
+
+/** True when a target weight points the wrong way for the goal. */
+function targetContradicts(goal: Goal | null, target: number | null, weight: number | null): boolean {
+  if (target == null || weight == null) return false;
+  return (goal === 'lose' && target >= weight) || (goal === 'gain' && target <= weight);
 }
 
 export const hasErrors = (e: StepErrors) => Object.keys(e).length > 0;
@@ -320,6 +514,11 @@ export function applyPatch(d: GoalDraft, patch: Partial<GoalDraft>): GoalDraft {
     if (!('custom' in patch)) next.custom = null;
     if (!('water_ml' in patch)) next.water_ml = null;
     if (!('steps' in patch)) next.steps = null;
+  }
+  // Switching goal (e.g. lose → gain) makes an old target meaningless: drop it
+  // instead of leaving a contradiction that only surfaces as an error on save.
+  if ('goal' in patch && patch.goal !== d.goal && !('target_weight_kg' in patch)) {
+    if (targetContradicts(next.goal, next.target_weight_kg, next.weight_kg)) next.target_weight_kg = null;
   }
   return next;
 }

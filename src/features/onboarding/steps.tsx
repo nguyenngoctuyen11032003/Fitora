@@ -27,21 +27,24 @@ import { Input } from '@/components/ui/Input';
 import { MACROS } from '@/components/ui/MacroBar';
 import { NumberField } from '@/components/ui/NumberField';
 import { ACTIVITY_FACTORS, calcAge, calcBMI, bmiCategory, type Macros } from '@/lib/energy';
-import { addDays, todayISO } from '@/lib/date';
 import { formatKg, formatMl, formatNumber, formatSigned } from '@/lib/format';
 import type { ActivityLevel, Goal, GoalPace, Sex } from '@/types/db';
 import {
   GAIN_KG_WEEK,
   LIMITS,
+  birthDateBounds,
+  goalWarnings,
   PACE_KG_WEEK,
   kgPerWeek,
   macroPercents,
   scaleMacrosToKcal,
   setMacro,
+  targetDateLabel,
   type GoalDraft,
   type Plan,
   type StepErrors,
 } from './logic';
+import { radioGroupKeys } from './a11y';
 import { BMI_COLORS, BmiGauge, MacroDonut, MacroLegend, OptionCard, RangeSlider, SectionTitle, StatTile } from './parts';
 
 export interface StepProps {
@@ -71,16 +74,14 @@ const SEX_OPTIONS: { value: Sex; label: string; icon: ReactNode }[] = [
 ];
 
 export function BasicsStep({ draft, onChange, errors = {}, compact }: StepProps) {
-  const today = todayISO();
-  const maxBirth = addDays(today, -LIMITS.age.min * 365.25);
-  const minBirth = addDays(today, -LIMITS.age.max * 365.25);
+  const { min: minBirth, max: maxBirth } = birthDateBounds();
   const age = draft.birth_date ? calcAge(draft.birth_date) : null;
 
   return (
     <div className="flex flex-col gap-7">
       <section>
         <SectionTitle>Giới tính sinh học</SectionTitle>
-        <div role="radiogroup" aria-label="Giới tính" className="grid grid-cols-2 gap-3">
+        <div role="radiogroup" aria-label="Giới tính" onKeyDown={radioGroupKeys} className="grid grid-cols-2 gap-3">
           {SEX_OPTIONS.map((o, i) => {
             const on = draft.sex === o.value;
             return (
@@ -273,7 +274,7 @@ export const ACTIVITY_OPTIONS: { value: ActivityLevel; label: string; desc: stri
 export function ActivityStep({ draft, onChange, errors = {}, compact }: StepProps) {
   return (
     <div>
-      <div role="radiogroup" aria-label="Mức vận động" className="flex flex-col gap-2.5">
+      <div role="radiogroup" aria-label="Mức vận động" onKeyDown={radioGroupKeys} className="flex flex-col gap-2.5">
         {ACTIVITY_OPTIONS.map((o, i) => (
           <OptionCard
             key={o.value}
@@ -282,7 +283,7 @@ export function ActivityStep({ draft, onChange, errors = {}, compact }: StepProp
             icon={o.icon}
             title={o.label}
             description={o.desc}
-            meta={`×${formatNumber(ACTIVITY_FACTORS[o.value], 2).replace(/,?0+$/, '')}`}
+            meta={`×${ACTIVITY_FACTORS[o.value].toLocaleString('vi-VN', { maximumFractionDigits: 3 })}`}
             delay={stagger(compact, i)}
           />
         ))}
@@ -314,11 +315,19 @@ const PACE_OPTIONS: { value: GoalPace; label: string }[] = [
   { value: 'fast', label: 'Nhanh' },
 ];
 
-function PacePicker({ value, onChange }: { value: GoalPace; onChange: (p: GoalPace) => void }) {
+/** Explains why the real deficit is smaller than the chosen pace (safety floor / low TDEE). */
+export function floorNote(plan: Plan): string | undefined {
+  if (!plan.floored) return undefined;
+  if (plan.delta > -30)
+    return `TDEE của bạn (${formatNumber(plan.tdee)} kcal) đã ${plan.tdee < plan.minKcal ? "thấp hơn" : "sát"} mức tối thiểu an toàn ${formatNumber(plan.minKcal)} kcal, nên kế hoạch giữ ở mức tiêu hao. Tăng vận động để tạo thâm hụt.`;
+  return `Để không xuống dưới mức tối thiểu an toàn ${formatNumber(plan.minKcal)} kcal, thâm hụt thực tế là ${formatNumber(-plan.delta)} kcal/ngày (~${formatNumber(kgPerWeek(plan.delta), 2)} kg/tuần).`;
+}
+
+function PacePicker({ value, onChange, note }: { value: GoalPace; onChange: (p: GoalPace) => void; note?: ReactNode }) {
   return (
     <div className="flex flex-col gap-2">
       <span className="text-[12px] font-semibold text-muted">Tốc độ giảm</span>
-      <div role="radiogroup" aria-label="Tốc độ giảm cân" className="grid grid-cols-3 gap-2">
+      <div role="radiogroup" aria-label="Tốc độ giảm cân" onKeyDown={radioGroupKeys} className="grid grid-cols-3 gap-2">
         {PACE_OPTIONS.map((p) => {
           const on = value === p.value;
           return (
@@ -345,6 +354,7 @@ function PacePicker({ value, onChange }: { value: GoalPace; onChange: (p: GoalPa
       {value === 'fast' && (
         <p className="text-[12px] leading-snug text-muted">Tốc độ nhanh khó duy trì — hãy đảm bảo đủ đạm và ngủ đủ giấc.</p>
       )}
+      {note && <p className="text-[12px] leading-snug text-[rgba(237,180,11,0.9)]">{note}</p>}
     </div>
   );
 }
@@ -352,10 +362,11 @@ function PacePicker({ value, onChange }: { value: GoalPace; onChange: (p: GoalPa
 export function GoalStep({ draft, onChange, errors = {}, compact, plan }: StepProps & { plan?: Plan | null }) {
   const showTarget = draft.goal && draft.goal !== 'maintain';
   const diff = draft.target_weight_kg != null && draft.weight_kg != null ? draft.target_weight_kg - draft.weight_kg : null;
+  const warnings = goalWarnings(draft);
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <div role="radiogroup" aria-label="Mục tiêu" className="flex flex-col gap-2.5">
+        <div role="radiogroup" aria-label="Mục tiêu" onKeyDown={radioGroupKeys} className="flex flex-col gap-2.5">
           {GOAL_OPTIONS.map((o, i) => (
             <OptionCard
               key={o.value}
@@ -366,12 +377,22 @@ export function GoalStep({ draft, onChange, errors = {}, compact, plan }: StepPr
               description={o.desc}
               delay={stagger(compact, i)}
             >
-              {o.value === 'lose' && <PacePicker value={draft.goal_pace} onChange={(p) => onChange({ goal_pace: p })} />}
+              {o.value === 'lose' && (
+                <PacePicker value={draft.goal_pace} onChange={(p) => onChange({ goal_pace: p })} note={plan ? floorNote(plan) : undefined} />
+              )}
             </OptionCard>
           ))}
         </div>
         <ErrorText>{errors.goal}</ErrorText>
       </div>
+
+      {warnings.length > 0 && (
+        <div role="status" className="rounded-2xl border border-[rgba(237,180,11,0.35)] bg-[rgba(237,180,11,0.08)] px-4 py-3 text-[13px] leading-snug text-[rgba(237,228,216,0.9)]">
+          {warnings.map((w) => (
+            <p key={w}>{w}</p>
+          ))}
+        </div>
+      )}
 
       {showTarget && (
         <section className={clsx(!compact && 'animate-fade-slide-up')}>
@@ -397,7 +418,7 @@ export function GoalStep({ draft, onChange, errors = {}, compact, plan }: StepPr
                 ? undefined
                 : diff !== null && Math.abs(diff) >= 0.1
                   ? `${formatSigned(Math.round(diff * 10) / 10, 1)} kg so với hiện tại${
-                      plan?.weeksToTarget ? ` · dự kiến ~${plan.weeksToTarget} tuần` : ''
+                      plan?.weeksToTarget ? ` · dự kiến ~${plan.weeksToTarget} tuần (${targetDateLabel(plan.weeksToTarget)})` : ''
                     }`
                   : 'Không bắt buộc — để trống nếu chưa có con số cụ thể.'
             }
@@ -435,13 +456,17 @@ export function PlanStep({
   plan,
   onChange,
   compact,
+  error,
 }: {
   draft: GoalDraft;
   plan: Plan;
   onChange: (patch: Partial<GoalDraft>) => void;
   compact?: boolean;
+  /** Plan-level validation message (e.g. custom total out of range). */
+  error?: string;
 }) {
   const [editing, setEditing] = useState(false);
+  const note = floorNote(plan);
   const reset = () => onChange({ custom: null, water_ml: null, steps: null });
   const anyCustom = plan.custom || draft.water_ml !== null || draft.steps !== null;
   const a = (cls: string) => (compact ? undefined : cls);
@@ -468,15 +493,22 @@ export function PlanStep({
           caption={
             <span className="flex flex-col gap-1">
               <span>{deltaCaption(plan)}</span>
+              {note && <span className="text-[rgba(237,180,11,0.9)]">{note}</span>}
+              {plan.custom && plan.kcal >= LIMITS.kcal.min && plan.kcal < plan.minKcal && (
+                <span className="text-[rgba(237,180,11,0.9)]">
+                  Thấp hơn mức tối thiểu khuyến nghị {formatNumber(plan.minKcal)} kcal/ngày cho {draft.sex === 'female' ? 'nữ' : 'nam'} — chỉ nên áp dụng khi có hướng dẫn chuyên môn.
+                </span>
+              )}
               {plan.weeksToTarget && draft.target_weight_kg && (
                 <span className="text-[rgba(237,228,216,0.85)]">
                   Dự kiến đạt <b className="tabular">{formatKg(draft.target_weight_kg)}</b> sau ~
-                  <b className="tabular">{plan.weeksToTarget}</b> tuần
+                  <b className="tabular">{plan.weeksToTarget}</b> tuần · khoảng {targetDateLabel(plan.weeksToTarget)}
                 </span>
               )}
             </span>
           }
         />
+        <ErrorText>{error}</ErrorText>
       </section>
 
       {/* BMR / TDEE */}
@@ -605,6 +637,11 @@ function PlanEditorSheet({
           stepper
           size="lg"
           hint={`Đề xuất: ${formatNumber(s.kcal)} kcal · đổi calo sẽ giữ nguyên tỉ lệ macro`}
+          error={
+            plan.kcal < LIMITS.kcal.min || plan.kcal > LIMITS.kcal.max
+              ? `Tổng hiện tại ${formatNumber(plan.kcal)} kcal — cần từ ${formatNumber(LIMITS.kcal.min)} đến ${formatNumber(LIMITS.kcal.max)} kcal.`
+              : undefined
+          }
         />
 
         <div className="flex h-2.5 w-full gap-1 overflow-hidden rounded-full bg-white/[0.06]" aria-hidden="true">
