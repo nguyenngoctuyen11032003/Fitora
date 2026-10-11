@@ -57,6 +57,13 @@ export default defineConfig(({ mode }) => {
                 priority: 30,
               },
               {
+                // One chunk for all lucide icons: tree-shaken per-icon modules otherwise become
+                // ~37 sub-1KB chunks (one request + modulepreload each) shared across the lazy pages.
+                name: 'icons',
+                test: /node_modules[\\/]lucide-react[\\/]/,
+                priority: 25,
+              },
+              {
                 name: 'supabase',
                 test: /node_modules[\\/](@supabase|iceberg-js|tslib)[\\/]/,
                 priority: 20,
