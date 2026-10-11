@@ -43,6 +43,8 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
   const [unit, setUnit] = useState('g');
   const [meal, setMeal] = useState<MealType>(defaultMeal);
   const [saving, setSaving] = useState(false);
+  // Synchronous guard: two taps (or Enter + tap) in the same frame both see saving === false.
+  const busy = useRef(false);
 
   const extraUnit = useMemo(
     () => (entry && entry.grams > 0 && entry.quantity > 0 ? { unit: entry.unit, grams: entry.grams / entry.quantity } : undefined),
@@ -65,6 +67,7 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
       setMeal(defaultMeal);
     }
     setSaving(false);
+    busy.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, opt?.key, entry?.id]);
 
@@ -90,7 +93,8 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
   };
 
   const save = async () => {
-    if (!valid || saving) return;
+    if (!valid || busy.current) return;
+    busy.current = true;
     setSaving(true);
     try {
       const row = toNewEntry(calcOpt, qty ?? 1, unit, meal, entry?.eaten_on ?? date);
@@ -108,6 +112,7 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
       onClose();
     } catch (e) {
       toast.error(e);
+      busy.current = false;
       setSaving(false);
     }
   };
@@ -171,7 +176,7 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
           />
           <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5" role="group" aria-label="Chọn nhanh số lượng">
             {quick.map((v) => (
-              <Chip key={v} size="md" selected={qty === v} onClick={() => setQty(v)} ariaLabel={`${formatNumber(v, 2)} ${unit}`}>
+              <Chip key={v} size="md" className="min-w-[48px] justify-center" selected={qty === v} onClick={() => setQty(v)} ariaLabel={`${formatNumber(v, 2)} ${unit}`}>
                 {formatNumber(v, 2)}
               </Chip>
             ))}
@@ -193,7 +198,7 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
                     aria-checked={on}
                     onClick={() => changeUnit(u.unit)}
                     className={clsx(
-                      'flex min-h-[52px] shrink-0 flex-col items-start justify-center rounded-2xl border px-4 text-left transition-colors active:scale-[0.97]',
+                      'flex min-h-[52px] min-w-[52px] shrink-0 flex-col items-start justify-center rounded-2xl border px-4 text-left transition-colors active:scale-[0.97]',
                       on ? 'border-gold/60 bg-gold/15 text-gold' : 'border-line bg-white/[0.04] text-text',
                     )}
                   >

@@ -1,5 +1,5 @@
 import { Check, ChefHat, PenLine, Plus, ScanLine, Search, Trash2, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
 import { Button, EmptyState, GlassButton, Input, ScreenHeader, Segmented, Skeleton, useToast } from '@/components/ui';
@@ -14,7 +14,19 @@ import { MEAL_LABELS, MEAL_TYPES, type CustomFood, type MealType } from '@/types
 import { CustomFoodSheet } from './components/CustomFoodSheet';
 import { FoodSheet } from './components/FoodSheet';
 import { QuickAddSheet } from './components/QuickAddSheet';
-import { computePortion, fromCustomFood, fromDbFood, guessMeal, MEAL_SHORT, parseMeal, recentFoods, searchFoods, type FoodOption } from './lib';
+import {
+  computePortion,
+  frequencyByKey,
+  fromCustomFood,
+  fromDbFood,
+  guessMeal,
+  highlightParts,
+  MEAL_SHORT,
+  parseMeal,
+  recentFoods,
+  searchFoods,
+  type FoodOption,
+} from './lib';
 
 type Tab = 'recent' | 'popular' | 'mine';
 
@@ -26,7 +38,8 @@ export default function FoodSearchPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const today = todayISO();
-  const date = isISODate(params.get('date')) ? params.get('date')! : today;
+  const asked = params.get('date');
+  const date = isISODate(asked) && asked < today ? asked : today;
   const [meal, setMeal] = useState<MealType>(() => parseMeal(params.get('meal')) ?? (date === today ? guessMeal() : 'snack'));
   const diaryHref = date === today ? '/diary' : `/diary?date=${date}`;
 
@@ -46,13 +59,11 @@ export default function FoodSearchPage() {
   const customOptions = useMemo(() => (customs.data ?? []).map(fromCustomFood), [customs.data]);
   const recent = useMemo(() => recentFoods(history.data ?? [], FOODS, customs.data ?? [], 20), [history.data, customs.data]);
   const recentByKey = useMemo(() => new Map(recent.map((r) => [r.option.key, r])), [recent]);
-  const results = useMemo(
-    () =>
-      q
-        ? searchFoods(q, [...customOptions, ...recent.map((r) => r.option), ...DB_OPTIONS], { recentKeys: recent.map((r) => r.option.key) })
-        : [],
-    [q, customOptions, recent],
-  );
+  const customById = useMemo(() => new Map((customs.data ?? []).map((c) => [c.id, c])), [customs.data]);
+  // Recent / personalised options first (searchFoods keeps the first option per key).
+  const searchPool = useMemo(() => [...recent.map((r) => r.option), ...customOptions, ...DB_OPTIONS], [recent, customOptions]);
+  const searchOpts = useMemo(() => ({ recentKeys: recent.map((r) => r.option.key), frequency: frequencyByKey(recent) }), [recent]);
+  const results = useMemo(() => (q ? searchFoods(q, searchPool, searchOpts) : []), [q, searchPool, searchOpts]);
   // Empty "Gần đây" tab on a new account → start on "Phổ biến".
   useEffect(() => {
     if (!history.loading && recent.length === 0) setTab((t) => (t === 'recent' ? 'popular' : t));
@@ -79,7 +90,23 @@ export default function FoodSearchPage() {
     }
   };
 
-  const list: FoodOption[] = q ? results : tab === 'recent' ? recent.map((r) => r.option) : tab === 'popular' ? POPULAR : customOptions;
+  // Foods the user logged before keep their own portion size (their "đĩa"), whichever tab shows them.
+  const list: FoodOption[] = useMemo(() => {
+    if (q) return results;
+    if (tab === 'recent') return recent.map((r) => r.option);
+    return (tab === 'popular' ? POPULAR : customOptions).map((o) => recentByKey.get(o.key)?.option ?? o);
+  }, [q, results, tab, recent, customOptions, recentByKey]);
+  const pick = useCallback((o: FoodOption) => setPicked(o), []);
+  // Enter in the search box opens the best match for what is typed now (no debounce wait).
+  const onSearchKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+    const now = query.trim();
+    if (!now) return;
+    e.preventDefault();
+    const top = now === q ? results[0] : searchFoods(now, searchPool, { ...searchOpts, limit: 1 })[0];
+    if (top) setPicked(top);
+    else setQuickOpen(true);
+  };
   const listLoading = !q && ((tab === 'recent' && history.loading) || (tab === 'mine' && customs.loading));
 
   return (
@@ -104,6 +131,7 @@ export default function FoodSearchPage() {
           placeholder="Tìm phở, cơm tấm, trứng…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={onSearchKey}
           icon={<Search className="h-5 w-5" />}
           trailing={
             query ? (
@@ -170,10 +198,10 @@ export default function FoodSearchPage() {
           <ul className="flex flex-col gap-1">
             {list.map((o) => {
               const r = recentByKey.get(o.key);
-              const custom = o.origin === 'custom' ? customs.data?.find((c) => c.id === o.customFoodId) : undefined;
+              const custom = o.origin === 'custom' && o.customFoodId ? customById.get(o.customFoodId) : undefined;
               return (
                 <li key={o.key} className="flex items-center gap-1">
-                  <FoodRow option={o} quantity={r?.quantity} unit={r?.unit} onPick={() => setPicked(o)} />
+                  <FoodRow option={o} quantity={r?.quantity} unit={r?.unit} count={r?.count} highlight={q} onPick={pick} />
                   {custom && !q && tab === 'mine' && (
                     <GlassButton label={`Xóa ${custom.name}`} onClick={() => void removeCustom(custom)} className="shrink-0 text-muted">
                       <Trash2 className="h-4 w-4" />
@@ -229,7 +257,17 @@ export default function FoodSearchPage() {
           history.setData((h) => (h ? [...h, e] : h));
         }}
       />
-      <QuickAddSheet open={quickOpen} onClose={() => setQuickOpen(false)} date={date} meal={meal} initialName={query.trim()} onSaved={onAdded} />
+      <QuickAddSheet
+        open={quickOpen}
+        onClose={() => setQuickOpen(false)}
+        date={date}
+        meal={meal}
+        initialName={query.trim()}
+        onSaved={(e) => {
+          onAdded();
+          history.setData((h) => (h ? [...h, e] : h));
+        }}
+      />
       <CustomFoodSheet
         open={customOpen}
         onClose={() => setCustomOpen(false)}
@@ -243,19 +281,45 @@ export default function FoodSearchPage() {
   );
 }
 
-function FoodRow({ option, quantity, unit, onPick }: { option: FoodOption; quantity?: number; unit?: string; onPick: () => void }) {
+interface FoodRowProps {
+  option: FoodOption;
+  quantity?: number;
+  unit?: string;
+  /** Times logged recently (shown when ≥ 2). */
+  count?: number;
+  /** Query whose words are highlighted in the name. */
+  highlight?: string;
+  onPick: (o: FoodOption) => void;
+}
+
+/** Memoised: typing re-renders the page, but rows only change when the debounced results do. */
+const FoodRow = memo(function FoodRow({ option, quantity, unit, count, highlight, onPick }: FoodRowProps) {
   const u = unit ?? option.defaultUnit;
   const qty = quantity ?? (u === 'g' || u === 'ml' ? 100 : 1);
   const kcal = computePortion(option, qty, u).kcal;
-  const tag = option.origin === 'custom' ? 'Món của tôi' : option.brand ?? (option.category ? FOOD_CATEGORY_LABELS[option.category] : 'Đã ghi trước đây');
+  const base = option.origin === 'custom' ? 'Món của tôi' : option.brand ?? (option.category ? FOOD_CATEGORY_LABELS[option.category] : 'Đã ghi trước đây');
+  const tag = count && count >= 2 ? `${base} · đã ghi ${count} lần` : base;
+  const parts = highlight ? highlightParts(option.name, highlight) : null;
   return (
     <button
       type="button"
-      onClick={onPick}
+      onClick={() => onPick(option)}
       className="flex min-h-[60px] min-w-0 flex-1 items-center gap-3 rounded-2xl px-3 py-2 text-left transition-colors hover:bg-white/[0.04] active:bg-white/[0.06]"
     >
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[15px] font-semibold text-text">{option.name}</span>
+        <span className="block truncate text-[15px] font-semibold text-text">
+          {parts
+            ? parts.map((p, i) =>
+                p.hit ? (
+                  <mark key={i} className="bg-transparent text-gold">
+                    {p.text}
+                  </mark>
+                ) : (
+                  <span key={i}>{p.text}</span>
+                ),
+              )
+            : option.name}
+        </span>
         <span className="block truncate text-[12px] text-muted">
           {tag} · {formatNumber(qty, 2)} {u}
         </span>
@@ -269,4 +333,4 @@ function FoodRow({ option, quantity, unit, onPick }: { option: FoodOption; quant
       </span>
     </button>
   );
-}
+});

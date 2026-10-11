@@ -1,11 +1,11 @@
 import { Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BottomSheet, Button, GlassButton, Input, NumberField, Segmented, useToast } from '@/components/ui';
 import { notifyDataChanged } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { addMealEntries, updateMeal } from '@/services/meals';
 import { MEAL_LABELS, MEAL_TYPES, type MealEntry, type MealType } from '@/types/db';
-import { kcalFromMacros, MEAL_SHORT } from '../lib';
+import { kcalFromMacros, kcalMismatch, MEAL_SHORT } from '../lib';
 
 export interface QuickAddSheetProps {
   open: boolean;
@@ -30,6 +30,8 @@ export function QuickAddSheet({ open, onClose, date, meal: defaultMeal, entry, i
   const [f, setF] = useState<number | null>(null);
   const [meal, setMeal] = useState<MealType>(defaultMeal);
   const [saving, setSaving] = useState(false);
+  // Synchronous guard: two taps in the same frame both see saving === false.
+  const busy = useRef(false);
   const [tried, setTried] = useState(false);
 
   useEffect(() => {
@@ -41,6 +43,7 @@ export function QuickAddSheet({ open, onClose, date, meal: defaultMeal, entry, i
     setF(entry?.fat_g || null);
     setMeal(entry?.meal ?? defaultMeal);
     setSaving(false);
+    busy.current = false;
     setTried(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, entry?.id]);
@@ -49,11 +52,12 @@ export function QuickAddSheet({ open, onClose, date, meal: defaultMeal, entry, i
   const finalKcal = kcal ?? (fromMacros > 0 ? fromMacros : null);
   const nameErr = tried && !name.trim() ? 'Hãy nhập tên món.' : undefined;
   const kcalErr = tried && !(finalKcal !== null && finalKcal >= 0) ? 'Nhập calo hoặc macro.' : undefined;
-  const mismatch = kcal !== null && fromMacros > 0 && Math.abs(fromMacros - kcal) > Math.max(30, kcal * 0.25);
+  const mismatch = kcalMismatch(kcal, fromMacros);
 
   const save = async () => {
     setTried(true);
-    if (!name.trim() || finalKcal === null || saving) return;
+    if (!name.trim() || finalKcal === null || busy.current) return;
+    busy.current = true;
     setSaving(true);
     const values = {
       name: name.trim(),
@@ -80,6 +84,7 @@ export function QuickAddSheet({ open, onClose, date, meal: defaultMeal, entry, i
       onClose();
     } catch (e) {
       toast.error(e);
+      busy.current = false;
       setSaving(false);
     }
   };

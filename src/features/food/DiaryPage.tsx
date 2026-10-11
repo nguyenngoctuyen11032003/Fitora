@@ -1,5 +1,5 @@
-import { ChevronLeft, ChevronRight, Plus, ScanLine, Utensils } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronLeft, ChevronRight, CopyPlus, Plus, ScanLine, Utensils } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
 import { BigNumber, Button, EmptyState, GlassButton, GlassCard, MacroBar, ProgressBar, ScreenHeader, Skeleton, useToast } from '@/components/ui';
@@ -9,44 +9,79 @@ import { addDays, formatDayVi, isISODate, todayISO } from '@/lib/date';
 import { notifyDataChanged, onDataChanged } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { useAsync } from '@/lib/hooks';
+import { latestWeight } from '@/services/body';
 import { listCustomFoods } from '@/services/foods';
 import { addMealEntries, deleteMeal, listMeals } from '@/services/meals';
-import { MEAL_LABELS, MEAL_TYPES, type MealEntry, type MealType, type NewMealEntry } from '@/types/db';
+import { getDaySummary } from '@/services/summary';
+import { MEAL_LABELS, MEAL_TYPES, type MealEntry, type MealType } from '@/types/db';
 import { FoodSheet } from './components/FoodSheet';
 import { EntryThumb, MacroInline, MEAL_ICONS, portionLabel, useMealPhotoUrls } from './components/parts';
 import { QuickAddSheet } from './components/QuickAddSheet';
-import { groupByMeal, guessMeal, optionForEntry, sumNutrients } from './lib';
-
-function toInsert(e: MealEntry): NewMealEntry {
-  const { id: _id, user_id: _u, created_at: _c, updated_at: _up, ...rest } = e;
-  return rest;
-}
+import { copyEntries, diaryBalance, entryToInsert, groupByMeal, guessMeal, optionForEdit, sortByLogged, sumNutrients } from './lib';
 
 export default function DiaryPage() {
   const toast = useToast();
   const { fit } = useProfile();
   const [params, setParams] = useSearchParams();
   const today = todayISO();
-  const date = isISODate(params.get('date')) ? params.get('date')! : today;
+  // Future days can't be logged from the diary (the "next day" button stops at today) → clamp.
+  const asked = params.get('date');
+  const date = isISODate(asked) && asked < today ? asked : today;
   const setDate = (d: string) => setParams(d === today ? {} : { date: d }, { replace: true });
 
   const meals = useAsync(async () => ({ date, rows: await listMeals(date) }), [date]);
   const customs = useAsync(() => listCustomFoods(), []);
   const { reload } = meals;
   useEffect(() => onDataChanged((k) => (k === 'meals' || k === 'any') && void reload()), [reload]);
+  // Burn side of the balance (workouts + steps) — same source and formula as Today.
+  // Best effort: if it fails the card falls back to "chưa tính tập luyện".
+  const burn = useAsync(async () => {
+    const [sum, w] = await Promise.all([getDaySummary(date), latestWeight().catch(() => null)]);
+    return { date, sum, weightKg: w?.weight_kg ?? null };
+  }, [date]);
+  const reloadBurn = burn.reload;
+  useEffect(
+    () => onDataChanged((k) => (k === 'workouts' || k === 'daily' || k === 'body' || k === 'any') && void reloadBurn()),
+    [reloadBurn],
+  );
   useEffect(() => {
     if (meals.error) toast.error(meals.error);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meals.error]);
+  // Previous day, for "Chép từ hôm qua" on empty meals (best effort, never blocks the page).
+  const prevDate = addDays(date, -1);
+  const prev = useAsync(async () => ({ date: prevDate, rows: await listMeals(prevDate).catch(() => [] as MealEntry[]) }), [prevDate]);
+  const prevGroups = useMemo(() => groupByMeal(prev.data?.date === prevDate ? prev.data.rows : []), [prev.data, prevDate]);
 
-  const rows = useMemo(() => (meals.data?.date === date ? meals.data.rows : []), [meals.data, date]);
+  // Refresh when the app comes back to the foreground (other device / tab may have logged,
+  // and "today" may have rolled over) — at most every 30 s.
+  const lastFocusReload = useRef(Date.now());
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - lastFocusReload.current < 30_000) return;
+      lastFocusReload.current = Date.now();
+      void reload();
+      void reloadBurn();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [reload, reloadBurn]);
+
+  // Logged order, so an edited entry keeps its place instead of jumping to the end of its meal.
+  const rows = useMemo(() => (meals.data?.date === date ? sortByLogged(meals.data.rows) : []), [meals.data, date]);
   const loading = meals.loading && meals.data?.date !== date;
   const groups = useMemo(() => groupByMeal(rows), [rows]);
   const total = useMemo(() => sumNutrients(rows), [rows]);
   const photos = useMealPhotoUrls(rows);
 
-  const target = fit?.calorie_target ?? 2000;
-  const left = target - total.kcal;
+  const burnFor = burn.data?.date === date ? burn.data : null;
+  const balance = diaryBalance(fit, total.kcal, burnFor?.sum, burnFor?.weightKg, date);
+  const { target, bonus } = balance;
+  const left = balance.remaining;
   const targets = fit ? { protein_g: fit.protein_g ?? undefined, carbs_g: fit.carbs_g ?? undefined, fat_g: fit.fat_g ?? undefined } : null;
   const nextMeal = date === today ? guessMeal() : 'snack';
 
@@ -54,7 +89,7 @@ export default function DiaryPage() {
   const [editing, setEditing] = useState<MealEntry | null>(null);
   const manual = editing?.source === 'manual';
   const option = useMemo(
-    () => (editing && !manual ? optionForEntry(editing, FOODS, customs.data ?? []) : null),
+    () => (editing && !manual ? optionForEdit(editing, FOODS, customs.data ?? []) : null),
     [editing, manual, customs.data],
   );
 
@@ -75,7 +110,7 @@ export default function DiaryPage() {
         action: {
           label: 'Hoàn tác',
           onClick: () => {
-            addMealEntries([toInsert(e)])
+            addMealEntries([entryToInsert(e)])
               .then(([row]) => {
                 if (row) upsert(row);
                 notifyDataChanged('meals');
@@ -87,6 +122,42 @@ export default function DiaryPage() {
     } catch (err) {
       upsert(e);
       toast.error(err);
+    }
+  };
+
+  // ---- copy a meal from the previous day ---------------------------------------
+  const [copying, setCopying] = useState<MealType | null>(null);
+  const copyBusy = useRef(false);
+  const copyMeal = async (meal: MealType) => {
+    const source = prevGroups[meal];
+    if (!source.length || copyBusy.current) return;
+    copyBusy.current = true;
+    setCopying(meal);
+    try {
+      const added = await addMealEntries(copyEntries(source, date, meal));
+      setRows((d) => (d && d.date === date ? { ...d, rows: [...d.rows, ...added] } : d));
+      notifyDataChanged('meals');
+      const label = MEAL_LABELS[meal].toLowerCase();
+      toast.show(`Đã chép ${added.length} món vào ${label}.`, {
+        action: {
+          label: 'Hoàn tác',
+          onClick: () => {
+            const ids = new Set(added.map((x) => x.id));
+            setRows((d) => d && { ...d, rows: d.rows.filter((x) => !ids.has(x.id)) });
+            Promise.all(added.map((x) => deleteMeal(x.id)))
+              .then(() => notifyDataChanged('meals'))
+              .catch((err) => {
+                toast.error(err);
+                void reload();
+              });
+          },
+        },
+      });
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      copyBusy.current = false;
+      setCopying(null);
     }
   };
 
@@ -117,18 +188,25 @@ export default function DiaryPage() {
           <Skeleton className="h-28 w-full" />
         ) : (
           <>
-            <div className="flex items-end justify-between gap-4">
-              <BigNumber value={total.kcal} unit="kcal" label="Đã nạp" size="lg" tone="gold" />
-              <div className="pb-1 text-right">
-                <p className="text-[13px] font-semibold text-muted">{left >= 0 ? 'Còn lại' : 'Vượt mục tiêu'}</p>
-                <p className={left >= 0 ? 'tabular text-[22px] font-bold text-text' : 'tabular text-[22px] font-bold text-[var(--danger-text)]'}>
+            <BigNumber value={total.kcal} unit="kcal" label="Đã nạp" size="lg" tone="gold" />
+            <div className="mt-3 flex items-baseline justify-between gap-3 whitespace-nowrap">
+              <p className="text-[14px] text-muted">
+                {left >= 0 ? 'Còn lại ' : 'Vượt '}
+                <span className={left >= 0 ? 'tabular text-[20px] font-bold text-text' : 'tabular text-[20px] font-bold text-[var(--danger-text)]'}>
                   {formatNumber(Math.abs(left))}
-                </p>
-                <p className="text-[12px] text-muted">/ {formatNumber(target)} kcal</p>
-                <p className="text-[11px] text-muted">chưa tính tập luyện</p>
-              </div>
+                </span>{' '}
+                kcal
+              </p>
+              <p className="tabular text-[13px] text-muted">Mục tiêu {formatNumber(target)} kcal</p>
             </div>
-            <ProgressBar value={total.kcal} max={target} label="Calo đã nạp so với mục tiêu" className="mt-4" />
+            <ProgressBar value={total.kcal} max={burnFor ? balance.budget : target} label="Calo đã nạp so với mục tiêu" className="mt-4" />
+            <p className="mt-2 text-[12px] text-muted">
+              {!burnFor
+                ? 'Còn lại chưa tính tập luyện.'
+                : bonus > 0
+                  ? `Đã cộng ${formatNumber(bonus)} kcal vận động vượt mức có sẵn trong mục tiêu (giống màn Hôm nay).`
+                  : 'Mục tiêu đã gồm vận động hằng ngày (giống màn Hôm nay).'}
+            </p>
             <MacroBar protein_g={total.protein_g} carbs_g={total.carbs_g} fat_g={total.fat_g} targets={targets} className="mt-5" />
           </>
         )}
@@ -146,6 +224,10 @@ export default function DiaryPage() {
             photos={photos}
             highlight={m === nextMeal && rows.length === 0}
             onEdit={setEditing}
+            copyFrom={groups[m].length === 0 ? prevGroups[m] : []}
+            copyLabel={date === today ? 'hôm qua' : 'ngày trước'}
+            copying={copying === m}
+            onCopy={copyMeal}
           />
         ))}
       </div>
@@ -195,6 +277,10 @@ function MealCard({
   photos,
   highlight,
   onEdit,
+  copyFrom,
+  copyLabel,
+  copying,
+  onCopy,
 }: {
   meal: MealType;
   date: string;
@@ -203,9 +289,15 @@ function MealCard({
   photos: Record<string, string>;
   highlight: boolean;
   onEdit: (e: MealEntry) => void;
+  /** Same meal of the previous day, offered when this meal is empty. */
+  copyFrom: MealEntry[];
+  copyLabel: string;
+  copying: boolean;
+  onCopy: (meal: MealType) => void;
 }) {
   const Icon = MEAL_ICONS[meal];
-  const sum = sumNutrients(entries);
+  const sum = useMemo(() => sumNutrients(entries), [entries]);
+  const copyKcal = useMemo(() => sumNutrients(copyFrom).kcal, [copyFrom]);
   const headingId = `meal-${meal}`;
   return (
     <GlassCard as="section" padding="md" accent={highlight} aria-labelledby={headingId}>
@@ -234,6 +326,23 @@ function MealCard({
           <Plus className="h-5 w-5" aria-hidden="true" />
         </Link>
       </header>
+
+      {!loading && entries.length === 0 && copyFrom.length > 0 && (
+        <button
+          type="button"
+          onClick={() => onCopy(meal)}
+          disabled={copying}
+          aria-busy={copying}
+          className="mt-3 flex min-h-[44px] w-full items-center gap-2 rounded-2xl border border-dashed border-line px-3 py-2 text-left text-[13px] text-muted transition-colors hover:bg-white/[0.04] active:bg-white/[0.06] disabled:opacity-60"
+        >
+          <CopyPlus className="h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-semibold text-text">{copying ? 'Đang chép…' : `Chép từ ${copyLabel}`}</span>
+            {' · '}
+            {copyFrom.length} món · <span className="tabular">{formatNumber(copyKcal)} kcal</span>
+          </span>
+        </button>
+      )}
 
       {loading ? (
         <Skeleton className="mt-4 h-14 w-full" />

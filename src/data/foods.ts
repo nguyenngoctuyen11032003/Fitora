@@ -142,7 +142,8 @@ export const FOODS: FoodItem[] = [
   /* ------------------------------------------------------------------ */
   f('com_tam_suon', 'Cơm tấm sườn', 'com', [190, 9, 24, 6.5, 0.6], [['đĩa', 350]], ['com tam', 'com suon']),
   f('com_tam_suon_bi_cha', 'Cơm tấm sườn bì chả', 'com', [200, 9.5, 23, 7.7, 0.6], [['đĩa', 450]], ['com tam suon bi cha', 'com tam dac biet']),
-  f('com_ga_xoi_mo', 'Cơm gà xối mỡ', 'com', [210, 10, 24, 8.2, 0.5], [['đĩa', 400]], ['com ga chien']),
+  // ≈ 250 g cơm + 130 g đùi gà chiên (bỏ xương) + dưa, nước chấm → ~740 kcal / đĩa 400 g.
+  f('com_ga_xoi_mo', 'Cơm gà xối mỡ', 'com', [185, 10, 21.5, 6.8, 0.5], [['đĩa', 400], ['đĩa nhỏ', 300]], ['com ga chien', 'com ga']),
   f('com_ga_hai_nam', 'Cơm gà Hải Nam', 'com', [180, 9, 22, 6.2, 0.4], [['đĩa', 400]], ['com ga luoc', 'com ga hoi an']),
   f('com_rang', 'Cơm rang dương châu', 'com', [180, 5.5, 25, 6.5, 0.8], [['đĩa', 350]], ['com chien', 'com rang', 'com chien duong chau']),
   f('com_rang_dua_bo', 'Cơm rang dưa bò', 'com', [175, 6.5, 22, 6.7, 1], [['đĩa', 350]], ['com chien bo']),
@@ -160,7 +161,7 @@ export const FOODS: FoodItem[] = [
   f('banh_pho_tuoi', 'Bánh phở', 'tinh_bot', [141, 3.2, 32, 0.2, 0.4], [['phần', 150], ['lạng', 100]], ['banh pho']),
   f('mien_luoc', 'Miến dong (luộc)', 'tinh_bot', [110, 0.2, 27, 0.1, 0.5], [['phần', 150]], ['mien dong']),
   f('mi_trung_luoc', 'Mì trứng (luộc)', 'tinh_bot', [138, 4.5, 25, 2.1, 1.2], [['vắt', 120]], ['mi soi', 'mi vat']),
-  f('nui_luoc', 'Nui / mì ống (luộc)', 'tinh_bot', [157, 5.8, 30.6, 0.9, 1.8], [['đĩa', 200], ['bát', 150]], ['nui', 'mi y', 'pasta', 'spaghetti']),
+  f('nui_luoc', 'Nui / mì ống (luộc)', 'tinh_bot', [157, 5.8, 30.6, 0.9, 1.8], [['đĩa', 200], ['bát', 150]], ['nui', 'mi ong', 'pasta']),
   f('khoai_lang', 'Khoai lang luộc', 'tinh_bot', [119, 0.8, 28.5, 0.2, 1.3], [['củ', 200], ['củ nhỏ', 120]], ['khoai lang', 'khoai lang nuong']),
   f('khoai_tay', 'Khoai tây luộc', 'tinh_bot', [87, 1.9, 20, 0.1, 1.8], [['củ', 150]], ['khoai tay']),
   f('khoai_mon', 'Khoai môn luộc', 'tinh_bot', [109, 1.5, 25.6, 0.2, 1.2], [['củ', 150]], ['khoai mon', 'khoai so']),
@@ -224,7 +225,7 @@ export const FOODS: FoodItem[] = [
   f('ga_nuong', 'Gà nướng', 'mon_man', [210, 25, 2, 11.4, 0], [['phần', 150], ['đùi', 150]], ['ga nuong mat ong']),
   f('ga_ran', 'Gà rán', 'mon_man', [260, 20, 9, 16, 0.4], [['miếng', 120], ['cánh', 50]], ['ga chien', 'ga ran kfc', 'dui ga ran']),
   f('canh_ga_chien_mam', 'Cánh gà chiên nước mắm', 'mon_man', [290, 20, 6, 20.8, 0], [['cánh', 40], ['đĩa', 200]], ['canh ga']),
-  f('vit_quay', 'Vịt quay', 'mon_man', [337, 19, 0, 28.4, 0], [['đĩa', 200], ['miếng', 80]], ['vit nuong', 'vit luoc']),
+  f('vit_quay', 'Vịt quay', 'mon_man', [337, 19, 0, 28.4, 0], [['đĩa', 200], ['miếng', 80]], ['vit nuong']),
   f('cha_ca', 'Chả cá Lã Vọng', 'mon_man', [210, 18, 5, 13, 0.5], [['phần', 200]], ['cha ca la vong']),
   f('ca_chien', 'Cá thu chiên', 'mon_man', [230, 22, 2, 15, 0], [['khúc', 100]], ['ca thu', 'ca chien']),
   f('ca_sot_ca_chua', 'Cá sốt cà chua', 'mon_man', [150, 16, 5, 7.4, 0.6], [['phần', 150]], ['ca sot ca']),
@@ -252,6 +253,7 @@ export const FOODS: FoodItem[] = [
   f('tom_luoc', 'Tôm luộc', 'dam', [99, 24, 0.2, 0.3, 0], [['lạng', 100], ['con', 15]], ['tom', 'tom hap']),
   f('trung_ga', 'Trứng gà luộc', 'dam', [155, 13, 1.1, 10.6, 0], [['quả', 50]], ['trung', 'trung luoc', 'egg']),
   f('long_trang_trung', 'Lòng trắng trứng', 'dam', [52, 10.9, 0.7, 0.2, 0], [['quả', 33]], ['long trang', 'egg white']),
+  f('trung_vit', 'Trứng vịt luộc', 'dam', [184, 13, 1, 14.2, 0], [['quả', 60]], ['trung vit']),
   f('trung_vit_lon', 'Trứng vịt lộn', 'dam', [182, 13.6, 4, 12.4, 0], [['quả', 70]], ['hot vit lon', 'trung vit lon']),
   f('trung_cut', 'Trứng cút', 'dam', [158, 13, 0.4, 11.1, 0], [['quả', 10]], ['trung cut luoc']),
   f('dau_phu', 'Đậu phụ', 'dam', [95, 10.9, 0.7, 5.4, 0.4], [['bìa', 120], ['miếng', 60]], ['dau hu', 'tofu', 'dau phu trang']),
@@ -351,7 +353,8 @@ export const FOODS: FoodItem[] = [
   f('sua_chua_hy_lap', 'Sữa chua Hy Lạp', 'sua', [59, 10, 3.6, 0.4, 0], [['hũ', 100], ['cốc', 170]], ['greek yogurt']),
   f('sua_chua_uong', 'Sữa chua uống', 'sua', [70, 2.6, 12, 1.2, 0], [['chai', 65], ['hộp', 180]], ['probi', 'yakult']),
   f('sua_dac', 'Sữa đặc', 'sua', [336, 8.1, 56.8, 8.8, 0], [['thìa', 15]], ['sua dac co duong', 'ong tho']),
-  f('pho_mai', 'Phô mai', 'sua', [330, 20, 4, 26, 0], [['lát', 17], ['miếng', 15]], ['pho mai', 'cheese', 'con bo cuoi']),
+  f('pho_mai', 'Phô mai', 'sua', [330, 20, 4, 26, 0], [['lát', 17], ['miếng', 15]], ['pho mai', 'cheese', 'pho mai lat', 'cheddar']),
+  f('pho_mai_bo_cuoi', 'Phô mai con bò cười', 'sua', [245, 10, 6, 20, 0], [['miếng', 17]], ['con bo cuoi', 'pho mai tam giac', 'la vache qui rit']),
   f('whey', 'Whey protein', 'sua', [400, 78, 8, 6, 0], [['muỗng', 30]], ['whey', 'bot protein', 'protein']),
 
   /* ------------------------------------------------------------------ */
@@ -392,8 +395,8 @@ export const FOODS: FoodItem[] = [
   f('khoai_tay_chien', 'Khoai tây chiên', 'fast_food', [312, 3.4, 41, 15, 3.8], [['phần vừa', 115], ['phần nhỏ', 75], ['phần lớn', 150]], ['french fries', 'khoai chien']),
   f('pizza', 'Pizza', 'fast_food', [266, 11, 33, 10, 2.3], [['miếng', 107]], ['pizza pho mai']),
   f('my_y', 'Mỳ Ý sốt bò bằm', 'fast_food', [150, 7, 19, 5.1, 1.5], [['đĩa', 350]], ['mi y', 'spaghetti bolognese', 'my y']),
-  f('sandwich_ga', 'Sandwich gà', 'fast_food', [230, 13, 25, 8.4, 2], [['cái', 180]], ['sandwich']),
-  f('sushi', 'Sushi', 'fast_food', [150, 6, 28, 1.4, 0.5], [['miếng', 30], ['đĩa', 240]], ['sashimi']),
+  f('sandwich_ga', 'Sandwich gà', 'fast_food', [230, 13, 25, 8.4, 2], [['cái', 180]], ['sandwich ga', 'banh mi kep ga']),
+  f('sushi', 'Sushi', 'fast_food', [150, 6, 28, 1.4, 0.5], [['miếng', 30], ['đĩa', 240]], ['sushi ca hoi', 'nigiri']),
   f('tokbokki', 'Tokbokki', 'fast_food', [150, 3, 33, 0.8, 0.8], [['phần', 250]], ['tteokbokki', 'banh gao cay']),
   f('ga_vien', 'Gà viên chiên', 'fast_food', [296, 15, 16, 19, 1], [['phần', 100], ['viên', 18]], ['nuggets', 'chicken nuggets']),
 
