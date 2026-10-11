@@ -114,6 +114,7 @@ export function DishCard({ dish, index, onChange, onRemove }: DishCardProps) {
               value={dish.name}
               maxLength={120}
               placeholder="Tên món"
+              aria-invalid={nameMissing || undefined}
               onChange={(e) => onChange({ ...dish, name: e.target.value })}
               className="min-h-[44px] w-full min-w-0 bg-transparent text-[20px] font-extrabold tracking-[-0.03em] text-text outline-none placeholder:text-muted"
             />
@@ -161,6 +162,7 @@ export function DishCard({ dish, index, onChange, onRemove }: DishCardProps) {
             max={5000}
             decimals={0}
             unit="g"
+            error={dish.grams > 0 || !(dish.quantity > 0) ? undefined : 'Phải lớn hơn 0'}
             wrapperClassName="w-[132px] shrink-0"
           />
         ) : (

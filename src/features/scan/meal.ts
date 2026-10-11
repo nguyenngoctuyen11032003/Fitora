@@ -13,6 +13,11 @@ export function parseMealParam(v: string | null, now = new Date()): MealType {
   return v && (MEAL_TYPES as string[]).includes(v) ? (v as MealType) : defaultMealForHour(now.getHours());
 }
 
-export function parseDateParam(v: string | null): string {
-  return v && isISODate(v) ? v : todayISO();
+/**
+ * `?date=` → ISO day. Invalid → today; a future day is clamped to today because the
+ * review sheet only allows logging what was already eaten (its date picker has max=today).
+ */
+export function parseDateParam(v: string | null, today = todayISO()): string {
+  if (!v || !isISODate(v)) return today;
+  return v > today ? today : v;
 }

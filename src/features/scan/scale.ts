@@ -22,6 +22,56 @@ export const DEFAULT_UNIT_GRAMS: Record<ScanUnit, number> = {
   gói: 75,
 };
 
+/**
+ * Other units the AI uses (see the edge-function prompt) — only consulted when the AI
+ * gave no weight, so a "tô" is not mistaken for 100 g.
+ */
+export const EXTRA_UNIT_GRAMS: Record<string, number> = {
+  ml: 1,
+  kg: 1000,
+  l: 1000,
+  lít: 1000,
+  tô: 500,
+  chén: 200,
+  cái: 60,
+  cốc: 250,
+  lon: 330,
+  chai: 500,
+  hộp: 200,
+  quả: 100,
+  trái: 100,
+  xiên: 50,
+  cuốn: 50,
+  lát: 30,
+  thìa: 15,
+  'ổ': 200,
+  hũ: 100,
+  khay: 300,
+  suất: 350,
+};
+
+const GRAM_ALIASES = new Set(['g', 'gr', 'gram', 'grams', 'gam', 'gm']);
+
+/**
+ * Canonical unit spelling: trimmed, lower-case, gram synonyms → 'g', empty → 'phần'.
+ * Keeps the stepper/picker logic (which compares with 'g') working for "Gram", " G "…
+ */
+export function normalizeUnit(unit: unknown): string {
+  const u = String(unit ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\.$/, '');
+  if (!u) return 'phần';
+  return GRAM_ALIASES.has(u) ? 'g' : u;
+}
+
+/** Grams for one `unit` when nothing dish-specific is known (100 g for unknown units). */
+export function defaultUnitGrams(unit: string): number {
+  const u = normalizeUnit(unit);
+  if (isScanUnit(u)) return DEFAULT_UNIT_GRAMS[u];
+  return EXTRA_UNIT_GRAMS[u] ?? 100;
+}
+
 export interface Nutrients {
   kcal: number;
   protein_g: number;
@@ -76,11 +126,11 @@ export function gramsPerUnit(dish: Pick<ScanDish, 'unitGrams'>, unit: string): n
   if (unit === 'g') return 1;
   const own = dish.unitGrams[unit];
   if (own > 0) return own;
-  return isScanUnit(unit) ? DEFAULT_UNIT_GRAMS[unit] : 100;
+  return defaultUnitGrams(unit);
 }
 
 export function nutrientsFor(density: Nutrients, grams: number): Nutrients {
-  const g = Math.max(0, grams);
+  const g = num(grams);
   return {
     kcal: r1(density.kcal * g),
     protein_g: r1(density.protein_g * g),
@@ -101,6 +151,27 @@ export function densityOf(n: Nutrients, grams: number): Nutrients {
   };
 }
 
+/** Atwater estimate (4/4/9 kcal per g of protein/carbs/fat). */
+export function kcalFromMacros(n: Pick<Nutrients, 'protein_g' | 'carbs_g' | 'fat_g'>): number {
+  return num(n.protein_g) * 4 + num(n.carbs_g) * 4 + num(n.fat_g) * 9;
+}
+
+/**
+ * Clean nutrient numbers (NaN/negative → 0). When the energy is missing but macros
+ * are present (an AI slip), estimate it from the macros instead of saving 0 kcal.
+ */
+export function sanitizeNutrients(n: Partial<Nutrients>): Nutrients {
+  const out: Nutrients = {
+    kcal: num(n.kcal),
+    protein_g: num(n.protein_g),
+    carbs_g: num(n.carbs_g),
+    fat_g: num(n.fat_g),
+    fiber_g: num(n.fiber_g),
+  };
+  if (!out.kcal) out.kcal = kcalFromMacros(out);
+  return out;
+}
+
 let seq = 0;
 export const dishKey = () => `d${Date.now().toString(36)}${(seq++).toString(36)}`;
 
@@ -109,24 +180,24 @@ export const dishKey = () => `d${Date.now().toString(36)}${(seq++).toString(36)}
  * estimate them from the unit table so the density stays meaningful.
  */
 export function fromAiDish(d: AiDish, key = dishKey()): ScanDish {
-  const unit = (d.unit || 'phần').trim() || 'phần';
+  const unit = normalizeUnit(d.unit);
   const quantity = num(d.quantity) || 1;
   let grams = num(d.grams);
   if (unit === 'g') grams = grams || quantity;
-  if (!grams) grams = quantity * (isScanUnit(unit) ? DEFAULT_UNIT_GRAMS[unit] : 100);
+  if (!grams) grams = quantity * defaultUnitGrams(unit);
   const unitGrams: Record<string, number> = { g: 1 };
   if (unit !== 'g') unitGrams[unit] = grams / quantity;
-  const density = densityOf(d, grams);
+  const density = densityOf(sanitizeNutrients(d), grams);
   return {
     key,
-    name: d.name,
+    name: String(d.name ?? '').trim(),
     quantity: unit === 'g' ? r1(grams) : quantity,
     unit,
     grams: r1(grams),
     density,
     unitGrams,
     ingredients: d.ingredients ?? [],
-    confidence: Number.isFinite(d.confidence) ? Math.min(1, Math.max(0, d.confidence)) : null,
+    confidence: typeof d.confidence === 'number' && Number.isFinite(d.confidence) ? Math.min(1, Math.max(0, d.confidence)) : null,
     original: d,
     ...nutrientsFor(density, grams),
   };
@@ -147,7 +218,7 @@ export interface ManualDishInput {
 /** A dish typed in by the user ("kcal for this many grams"). */
 export function manualDish(input: ManualDishInput, key = dishKey()): ScanDish {
   const grams = num(input.grams) || 100;
-  const unit = input.unit || 'phần';
+  const unit = normalizeUnit(input.unit);
   const quantity = unit === 'g' ? grams : num(input.quantity) || 1;
   const base: Nutrients = {
     kcal: num(input.kcal),
@@ -175,13 +246,13 @@ export function manualDish(input: ManualDishInput, key = dishKey()): ScanDish {
 }
 
 function withGrams(dish: ScanDish, grams: number, patch: Partial<ScanDish> = {}): ScanDish {
-  const g = Math.max(0, grams);
+  const g = num(grams);
   return { ...dish, ...patch, grams: r1(g), ...nutrientsFor(dish.density, g) };
 }
 
 /** Change the count; grams follow the current unit size. */
 export function setQuantity(dish: ScanDish, quantity: number): ScanDish {
-  const q = Math.max(0, Number(quantity) || 0);
+  const q = num(quantity);
   return withGrams(dish, q * gramsPerUnit(dish, dish.unit), { quantity: q });
 }
 
@@ -191,7 +262,8 @@ export function setQuantity(dish: ScanDish, quantity: number): ScanDish {
  * - from 'g': keep the weight, express it in the new unit (snapped to ¼).
  * - between units: keep the count, weight follows the new unit size.
  */
-export function setUnit(dish: ScanDish, unit: string): ScanDish {
+export function setUnit(dish: ScanDish, rawUnit: string): ScanDish {
+  const unit = normalizeUnit(rawUnit);
   if (unit === dish.unit) return dish;
   if (unit === 'g') return withGrams(dish, dish.grams, { unit, quantity: r1(dish.grams) });
   const gpu = gramsPerUnit(dish, unit);
@@ -204,7 +276,7 @@ export function setUnit(dish: ScanDish, unit: string): ScanDish {
 
 /** Edit the weight directly; the current unit's size is re-learnt so the stepper stays consistent. */
 export function setGrams(dish: ScanDish, grams: number): ScanDish {
-  const g = Math.max(0, Number(grams) || 0);
+  const g = num(grams);
   if (dish.unit === 'g') return withGrams(dish, g, { quantity: r1(g) });
   const unitGrams = dish.quantity > 0 && g > 0 ? { ...dish.unitGrams, [dish.unit]: g / dish.quantity } : dish.unitGrams;
   return withGrams(dish, g, { unitGrams });
@@ -227,9 +299,9 @@ export function macroShares(n: Pick<Nutrients, 'protein_g' | 'carbs_g' | 'fat_g'
   return { protein: p / sum, carbs: c / sum, fat: f / sum };
 }
 
-/** A dish can be saved when it has a name and a positive amount. */
+/** A dish can be saved when it has a name, a positive count and a positive weight. */
 export function isDishValid(d: Pick<ScanDish, 'name' | 'quantity' | 'grams'>): boolean {
-  return d.name.trim().length > 0 && d.quantity > 0 && d.grams >= 0;
+  return d.name.trim().length > 0 && d.quantity > 0 && d.grams > 0;
 }
 
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
@@ -238,4 +310,10 @@ export function confidenceLevel(c: number | null): ConfidenceLevel | null {
   if (c >= 0.75) return 'high';
   if (c >= 0.5) return 'medium';
   return 'low';
+}
+
+/** Put `item` back at `index` (clamped) — used to undo a removal. */
+export function insertAt<T>(list: T[], index: number, item: T): T[] {
+  const i = Math.min(Math.max(0, Math.trunc(index) || 0), list.length);
+  return [...list.slice(0, i), item, ...list.slice(i)];
 }

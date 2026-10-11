@@ -4,9 +4,11 @@ import {
   confidenceLevel,
   fromAiDish,
   gramsPerUnit,
+  insertAt,
   isDishValid,
   macroShares,
   manualDish,
+  normalizeUnit,
   roundQuantity,
   setGrams,
   setQuantity,
@@ -146,5 +148,85 @@ describe('manualDish / totals / helpers', () => {
     expect(confidenceLevel(0.6)).toBe('medium');
     expect(confidenceLevel(0.2)).toBe('low');
     expect(confidenceLevel(null)).toBeNull();
+  });
+});
+
+describe('units the AI uses outside the picker', () => {
+  it('estimates weight from realistic sizes when grams are missing', () => {
+    expect(fromAiDish({ ...pho, unit: 'tô', grams: 0, kcal: 500 }).grams).toBe(500);
+    expect(fromAiDish({ ...pho, quantity: 330, unit: 'ml', grams: 0, kcal: 140 }).grams).toBe(330);
+    expect(fromAiDish({ ...pho, quantity: 2, unit: 'Quả', grams: 0, kcal: 140 }).grams).toBe(200);
+    expect(fromAiDish({ ...pho, unit: 'thứ lạ', grams: 0 }).grams).toBe(100);
+  });
+
+  it('keeps nutrients proportional when the count of an AI unit changes', () => {
+    const d = fromAiDish({ ...pho, unit: 'tô', grams: 600, kcal: 540, protein_g: 30 });
+    const two = setQuantity(d, 2);
+    expect(two).toMatchObject({ grams: 1200, kcal: 1080, protein_g: 60 });
+    expect(setQuantity(two, 0.5)).toMatchObject({ grams: 300, kcal: 270, protein_g: 15 });
+  });
+});
+
+describe('isDishValid', () => {
+  it('needs a name, a positive count and a positive weight', () => {
+    const d = fromAiDish(pho);
+    expect(isDishValid(d)).toBe(true);
+    expect(isDishValid({ ...d, name: '  ' })).toBe(false);
+    expect(isDishValid(setQuantity(d, 0))).toBe(false);
+    expect(isDishValid(setGrams(d, 0))).toBe(false);
+  });
+});
+
+describe('robustness against messy AI answers', () => {
+  it('normalises unit spelling and gram synonyms', () => {
+    expect(normalizeUnit(' Gram ')).toBe('g');
+    expect(normalizeUnit('GR.')).toBe('g');
+    expect(normalizeUnit('Bát')).toBe('bát');
+    expect(normalizeUnit('')).toBe('phần');
+    expect(normalizeUnit(undefined)).toBe('phần');
+    const d = fromAiDish({ ...pho, quantity: 200, unit: 'Gram', grams: 0, kcal: 300 });
+    expect(d).toMatchObject({ unit: 'g', quantity: 200, grams: 200, kcal: 300 });
+  });
+
+  it('estimates kcal from macros when the AI forgot the energy', () => {
+    const d = fromAiDish({ ...pho, kcal: 0, protein_g: 10, carbs_g: 20, fat_g: 5 });
+    expect(d.kcal).toBe(165);
+    expect(setQuantity(d, 2).kcal).toBe(330);
+  });
+
+  it('never yields NaN or negative numbers', () => {
+    const d = fromAiDish({ ...pho, grams: NaN, kcal: -50, protein_g: Number.NaN, quantity: -2 });
+    for (const k of ['grams', 'quantity', 'kcal', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g'] as const) {
+      expect(Number.isFinite(d[k])).toBe(true);
+      expect(d[k]).toBeGreaterThanOrEqual(0);
+    }
+    const bad = setQuantity(fromAiDish(pho), Number.NaN);
+    expect(bad).toMatchObject({ quantity: 0, grams: 0, kcal: 0 });
+    expect(setGrams(fromAiDish(pho), -10)).toMatchObject({ grams: 0, kcal: 0 });
+    expect(totals([{ kcal: NaN, protein_g: -1, carbs_g: 2, fat_g: 0, fiber_g: 0 }])).toMatchObject({ kcal: 0, protein_g: 0, carbs_g: 2 });
+  });
+
+  it('setUnit accepts any spelling of the target unit', () => {
+    const d = setUnit(fromAiDish(pho), 'Gram');
+    expect(d).toMatchObject({ unit: 'g', grams: 500, kcal: 450 });
+  });
+
+  it('keeps kcal and macros consistent after many edits', () => {
+    let d = fromAiDish(pho);
+    d = setUnit(d, 'g');
+    d = setGrams(d, 333);
+    d = setUnit(d, 'bát');
+    d = setQuantity(d, 2);
+    // nutrients are always density × grams, rounded to 0.1
+    expect(d.kcal).toBeCloseTo(d.grams * 0.9, 0);
+    expect(d.protein_g).toBeCloseTo(d.grams * 0.05, 0);
+  });
+});
+
+describe('insertAt', () => {
+  it('restores an item at its old position (clamped)', () => {
+    expect(insertAt(['a', 'c'], 1, 'b')).toEqual(['a', 'b', 'c']);
+    expect(insertAt(['a'], 9, 'b')).toEqual(['a', 'b']);
+    expect(insertAt(['a'], -3, 'b')).toEqual(['b', 'a']);
   });
 });

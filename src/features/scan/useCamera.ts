@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-export type CameraStatus = 'idle' | 'starting' | 'ready' | 'denied' | 'unsupported' | 'error';
+export type CameraStatus = 'idle' | 'starting' | 'ready' | 'denied' | 'notfound' | 'unsupported' | 'error';
 export type Facing = 'environment' | 'user';
 
 export const cameraSupported = () =>
@@ -11,8 +11,44 @@ interface TorchCapabilities extends MediaTrackCapabilities {
 }
 
 /**
+ * Constraint ladder, most specific first. Some devices reject the resolution hints
+ * (OverconstrainedError) or a facing mode they don't have — fall back instead of failing.
+ * 1920×1440 is plenty: stills are downscaled to 1280 px before upload.
+ */
+export function constraintLadder(facing: Facing): MediaStreamConstraints[] {
+  return [
+    { audio: false, video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1440 } } },
+    { audio: false, video: { facingMode: { ideal: facing } } },
+    { audio: false, video: true },
+  ];
+}
+
+/** getUserMedia error name → screen status. */
+export function statusForError(name: string | undefined): CameraStatus {
+  if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') return 'denied';
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return 'notfound';
+  return 'error';
+}
+
+const RETRYABLE = new Set(['OverconstrainedError', 'ConstraintNotSatisfiedError', 'TypeError']);
+
+async function openStream(facing: Facing): Promise<MediaStream> {
+  let last: unknown;
+  for (const c of constraintLadder(facing)) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(c);
+    } catch (e) {
+      last = e;
+      if (!RETRYABLE.has((e as DOMException)?.name)) throw e;
+    }
+  }
+  throw last;
+}
+
+/**
  * getUserMedia wrapper bound to a <video>. Runs only while `active`; stops every
  * track when inactive, on unmount and while the tab is hidden (restarts on return).
+ * Rear camera preferred; iOS needs muted + playsInline for inline autoplay.
  */
 export function useCamera(active: boolean) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -26,7 +62,10 @@ export function useCamera(active: boolean) {
   const [attempt, setAttempt] = useState(0);
 
   const stop = useCallback(() => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current?.getTracks().forEach((t) => {
+      t.onended = null;
+      t.stop();
+    });
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     setTorchOn(false);
@@ -35,8 +74,16 @@ export function useCamera(active: boolean) {
 
   useEffect(() => {
     const on = () => setVisible(document.visibilityState !== 'hidden');
+    // pagehide covers iOS Safari back-forward cache, where visibilitychange may not fire.
+    const hide = () => setVisible(false);
     document.addEventListener('visibilitychange', on);
-    return () => document.removeEventListener('visibilitychange', on);
+    window.addEventListener('pagehide', hide);
+    window.addEventListener('pageshow', on);
+    return () => {
+      document.removeEventListener('visibilitychange', on);
+      window.removeEventListener('pagehide', hide);
+      window.removeEventListener('pageshow', on);
+    };
   }, []);
 
   useEffect(() => {
@@ -53,10 +100,7 @@ export function useCamera(active: boolean) {
     setStatus('starting');
     (async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1440 } },
-        });
+        const stream = await openStream(facing);
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -64,27 +108,33 @@ export function useCamera(active: boolean) {
         streamRef.current = stream;
         const video = videoRef.current;
         if (video) {
-          video.srcObject = stream;
           video.muted = true;
           video.playsInline = true;
+          video.setAttribute('playsinline', '');
+          video.srcObject = stream;
           await video.play().catch(() => {});
         }
         const track = stream.getVideoTracks()[0];
+        if (track) {
+          // Camera taken by another app / permission revoked mid-session.
+          track.onended = () => {
+            if (cancelled || streamRef.current !== stream) return;
+            stop();
+            setStatus('error');
+          };
+        }
         const caps = (track?.getCapabilities?.() ?? {}) as TorchCapabilities;
         setTorchSupported(!!caps.torch);
         try {
           const devices = await navigator.mediaDevices.enumerateDevices();
-          setCanFlip(devices.filter((d) => d.kind === 'videoinput').length > 1);
+          if (!cancelled) setCanFlip(devices.filter((d) => d.kind === 'videoinput').length > 1);
         } catch {
-          setCanFlip(false);
+          if (!cancelled) setCanFlip(false);
         }
         if (!cancelled) setStatus('ready');
       } catch (e) {
         if (cancelled) return;
-        const name = (e as DOMException)?.name;
-        if (name === 'NotAllowedError' || name === 'SecurityError') setStatus('denied');
-        else if (name === 'NotFoundError' || name === 'OverconstrainedError' || name === 'NotReadableError') setStatus('error');
-        else setStatus('error');
+        setStatus(statusForError((e as DOMException)?.name));
       }
     })();
     return () => {

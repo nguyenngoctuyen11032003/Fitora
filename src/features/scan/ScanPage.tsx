@@ -1,25 +1,9 @@
 import clsx from 'clsx';
-import {
-  Camera,
-  CameraOff,
-  ChevronRight,
-  Flashlight,
-  FlashlightOff,
-  ImagePlus,
-  Pause,
-  Play,
-  Radar,
-  ScanLine,
-  SwitchCamera,
-  Upload,
-  X,
-} from 'lucide-react';
+import { Flashlight, FlashlightOff, Radar, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
-import { Button } from '@/components/ui/Button';
 import { GlassButton } from '@/components/ui/GlassButton';
-import { Segmented } from '@/components/ui/Segmented';
 import { Spinner } from '@/components/ui/Spinner';
 import { useToast } from '@/components/ui/Toast';
 import { formatDayVi, todayISO } from '@/lib/date';
@@ -29,49 +13,25 @@ import { captureVideoFrame, compressImage } from '@/lib/image';
 import { AiScanError, scanFood } from '@/services/ai';
 import { addMealEntries, uploadMealPhoto } from '@/services/meals';
 import { removeImages } from '@/services/storage';
-import { MEAL_LABELS, type AiErrorCode, type MealType, type NewMealEntry } from '@/types/db';
+import { MEAL_LABELS, type AiErrorCode, type MealType } from '@/types/db';
 import { Analysing } from './Analysing';
-import { ConfidenceBadge } from './DishCard';
-import { DARK_LUMA, frameDiff, meanLuma, STABLE_DIFF, toLuma } from './frame';
+import { CameraFallback, isCameraUnavailable } from './CameraFallback';
+import { buildMealEntries } from './entries';
 import { parseDateParam, parseMealParam } from './meal';
 import { ReviewSheet } from './ReviewSheet';
 import { fromAiDish, totals, type ScanDish } from './scale';
+import { ScanDock, type ScanMode } from './ScanDock';
 import { ScanErrorPanel } from './ScanErrorPanel';
+import { useShots, vibrate, type Shot } from './shot';
+import { UploadDropzone } from './UploadDropzone';
 import { cameraSupported, useCamera } from './useCamera';
+import { useLiveScan } from './useLiveScan';
 import { Viewfinder } from './Viewfinder';
 import './scan.css';
 
-type Mode = 'camera' | 'upload' | 'live';
 type Phase = 'capture' | 'analysing' | 'error' | 'review';
 
-interface Shot {
-  blob: Blob;
-  dataUrl: string;
-  url: string;
-}
-
-interface LiveResult {
-  shot: Shot;
-  dishes: ScanDish[];
-  notes?: string;
-  confidence: number;
-}
-
-/* Live Scan tuning */
-const LIVE_INTERVAL = 3500; // min ms between AI calls
-const LIVE_TICK = 500; // stability sampling
-const LIVE_STABLE_MS = 900; // scene must be still this long
-const LIVE_CONFIDENT = 0.6; // pause when the best dish reaches this
-const LIVE_MAX_CALLS = 8; // per live session → protects the daily AI quota
-
-const makeShot = (blob: Blob, dataUrl: string): Shot => ({ blob, dataUrl, url: URL.createObjectURL(blob) });
-const vibrate = (ms: number) => {
-  try {
-    navigator.vibrate?.(ms);
-  } catch {
-    /* unsupported */
-  }
-};
+const isAbort = (e: unknown) => (e as Error)?.name === 'AbortError';
 
 export default function ScanPage() {
   const [params] = useSearchParams();
@@ -80,7 +40,7 @@ export default function ScanPage() {
 
   const [meal, setMeal] = useState<MealType>(() => parseMealParam(params.get('meal')));
   const [date, setDate] = useState(() => parseDateParam(params.get('date')));
-  const [mode, setMode] = useState<Mode>(() => (cameraSupported() ? 'camera' : 'upload'));
+  const [mode, setMode] = useState<ScanMode>(() => (cameraSupported() ? 'camera' : 'upload'));
   const [phase, setPhase] = useState<Phase>('capture');
   const [shot, setShot] = useState<Shot | null>(null);
   const [dishes, setDishes] = useState<ScanDish[]>([]);
@@ -90,39 +50,49 @@ export default function ScanPage() {
   const [busyCapture, setBusyCapture] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
-  // Live Scan state
-  const [livePaused, setLivePaused] = useState(false);
-  const [liveBusy, setLiveBusy] = useState(false);
-  const [liveHint, setLiveHint] = useState<string>('Giữ máy ổn định, đưa món vào khung');
-  const [liveResult, setLiveResult] = useState<LiveResult | null>(null);
-
   const cameraActive = phase === 'capture' && (mode === 'camera' || mode === 'live');
   const cam = useCamera(cameraActive);
+  const shots = useShots();
 
   const galleryInput = useRef<HTMLInputElement>(null);
   const captureInput = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const uploadedPath = useRef<{ blob: Blob; path: string } | null>(null);
   const saved = useRef(false);
-  const shots = useRef(new Set<string>());
+  // Synchronous guards: state updates land a render later, a fast double tap would slip through.
+  const savingRef = useRef(false);
+  const capturingRef = useRef(false);
 
   const manualHref = `/food/search?meal=${meal}&date=${date}`;
 
   /* ---------- lifecycle ---------- */
-  useEffect(() => {
-    const urls = shots.current;
-    return () => {
+  useEffect(
+    () => () => {
       abortRef.current?.abort();
-      urls.forEach((u) => URL.revokeObjectURL(u));
       // Photo uploaded for a save that never completed → don't leave it orphaned.
       if (uploadedPath.current && !saved.current) void removeImages([uploadedPath.current.path]).catch(() => {});
-    };
+    },
+    [],
+  );
+
+  /* ---------- Live Scan ---------- */
+  const onLiveFatal = useCallback((code: AiErrorCode, message: string) => {
+    setError({ code, message });
+    setShot(null);
+    setPhase('error');
   }, []);
 
-  const track = useCallback((s: Shot) => {
-    shots.current.add(s.url);
-    return s;
-  }, []);
+  const live = useLiveScan({
+    running: mode === 'live' && phase === 'capture' && cam.status === 'ready' && cam.visible,
+    videoRef: cam.videoRef,
+    makeShot: shots.make,
+    onFatal: onLiveFatal,
+  });
+
+  // Free the object URLs of photos that are no longer shown anywhere.
+  useEffect(() => {
+    shots.release([shot, live.result?.shot]);
+  }, [shot, live.result, shots]);
 
   /* ---------- analyse a still photo ---------- */
   const analyse = useCallback(
@@ -143,17 +113,16 @@ export default function ScanPage() {
         vibrate(25);
         setPhase('review');
       } catch (e) {
-        if (ctrl.signal.aborted || (e as Error)?.name === 'AbortError') {
-          setPhase('capture');
-          return;
-        }
+        if (ctrl.signal.aborted || isAbort(e)) return;
         if (e instanceof AiScanError) {
-          setError({ code: e.code });
+          setError({ code: e.code, message: e.message });
           setPhase('error');
         } else {
           toast.error(e);
           setPhase('capture');
         }
+      } finally {
+        if (abortRef.current === ctrl) abortRef.current = null;
       }
     },
     [toast],
@@ -161,38 +130,51 @@ export default function ScanPage() {
 
   const cancelAnalyse = () => {
     abortRef.current?.abort();
+    abortRef.current = null;
     setPhase('capture');
   };
+
+  // Offline failure → retry by itself as soon as the connection comes back.
+  useEffect(() => {
+    if (phase !== 'error' || error?.code !== 'network' || !shot) return;
+    const again = () => void analyse(shot);
+    window.addEventListener('online', again);
+    return () => window.removeEventListener('online', again);
+  }, [phase, error, shot, analyse]);
 
   /* ---------- capture sources ---------- */
   const shoot = async () => {
     const video = cam.videoRef.current;
-    if (!video || cam.status !== 'ready' || busyCapture) return;
+    if (!video || cam.status !== 'ready' || capturingRef.current) return;
+    capturingRef.current = true;
     setBusyCapture(true);
     vibrate(15);
     try {
       const img = await captureVideoFrame(video, { maxSide: 1280, quality: 0.82, type: 'image/webp' });
-      void analyse(track(makeShot(img.blob, img.dataUrl)));
+      void analyse(shots.make(img.blob, img.dataUrl));
     } catch (e) {
       toast.error(e);
     } finally {
+      capturingRef.current = false;
       setBusyCapture(false);
     }
   };
 
   const handleFile = async (file: File | undefined | null) => {
-    if (!file) return;
+    if (!file || capturingRef.current) return;
     if (file.type && !file.type.startsWith('image/')) {
       toast.error('Tệp đã chọn không phải là ảnh.');
       return;
     }
+    capturingRef.current = true;
     setBusyCapture(true);
     try {
       const img = await compressImage(file, { maxSide: 1280 });
-      void analyse(track(makeShot(img.blob, img.dataUrl)));
+      void analyse(shots.make(img.blob, img.dataUrl));
     } catch (e) {
       toast.error(e);
     } finally {
+      capturingRef.current = false;
       setBusyCapture(false);
     }
   };
@@ -206,148 +188,21 @@ export default function ScanPage() {
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setDragOver(false);
+    if (phase !== 'capture') return;
     void handleFile(e.dataTransfer.files?.[0]);
   };
 
-  /* ---------- Live Scan loop ---------- */
-  const liveRef = useRef({ busy: false, lastSent: 0, stableSince: 0, prev: null as Uint8Array | null, sentThumb: null as Uint8Array | null, calls: 0, needChange: false });
-  const thumbCanvas = useRef<HTMLCanvasElement | null>(null);
-
-  const liveRunning = mode === 'live' && phase === 'capture' && cam.status === 'ready' && !livePaused && cam.visible;
-
-  useEffect(() => {
-    if (!liveRunning) return;
-    const L = liveRef.current;
-    L.stableSince = 0;
-    L.prev = null;
-    let alive = true;
-    const ctrl = new AbortController();
-
-    const sample = (): Uint8Array | null => {
-      const v = cam.videoRef.current;
-      if (!v || !v.videoWidth) return null;
-      if (!thumbCanvas.current) {
-        thumbCanvas.current = document.createElement('canvas');
-        thumbCanvas.current.width = 32;
-        thumbCanvas.current.height = 24;
-      }
-      const ctx = thumbCanvas.current.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return null;
-      ctx.drawImage(v, 0, 0, 32, 24);
-      return toLuma(ctx.getImageData(0, 0, 32, 24).data);
-    };
-
-    const send = async (thumb: Uint8Array) => {
-      const v = cam.videoRef.current;
-      if (!v) return;
-      L.busy = true;
-      L.lastSent = performance.now();
-      L.calls += 1;
-      L.sentThumb = thumb;
-      setLiveBusy(true);
-      setLiveHint('Đang nhận diện…');
-      try {
-        const img = await captureVideoFrame(v, { maxSide: 960, quality: 0.75, type: 'image/jpeg' });
-        const res = await scanFood(img.dataUrl, { mode: 'live', signal: ctrl.signal });
-        if (!alive) return;
-        const list = res.dishes.map((d) => fromAiDish(d));
-        const confidence = Math.max(0, ...list.map((d) => d.confidence ?? 0));
-        setLiveResult({ shot: track(makeShot(img.blob, img.dataUrl)), dishes: list, notes: res.notes, confidence });
-        if (confidence >= LIVE_CONFIDENT) {
-          vibrate(30);
-          setLivePaused(true);
-          setLiveHint('Đã nhận diện — kiểm tra & lưu');
-        } else {
-          L.needChange = true;
-          setLiveHint('Chưa chắc chắn — xoay góc hoặc lại gần hơn');
-        }
-      } catch (e) {
-        if (!alive || (e as Error)?.name === 'AbortError') return;
-        const code = e instanceof AiScanError ? e.code : null;
-        if (code === 'not_food') {
-          L.needChange = true;
-          setLiveHint('Chưa thấy món ăn — đưa món vào khung');
-        } else if (code === 'quota_exceeded' || code === 'unauthorized') {
-          setLivePaused(true);
-          setError({ code });
-          setShot(null);
-          setPhase('error');
-        } else {
-          setLivePaused(true);
-          setLiveHint(code === 'network' ? 'Mất kết nối — đã tạm dừng' : 'AI tạm gián đoạn — đã tạm dừng');
-        }
-      } finally {
-        L.busy = false;
-        if (alive) setLiveBusy(false);
-        if (alive && L.calls >= LIVE_MAX_CALLS) {
-          setLivePaused(true);
-          setLiveHint('Đã tạm dừng để tiết kiệm lượt quét');
-        }
-      }
-    };
-
-    const id = window.setInterval(() => {
-      if (L.busy) return;
-      const t = sample();
-      if (!t) return;
-      const now = performance.now();
-      const diff = frameDiff(L.prev, t);
-      L.prev = t;
-      if (meanLuma(t) < DARK_LUMA) {
-        L.stableSince = 0;
-        setLiveHint('Hơi tối — thêm ánh sáng hoặc bật đèn');
-        return;
-      }
-      if (diff > STABLE_DIFF) {
-        L.stableSince = 0;
-        if (!L.needChange) setLiveHint('Giữ máy ổn định…');
-        // Enough movement away from the last sent frame → allow a new attempt.
-        if (L.needChange && frameDiff(L.sentThumb, t) > STABLE_DIFF * 1.5) L.needChange = false;
-        return;
-      }
-      if (!L.stableSince) L.stableSince = now;
-      const waited = now - L.lastSent;
-      const steady = now - L.stableSince >= LIVE_STABLE_MS;
-      const freshScene = !L.needChange || waited > LIVE_INTERVAL * 3;
-      if (steady && waited >= LIVE_INTERVAL && freshScene) void send(t);
-      else if (steady && !L.needChange) setLiveHint('Đã giữ ổn định — chuẩn bị quét');
-    }, LIVE_TICK);
-
-    return () => {
-      alive = false;
-      window.clearInterval(id);
-      ctrl.abort();
-      L.busy = false;
-      setLiveBusy(false);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveRunning]);
-
-  const resumeLive = () => {
-    liveRef.current.calls = 0;
-    liveRef.current.needChange = !!liveResult;
-    setLiveResult(null);
-    setLiveHint('Giữ máy ổn định, đưa món vào khung');
-    setLivePaused(false);
-  };
-
   const openLiveResult = () => {
-    if (!liveResult) return;
-    setShot(liveResult.shot);
-    setDishes(liveResult.dishes);
-    setNotes(liveResult.notes);
+    if (!live.result) return;
+    setShot(live.result.shot);
+    setDishes(live.result.dishes);
+    setNotes(live.result.notes);
     setPhase('review');
   };
 
-  const changeMode = (m: Mode) => {
+  const changeMode = (m: ScanMode) => {
     setMode(m);
-    if (m === 'live') {
-      liveRef.current.calls = 0;
-      liveRef.current.needChange = false;
-      setLivePaused(false);
-      setLiveResult(null);
-      setLiveHint('Giữ máy ổn định, đưa món vào khung');
-    }
+    if (m === 'live') live.reset();
   };
 
   /* ---------- review & save ---------- */
@@ -365,7 +220,8 @@ export default function ScanPage() {
   };
 
   const save = async () => {
-    if (saving || !dishes.length) return;
+    if (savingRef.current || !dishes.length) return;
+    savingRef.current = true;
     setSaving(true);
     let photoPath: string | null = null;
     let photoFailed = false;
@@ -373,31 +229,18 @@ export default function ScanPage() {
       if (uploadedPath.current?.blob === shot.blob) photoPath = uploadedPath.current.path;
       else {
         try {
+          const prev = uploadedPath.current;
           photoPath = await uploadMealPhoto(shot.blob);
           uploadedPath.current = { blob: shot.blob, path: photoPath };
+          // An earlier failed save uploaded a different photo → it would be orphaned.
+          if (prev) void removeImages([prev.path]).catch(() => {});
         } catch {
           photoFailed = true;
         }
       }
     }
-    const entries: NewMealEntry[] = dishes.map((d) => ({
-      eaten_on: date,
-      meal,
-      name: d.name.trim(),
-      quantity: d.quantity,
-      unit: d.unit,
-      grams: d.grams,
-      kcal: d.kcal,
-      protein_g: d.protein_g,
-      carbs_g: d.carbs_g,
-      fat_g: d.fat_g,
-      fiber_g: d.fiber_g,
-      source: d.original ? 'ai' : 'manual',
-      photo_path: photoPath,
-      ai_meta: d.original ? { ingredients: d.ingredients, confidence: d.confidence, original: d.original } : null,
-    }));
     try {
-      await addMealEntries(entries);
+      await addMealEntries(buildMealEntries(dishes, { date, meal, photoPath }));
       saved.current = true;
       notifyDataChanged('meals');
       const kcal = formatNumber(totals(dishes).kcal);
@@ -406,6 +249,7 @@ export default function ScanPage() {
       navigate(`/diary?date=${date}`, { replace: true });
     } catch (e) {
       toast.error(e);
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -417,9 +261,11 @@ export default function ScanPage() {
 
   /* ---------- derived UI ---------- */
   const usesCamera = mode === 'camera' || mode === 'live';
-  const camUnavailable = cam.status === 'denied' || cam.status === 'unsupported' || cam.status === 'error';
+  const camUnavailable = isCameraUnavailable(cam.status);
   const hasPending = phase === 'capture' && !!shot && dishes.length > 0 && mode !== 'live';
-  const liveTotal = useMemo(() => (liveResult ? totals(liveResult.dishes).kcal : 0), [liveResult]);
+  const showLiveCard = mode === 'live' && !!live.result && phase === 'capture';
+  const liveTotal = useMemo(() => (live.result ? totals(live.result.dishes).kcal : 0), [live.result]);
+  const pendingKcal = useMemo(() => totals(dishes).kcal, [dishes]);
   const subtitle = `${MEAL_LABELS[meal]} · ${date === todayISO() ? 'Hôm nay' : formatDayVi(date, 'short')}`;
 
   return (
@@ -427,7 +273,7 @@ export default function ScanPage() {
       <div
         className="relative h-full min-h-[560px] w-full overflow-hidden bg-black text-text"
         onDragOver={(e) => {
-          if (mode !== 'upload') return;
+          if (mode !== 'upload' || phase !== 'capture') return;
           e.preventDefault();
           setDragOver(true);
         }}
@@ -441,9 +287,10 @@ export default function ScanPage() {
             playsInline
             muted
             autoPlay
+            disablePictureInPicture
             aria-hidden="true"
             className={clsx(
-              'absolute inset-0 h-full w-full object-cover transition-opacity duration-500',
+              'absolute inset-0 h-full w-full object-cover transition-opacity duration-500 motion-reduce:transition-none',
               cam.status === 'ready' ? 'opacity-100' : 'opacity-0',
               cam.facing === 'user' && '-scale-x-100',
             )}
@@ -478,15 +325,18 @@ export default function ScanPage() {
         </header>
 
         {/* ---- Stage ---- */}
-        <div className="absolute inset-x-0 flex flex-col items-center justify-center px-6" style={{ top: 'calc(var(--safe-top) + 64px)', bottom: `calc(var(--safe-bottom) + ${(mode === 'live' && liveResult) || hasPending ? 280 : 196}px)` }}>
+        <div
+          className="absolute inset-x-0 flex flex-col items-center justify-center px-6"
+          style={{ top: 'calc(var(--safe-top) + 64px)', bottom: `calc(var(--safe-bottom) + ${showLiveCard || hasPending ? 280 : 196}px)` }}
+        >
           {usesCamera && cam.status === 'ready' && (
             <>
-              <Viewfinder scanning={mode === 'live' && (liveBusy || !livePaused)} tone={mode === 'live' && livePaused && liveResult ? 'ok' : 'gold'} />
+              <Viewfinder scanning={mode === 'live' && (live.busy || !live.paused)} tone={mode === 'live' && live.paused && live.result ? 'ok' : 'gold'} />
               <p className="mt-5 max-w-[280px] rounded-full bg-black/45 px-4 py-2 text-center text-[13px] font-semibold text-text/90 backdrop-blur-sm" aria-live="polite">
                 {mode === 'live' ? (
                   <span className="inline-flex items-center gap-2">
-                    {liveBusy ? <Spinner size={14} /> : <Radar className="h-4 w-4 text-gold" aria-hidden="true" />}
-                    {liveHint}
+                    {live.busy ? <Spinner size={14} /> : <Radar className="h-4 w-4 text-gold" aria-hidden="true" />}
+                    {live.hint}
                   </span>
                 ) : (
                   'Đưa cả đĩa vào khung, chụp từ trên xuống'
@@ -503,175 +353,37 @@ export default function ScanPage() {
           )}
 
           {usesCamera && camUnavailable && (
-            <div className="glass-card animate-scale-in w-full max-w-[340px] p-6 text-center" role="alert">
-              <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-[20px] bg-gold/15 text-gold">
-                <CameraOff className="h-7 w-7" aria-hidden="true" />
-              </div>
-              <h2 className="display text-[24px]">
-                {cam.status === 'denied' ? 'Chưa có quyền camera' : cam.status === 'unsupported' ? 'Không hỗ trợ camera' : 'Không mở được camera'}
-              </h2>
-              <p className="mt-2 text-[14px] leading-relaxed text-muted">
-                {cam.status === 'denied'
-                  ? 'Hãy cho phép Camera trong cài đặt trình duyệt (biểu tượng ổ khóa cạnh địa chỉ) rồi thử lại — hoặc dùng ảnh có sẵn.'
-                  : cam.status === 'unsupported'
-                    ? 'Trình duyệt này không mở camera trực tiếp được. Bạn vẫn có thể chụp bằng máy ảnh của máy hoặc tải ảnh lên.'
-                    : 'Camera có thể đang được ứng dụng khác dùng. Đóng ứng dụng đó rồi thử lại, hoặc tải ảnh lên.'}
-              </p>
-              <div className="mt-5 flex flex-col gap-2.5">
-                <Button block icon={<Upload className="h-5 w-5" />} onClick={() => changeMode('upload')}>
-                  Tải ảnh lên
-                </Button>
-                {cam.status === 'unsupported' ? (
-                  <Button variant="secondary" block icon={<Camera className="h-5 w-5" />} onClick={() => captureInput.current?.click()}>
-                    Chụp bằng máy ảnh
-                  </Button>
-                ) : (
-                  <Button variant="secondary" block onClick={cam.retry}>
-                    Thử lại
-                  </Button>
-                )}
-              </div>
-            </div>
+            <CameraFallback
+              status={cam.status}
+              onUpload={() => changeMode('upload')}
+              onNativeCapture={() => captureInput.current?.click()}
+              onRetry={cam.retry}
+            />
           )}
 
-          {mode === 'upload' && (
-            <button
-              type="button"
-              onClick={() => galleryInput.current?.click()}
-              disabled={busyCapture}
-              className={clsx(
-                'group flex aspect-[4/5] w-full max-w-[300px] flex-col items-center justify-center gap-4 rounded-[32px] border-2 border-dashed p-6 text-center transition-colors',
-                dragOver ? 'border-gold bg-gold/10' : 'border-white/20 bg-white/[0.03] hover:border-gold/60',
-              )}
-            >
-              <span className="relative">
-                <span className="absolute inset-0 rounded-[24px] bg-ember/40 blur-xl" aria-hidden="true" />
-                <span className="glass relative grid h-[72px] w-[72px] place-items-center rounded-[24px] text-gold">
-                  {busyCapture ? <Spinner size={28} /> : <ImagePlus className="h-8 w-8" aria-hidden="true" />}
-                </span>
-              </span>
-              <span className="display text-[28px]">{busyCapture ? 'Đang xử lý ảnh' : 'Chọn ảnh món ăn'}</span>
-              <span className="max-w-[220px] text-[14px] leading-relaxed text-muted">Ảnh rõ, đủ sáng, thấy trọn món cho kết quả chính xác nhất.</span>
-            </button>
-          )}
+          {mode === 'upload' && <UploadDropzone busy={busyCapture} dragOver={dragOver} onPick={() => galleryInput.current?.click()} />}
         </div>
 
         {/* ---- Bottom dock ---- */}
-        <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col gap-4 px-5" style={{ paddingBottom: 'calc(var(--safe-bottom) + 18px)' }}>
-          {/* Live result card */}
-          {mode === 'live' && liveResult && phase === 'capture' && (
-            <div className="glass-strong animate-fade-slide-up flex items-center gap-3 rounded-[24px] p-2.5 pr-3">
-              <img src={liveResult.shot.url} alt="" className="h-14 w-14 shrink-0 rounded-[16px] object-cover" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[15px] font-bold">{liveResult.dishes.map((d) => d.name).join(', ')}</p>
-                <p className="mt-1 flex items-center gap-2 text-[13px] text-muted">
-                  <span className="tabular font-bold text-gold">{formatNumber(liveTotal)} kcal</span>
-                  <ConfidenceBadge value={liveResult.confidence} />
-                </p>
-              </div>
-              <Button size="sm" onClick={openLiveResult} iconRight={<ChevronRight className="h-4 w-4" />}>
-                Xem
-              </Button>
-            </div>
-          )}
-
-          {/* Pending (closed) review */}
-          {hasPending && (
-            <button type="button" onClick={() => setPhase('review')} className="glass-strong flex min-h-[56px] items-center gap-3 rounded-[24px] p-2 pr-4 text-left">
-              <img src={shot!.url} alt="" className="h-10 w-10 shrink-0 rounded-[12px] object-cover" />
-              <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">
-                Kết quả chưa lưu · <span className="text-gold">{formatNumber(totals(dishes).kcal)} kcal</span>
-              </span>
-              <ChevronRight className="h-5 w-5 text-muted" aria-hidden="true" />
-            </button>
-          )}
-
-          <Segmented<Mode>
-            ariaLabel="Chế độ quét"
-            size="sm"
-            value={mode}
-            onChange={changeMode}
-            className="!bg-black/40 backdrop-blur-md"
-            options={[
-              { value: 'camera', label: 'Chụp ảnh', disabled: cam.status === 'unsupported' },
-              { value: 'upload', label: 'Tải ảnh' },
-              { value: 'live', label: 'Live Scan', disabled: cam.status === 'unsupported' },
-            ]}
-          />
-
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center">
-            {/* left: gallery */}
-            <div className="flex justify-start">
-              {mode !== 'upload' ? (
-                <GlassButton variant="square" label="Chọn ảnh từ thư viện" onClick={() => galleryInput.current?.click()} className="!h-14 !w-14 bg-black/30">
-                  <ImagePlus className="h-6 w-6" />
-                </GlassButton>
-              ) : (
-                <GlassButton variant="square" label="Chụp bằng máy ảnh" onClick={() => captureInput.current?.click()} className="!h-14 !w-14 bg-black/30">
-                  <Camera className="h-6 w-6" />
-                </GlassButton>
-              )}
-            </div>
-
-            {/* center: primary action */}
-            {mode === 'camera' && (
-              <button
-                type="button"
-                onClick={() => void shoot()}
-                disabled={cam.status !== 'ready' || busyCapture}
-                aria-label="Chụp ảnh"
-                className="group relative grid h-[80px] w-[80px] place-items-center rounded-full border-[3px] border-white/85 transition-transform active:scale-95 disabled:opacity-40"
-              >
-                <span className="h-[62px] w-[62px] rounded-full bg-gold shadow-[0_0_30px_rgba(237,180,11,0.55),inset_0_2px_0_rgba(255,255,255,0.5)] transition-transform group-active:scale-90" />
-                {busyCapture && <Spinner size={22} className="absolute text-[#1a0e02]" />}
-              </button>
-            )}
-            {mode === 'upload' && (
-              <button
-                type="button"
-                onClick={() => galleryInput.current?.click()}
-                disabled={busyCapture}
-                aria-label="Chọn ảnh"
-                className="grid h-[80px] w-[80px] place-items-center rounded-full bg-gold text-[#1a0e02] shadow-[0_0_30px_rgba(237,180,11,0.5),inset_0_2px_0_rgba(255,255,255,0.5)] transition-transform active:scale-95 disabled:opacity-50"
-              >
-                {busyCapture ? <Spinner size={24} /> : <Upload className="h-8 w-8" strokeWidth={2.4} />}
-              </button>
-            )}
-            {mode === 'live' && (
-              <button
-                type="button"
-                onClick={() => (livePaused ? resumeLive() : setLivePaused(true))}
-                disabled={cam.status !== 'ready'}
-                aria-label={livePaused ? 'Tiếp tục quét' : 'Tạm dừng quét'}
-                className={clsx(
-                  'relative grid h-[80px] w-[80px] place-items-center rounded-full border-[3px] transition-transform active:scale-95 disabled:opacity-40',
-                  livePaused ? 'border-white/85 bg-gold text-[#1a0e02]' : 'animate-pulse-ring border-gold bg-black/40 text-gold',
-                )}
-              >
-                {livePaused ? <Play className="h-8 w-8 translate-x-0.5" fill="currentColor" /> : <Pause className="h-8 w-8" fill="currentColor" />}
-              </button>
-            )}
-
-            {/* right: flip */}
-            <div className="flex justify-end">
-              {usesCamera && cam.status === 'ready' && cam.canFlip ? (
-                <GlassButton label="Đổi camera trước/sau" onClick={cam.flip} className="!h-14 !w-14 bg-black/30">
-                  <SwitchCamera className="h-6 w-6" />
-                </GlassButton>
-              ) : mode === 'live' ? (
-                <span className="flex h-14 items-center text-right text-[11px] font-semibold leading-tight text-muted">
-                  Mỗi lần nhận diện
-                  <br />
-                  tính 1 lượt AI
-                </span>
-              ) : (
-                <span className="flex h-14 w-14 items-center justify-center text-muted" aria-hidden="true">
-                  <ScanLine className="h-5 w-5 opacity-40" />
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
+        <ScanDock
+          mode={mode}
+          onModeChange={changeMode}
+          cameraUnsupported={cam.status === 'unsupported'}
+          cameraReady={cam.status === 'ready'}
+          canFlip={cam.canFlip}
+          onFlip={cam.flip}
+          busyCapture={busyCapture}
+          onShoot={() => void shoot()}
+          onPickGallery={() => galleryInput.current?.click()}
+          onNativeCapture={() => captureInput.current?.click()}
+          livePaused={live.paused}
+          liveResult={showLiveCard ? live.result : null}
+          liveTotal={liveTotal}
+          onLiveToggle={() => (live.paused ? live.resume() : live.pause())}
+          onOpenLiveResult={openLiveResult}
+          pending={hasPending && shot ? { photoUrl: shot.url, kcal: pendingKcal } : null}
+          onOpenPending={() => setPhase('review')}
+        />
 
         <input ref={galleryInput} type="file" accept="image/*" className="sr-only" tabIndex={-1} aria-hidden="true" onChange={onPick} />
         <input ref={captureInput} type="file" accept="image/*" capture="environment" className="sr-only" tabIndex={-1} aria-hidden="true" onChange={onPick} />
@@ -687,6 +399,7 @@ export default function ScanPage() {
             onRetake={retake}
             onRetry={() => shot && void analyse(shot)}
             onManual={manualFromPhoto}
+            canRetry={!!shot}
           />
         )}
       </div>

@@ -1,4 +1,5 @@
 import { Camera, CloudOff, LogIn, PencilLine, RefreshCw, Search, TriangleAlert, Utensils, WifiOff, type LucideIcon } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { AI_ERROR_MESSAGES } from '@/services/ai';
@@ -21,14 +22,36 @@ interface Props {
   onRetake: () => void;
   onRetry: () => void;
   onManual: () => void;
+  /** False when there is no photo to resend (e.g. a Live Scan session ended). */
+  canRetry?: boolean;
+}
+
+function useOnline() {
+  const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine !== false);
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => {
+      window.removeEventListener('online', up);
+      window.removeEventListener('offline', down);
+    };
+  }, []);
+  return online;
 }
 
 /** Friendly full-screen error after a scan, with the next best action first. */
-export function ScanErrorPanel({ code, message, photoUrl, manualHref, onRetake, onRetry, onManual }: Props) {
-  const { icon: Icon, title } = META[code] ?? META.ai_unavailable;
-  const canRetrySame = code === 'ai_unavailable' || code === 'network';
+export function ScanErrorPanel({ code, message, photoUrl, manualHref, onRetake, onRetry, onManual, canRetry = true }: Props) {
+  const online = useOnline();
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Move focus into the dialog so screen readers announce it and keyboard users land on it.
+  useEffect(() => rootRef.current?.focus(), []);
+  const offline = code === 'network' && !online;
+  const { icon: Icon, title } = offline ? { icon: WifiOff, title: 'Bạn đang ngoại tuyến' } : (META[code] ?? META.ai_unavailable);
+  const canRetrySame = canRetry && (code === 'ai_unavailable' || code === 'network');
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-black" role="alertdialog" aria-labelledby="scan-err-title" aria-describedby="scan-err-msg">
+    <div ref={rootRef} tabIndex={-1} className="absolute inset-0 z-20 flex flex-col bg-black outline-none" role="alertdialog" aria-modal="true" aria-labelledby="scan-err-title" aria-describedby="scan-err-msg">
       {photoUrl && <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-35 blur-[2px]" />}
       <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/50 to-black/90" aria-hidden="true" />
       <div className="relative mt-auto px-5" style={{ paddingBottom: 'calc(var(--safe-bottom) + 24px)' }}>
@@ -43,7 +66,7 @@ export function ScanErrorPanel({ code, message, photoUrl, manualHref, onRetake, 
             {title}
           </h2>
           <p id="scan-err-msg" className="mt-2 text-[15px] leading-relaxed text-muted">
-            {message || AI_ERROR_MESSAGES[code]}
+            {offline ? 'Thiết bị đang mất mạng. Ảnh vẫn được giữ — Fitora sẽ tự gửi lại khi có kết nối.' : message || AI_ERROR_MESSAGES[code]}
           </p>
 
           <div className="mt-5 flex flex-col gap-2.5">
@@ -56,8 +79,8 @@ export function ScanErrorPanel({ code, message, photoUrl, manualHref, onRetake, 
                 <Search className="h-5 w-5" aria-hidden="true" /> Tìm thủ công
               </Link>
             ) : canRetrySame ? (
-              <Button size="lg" block onClick={onRetry} icon={<RefreshCw className="h-5 w-5" />}>
-                Thử lại
+              <Button size="lg" block onClick={onRetry} disabled={offline} icon={<RefreshCw className="h-5 w-5" />}>
+                {offline ? 'Đang chờ mạng…' : 'Thử lại'}
               </Button>
             ) : (
               <Button size="lg" block onClick={onRetake} icon={<Camera className="h-5 w-5" />}>

@@ -1,5 +1,5 @@
 import { CalendarDays, Check, Plus, Search, Utensils } from 'lucide-react';
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { Link } from 'react-router-dom';
 import { BottomSheet } from '@/components/ui/BottomSheet';
 import { Button } from '@/components/ui/Button';
@@ -7,12 +7,13 @@ import { CountUp } from '@/components/ui/CountUp';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { MacroBar } from '@/components/ui/MacroBar';
 import { Segmented } from '@/components/ui/Segmented';
-import { formatDayVi, isISODate } from '@/lib/date';
+import { useToast } from '@/components/ui/Toast';
+import { formatDayVi, isISODate, todayISO } from '@/lib/date';
 import { formatNumber } from '@/lib/format';
 import { MEAL_LABELS, MEAL_TYPES, type MealType } from '@/types/db';
 import { AddDishForm } from './AddDishForm';
 import { DishCard } from './DishCard';
-import { isDishValid, totals, type ScanDish } from './scale';
+import { insertAt, isDishValid, totals, type ScanDish } from './scale';
 
 const MEAL_SHORT: Record<MealType, string> = { breakfast: 'Sáng', lunch: 'Trưa', dinner: 'Tối', snack: 'Ăn vặt' };
 
@@ -21,7 +22,8 @@ interface ReviewSheetProps {
   onClose: () => void;
   photoUrl: string | null;
   dishes: ScanDish[];
-  onDishesChange: (d: ScanDish[]) => void;
+  /** Accepts a list or an updater (React state setter) so edits never act on a stale list. */
+  onDishesChange: Dispatch<SetStateAction<ScanDish[]>>;
   notes?: string;
   meal: MealType;
   onMealChange: (m: MealType) => void;
@@ -48,13 +50,31 @@ export function ReviewSheet({
   manualHref,
 }: ReviewSheetProps) {
   const [adding, setAdding] = useState(false);
+  const toast = useToast();
   const dateId = useId();
   const sum = useMemo(() => totals(dishes), [dishes]);
   const invalid = dishes.some((d) => !isDishValid(d));
   const canSave = dishes.length > 0 && !invalid && !saving;
+  const aiCount = dishes.filter((d) => d.original).length;
+  const today = todayISO();
+  const description = !dishes.length
+    ? undefined
+    : aiCount === dishes.length
+      ? `AI nhận ra ${aiCount} món — kiểm tra lại khẩu phần trước khi lưu.`
+      : aiCount > 0
+        ? `${aiCount} món do AI nhận ra, ${dishes.length - aiCount} món bạn tự thêm — kiểm tra lại trước khi lưu.`
+        : `${dishes.length} món tự nhập — kiểm tra lại trước khi lưu.`;
 
-  const update = (i: number, d: ScanDish) => onDishesChange(dishes.map((x, k) => (k === i ? d : x)));
-  const remove = (i: number) => onDishesChange(dishes.filter((_, k) => k !== i));
+  const update = (d: ScanDish) => onDishesChange((list) => list.map((x) => (x.key === d.key ? d : x)));
+  const remove = (d: ScanDish) => {
+    const index = dishes.findIndex((x) => x.key === d.key);
+    onDishesChange((list) => list.filter((x) => x.key !== d.key));
+    toast.show(`Đã xóa ${d.name.trim() || 'món'}`, {
+      kind: 'info',
+      duration: 5000,
+      action: { label: 'Hoàn tác', onClick: () => onDishesChange((list) => (list.some((x) => x.key === d.key) ? list : insertAt(list, index, d))) },
+    });
+  };
 
   return (
     <BottomSheet
@@ -63,7 +83,7 @@ export function ReviewSheet({
       height="full"
       dismissible={!saving}
       title="Kết quả quét"
-      description={dishes.length ? `AI nhận ra ${dishes.length} món — kiểm tra lại khẩu phần trước khi lưu.` : undefined}
+      description={description}
       footer={
         <Button size="lg" block onClick={onSave} disabled={!canSave} loading={saving} icon={<Check className="h-5 w-5" />}>
           {saving ? 'Đang lưu…' : `Lưu vào nhật ký · ${formatNumber(sum.kcal)} kcal`}
@@ -111,7 +131,8 @@ export function ReviewSheet({
                 id={dateId}
                 type="date"
                 value={date}
-                onChange={(e) => isISODate(e.target.value) && onDateChange(e.target.value)}
+                max={today}
+                onChange={(e) => isISODate(e.target.value) && e.target.value <= today && onDateChange(e.target.value)}
                 className="scan-date !py-2.5 text-[15px] font-semibold"
               />
             </div>
@@ -126,7 +147,7 @@ export function ReviewSheet({
         {/* Dishes */}
         <section className="flex flex-col gap-3" aria-label="Danh sách món">
           {dishes.map((d, i) => (
-            <DishCard key={d.key} dish={d} index={i} onChange={(nd) => update(i, nd)} onRemove={() => remove(i)} />
+            <DishCard key={d.key} dish={d} index={i} onChange={update} onRemove={() => remove(d)} />
           ))}
 
           {!dishes.length && !adding && (
@@ -147,7 +168,7 @@ export function ReviewSheet({
             <AddDishForm
               onCancel={() => setAdding(false)}
               onAdd={(d) => {
-                onDishesChange([...dishes, d]);
+                onDishesChange((list) => [...list, d]);
                 setAdding(false);
               }}
             />
@@ -162,7 +183,7 @@ export function ReviewSheet({
           )}
         </section>
 
-        {invalid && <p className="text-center text-[13px] font-medium text-[var(--danger-text)]">Mỗi món cần có tên và số lượng lớn hơn 0.</p>}
+        {invalid && <p role="alert" className="text-center text-[13px] font-medium text-[var(--danger-text)]">Mỗi món cần có tên, số lượng và khối lượng lớn hơn 0.</p>}
       </div>
     </BottomSheet>
   );

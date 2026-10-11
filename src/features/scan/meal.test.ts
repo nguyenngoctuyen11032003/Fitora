@@ -33,3 +33,13 @@ describe('frame stability', () => {
     expect(meanLuma(black)).toBe(0);
   });
 });
+
+describe('parseDateParam', () => {
+  it('clamps future days to today', () => {
+    expect(parseDateParam('2026-12-31', '2026-10-11')).toBe('2026-10-11');
+    expect(parseDateParam('2026-10-11', '2026-10-11')).toBe('2026-10-11');
+    expect(parseDateParam('2025-01-02', '2026-10-11')).toBe('2025-01-02');
+    expect(parseDateParam(null, '2026-10-11')).toBe('2026-10-11');
+    expect(parseDateParam('2026-02-30', '2026-10-11')).toBe('2026-10-11');
+  });
+});
