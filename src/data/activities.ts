@@ -33,6 +33,8 @@ export interface ActivityVariant {
   /** Short Vietnamese label ("Vừa", "8 km/h"). */
   label: string;
   met: number;
+  /** Typical speed (km/h) of speed-based variants (running, walking, road cycling) — converts distance ↔ duration. */
+  kmh?: number;
 }
 
 export interface ActivityDef {
@@ -48,7 +50,8 @@ export interface ActivityDef {
   aliases?: string[];
 }
 
-type Raw = [key: string, name: string, icon: ActivityIconKey, variants: [string, string, number][], def?: number, aliases?: string[]];
+type RawVariant = [id: string, label: string, met: number, kmh?: number];
+type Raw = [key: string, name: string, icon: ActivityIconKey, variants: RawVariant[], def?: number, aliases?: string[]];
 
 const RAW: Record<WorkoutCategory, Raw[]> = {
   gym: [
@@ -97,20 +100,20 @@ const RAW: Record<WorkoutCategory, Raw[]> = {
   running: [
     // 12020 jogging general 7.0
     ['jogging', 'Chạy bộ nhẹ (jogging)', 'run', [['general', 'Chung', 7.0]], 0, ['jog', 'chay cham']],
-    // 12030 6.4 km/h 6.0 · 12040 8 km/h 8.3 · 12060 9.7 km/h 9.8 · 12080 11.3 km/h 11.0
-    // 12090 12.9 km/h 11.8 · 12100 14.5 km/h 12.8 · 12110 16 km/h 14.5
+    // 12029 4 mph (6.4 km/h) 6.0 · 12030 5 mph (8 km/h) 8.3 · 12050 6 mph (9.7 km/h) 9.8 · 12070 7 mph (11.3 km/h) 11.0
+    // 12090 8 mph (12.9 km/h) 11.8 · 12110 9 mph (14.5 km/h) 12.8 · 12120 10 mph (16 km/h) 14.5
     [
       'running',
       'Chạy bộ',
       'run',
       [
-        ['6kmh', '6,4 km/h', 6.0],
-        ['8kmh', '8 km/h', 8.3],
-        ['10kmh', '9,7 km/h', 9.8],
-        ['11kmh', '11,3 km/h', 11.0],
-        ['13kmh', '12,9 km/h', 11.8],
-        ['14kmh', '14,5 km/h', 12.8],
-        ['16kmh', '16 km/h', 14.5],
+        ['6kmh', '6,4 km/h', 6.0, 6.4],
+        ['8kmh', '8 km/h', 8.3, 8],
+        ['10kmh', '9,7 km/h', 9.8, 9.7],
+        ['11kmh', '11,3 km/h', 11.0, 11.3],
+        ['13kmh', '12,9 km/h', 11.8, 12.9],
+        ['14kmh', '14,5 km/h', 12.8, 14.5],
+        ['16kmh', '16 km/h', 14.5, 16],
       ],
       1,
       ['run', 'chay', 'treadmill', 'may chay'],
@@ -139,17 +142,18 @@ const RAW: Record<WorkoutCategory, Raw[]> = {
     ['treading_water', 'Đạp nước', 'waves', [['moderate', 'Vừa', 3.5]], 0, ['treading']],
   ],
   cycling: [
+    // 01010 < 10 mph leisure 4.0 · 01020 10–11.9 mph 6.8 · 01030 12–13.9 mph 8.0 · 01040 14–15.9 mph 10.0 · 01050 16–19 mph 12.0
     // bicycling: leisure <16 km/h 4.0 · 16-19 km/h 6.8 · 19-22 km/h 8.0 · 22-25 km/h 10.0 · 25-30 km/h 12.0
     [
       'cycling_road',
       'Đạp xe',
       'bike',
       [
-        ['leisure', '< 16 km/h', 4.0],
-        ['16_19', '16–19 km/h', 6.8],
-        ['19_22', '19–22 km/h', 8.0],
-        ['22_25', '22–25 km/h', 10.0],
-        ['25_30', '25–30 km/h', 12.0],
+        ['leisure', '< 16 km/h', 4.0, 13],
+        ['16_19', '16–19 km/h', 6.8, 17.5],
+        ['19_22', '19–22 km/h', 8.0, 20.5],
+        ['22_25', '22–25 km/h', 10.0, 23.5],
+        ['25_30', '25–30 km/h', 12.0, 27.5],
       ],
       1,
       ['bike', 'xe dap', 'cycling'],
@@ -194,18 +198,19 @@ const RAW: Record<WorkoutCategory, Raw[]> = {
     ['handball', 'Bóng ném', 'trophy', [['general', 'Chung', 8.0]], 0, ['handball', 'bong nem']],
   ],
   walking: [
-    // 17150 <3.2 km/h 2.0 · 17170 4 km/h 3.0 · 17190 4.8 km/h 3.5 · 17200 5.6 km/h 4.3 · 17220 6.4 km/h 5.0 · 17230 7.2 km/h 7.0
+    // 17150 < 2 mph 2.0 · 17152 2.5 mph (4 km/h) 3.0 · 17170 3 mph (4.8 km/h) 3.5 · 17190 3.5 mph (5.6 km/h) 4.3
+    // 17200 4 mph (6.4 km/h) 5.0 · 17220 4.5 mph (7.2 km/h) 7.0
     [
       'walking',
       'Đi bộ',
       'footprints',
       [
-        ['slow', 'Chậm < 3 km/h', 2.0],
-        ['4kmh', '4 km/h', 3.0],
-        ['5kmh', '4,8 km/h', 3.5],
-        ['6kmh', '5,6 km/h', 4.3],
-        ['brisk', 'Nhanh 6,4 km/h', 5.0],
-        ['very_brisk', 'Rất nhanh 7,2 km/h', 7.0],
+        ['slow', 'Chậm < 3 km/h', 2.0, 2.5],
+        ['4kmh', '4 km/h', 3.0, 4],
+        ['5kmh', '4,8 km/h', 3.5, 4.8],
+        ['6kmh', '5,6 km/h', 4.3, 5.6],
+        ['brisk', 'Nhanh 6,4 km/h', 5.0, 6.4],
+        ['very_brisk', 'Rất nhanh 7,2 km/h', 7.0, 7.2],
       ],
       2,
       ['walk', 'di bo', 'tan bo'],
@@ -246,7 +251,7 @@ function build(): ActivityDef[] {
         name,
         category,
         icon,
-        variants: vs.map(([id, label, met]) => ({ id, label, met })),
+        variants: vs.map(([id, label, met, kmh]) => (kmh ? { id, label, met, kmh } : { id, label, met })),
         defaultVariant: Math.min(def, vs.length - 1),
         aliases,
       });
@@ -260,8 +265,44 @@ export const ACTIVITIES: ActivityDef[] = build();
 
 export const ACTIVITY_BY_KEY: Record<string, ActivityDef> = Object.fromEntries(ACTIVITIES.map((a) => [a.key, a]));
 
+const foldKey = (s: string) =>
+  s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .toLowerCase()
+    .replace(/[\s_-]+/g, ' ')
+    .trim();
+
+/** Alias / name (folded) → first activity that declares it. Lets older or hand-typed keys ("yoga", "chay bo") resolve. */
+const ALIAS_INDEX: Map<string, ActivityDef> = (() => {
+  const m = new Map<string, ActivityDef>();
+  for (const a of ACTIVITIES) {
+    for (const k of [a.key, a.name, ...(a.aliases ?? [])]) {
+      const f = foldKey(k);
+      if (f && !m.has(f)) m.set(f, a);
+    }
+  }
+  return m;
+})();
+
+/**
+ * Catalogue entry for a stored `activity`. Exact key first; then legacy keys
+ * that carry a variant suffix ("running_8kmh" → running); then an exact
+ * alias/name match ("yoga" → Yoga Hatha). Free-text activities → undefined.
+ */
 export function findActivity(key: string | null | undefined): ActivityDef | undefined {
-  return key ? ACTIVITY_BY_KEY[key] : undefined;
+  if (!key) return undefined;
+  const exact = ACTIVITY_BY_KEY[key];
+  if (exact) return exact;
+  if (/^[a-z0-9_]+$/.test(key)) {
+    const parts = key.split('_');
+    for (let n = parts.length - 1; n >= 1; n--) {
+      const hit = ACTIVITY_BY_KEY[parts.slice(0, n).join('_')];
+      if (hit) return hit;
+    }
+  }
+  return ALIAS_INDEX.get(foldKey(key));
 }
 
 export function activitiesByCategory(category: WorkoutCategory): ActivityDef[] {

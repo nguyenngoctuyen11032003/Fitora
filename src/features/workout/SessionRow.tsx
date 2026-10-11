@@ -19,7 +19,7 @@ export function SessionRow({ workout: w, pending, onToggle, onOpen, index = 0 }:
   const time = formatTime(w.start_time);
   return (
     <li
-      className={clsx('glass-card flex items-stretch gap-1 p-1.5 pr-2 animate-fade-slide-up', pending && 'opacity-60')}
+      className={clsx('glass-card flex items-stretch gap-1 p-1.5 pr-2 animate-fade-slide-up motion-reduce:animate-none', pending && 'opacity-60')}
       style={{ animationDelay: `${Math.min(index, 6) * 60}ms` }}
     >
       <button
@@ -28,7 +28,7 @@ export function SessionRow({ workout: w, pending, onToggle, onOpen, index = 0 }:
         disabled={pending}
         aria-pressed={done}
         aria-label={done ? `Đánh dấu "${w.title}" là chưa tập` : `Đánh dấu "${w.title}" là đã tập`}
-        className="grid h-auto min-h-[56px] w-12 shrink-0 place-items-center rounded-[18px] transition-transform active:scale-90"
+        className="grid h-auto min-h-[56px] w-12 shrink-0 place-items-center rounded-[18px] transition-transform active:scale-90 disabled:cursor-wait motion-reduce:transition-none"
       >
         <span
           className={clsx(
@@ -44,12 +44,12 @@ export function SessionRow({ workout: w, pending, onToggle, onOpen, index = 0 }:
         type="button"
         onClick={onOpen}
         className="flex min-h-[56px] min-w-0 flex-1 items-center gap-3 rounded-[18px] py-2 pl-1 pr-1 text-left transition-colors hover:bg-white/[0.04]"
-        aria-label={`Sửa ${w.title}`}
+        aria-label={`Sửa ${w.title}, ${w.duration_min} phút, ${formatNumber(w.kcal)} kcal${done ? '' : ', lên lịch'}`}
       >
         <ActivityIcon activity={w.activity} category={w.category} size={40} muted={!done} />
         <span className="min-w-0 flex-1">
           <span className={clsx('block truncate text-[15px] font-bold tracking-[-0.01em]', done ? 'text-text' : 'text-text/80')}>{w.title}</span>
-          <span className="mt-0.5 flex items-center gap-1.5 text-[12.5px] text-muted">
+          <span className="mt-0.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[12.5px] text-muted">
             {time && (
               <>
                 <Clock className="h-3.5 w-3.5" aria-hidden="true" />

@@ -1,6 +1,6 @@
 import clsx from 'clsx';
-import { BookmarkPlus, CalendarClock, Check, History, PenLine, Plus, Search, Trash2, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { BookmarkPlus, CalendarClock, Check, Route, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { BottomSheet } from '@/components/ui/BottomSheet';
 import { Button } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
@@ -11,28 +11,27 @@ import { NumberField } from '@/components/ui/NumberField';
 import { Segmented } from '@/components/ui/Segmented';
 import { findActivity, type ActivityDef } from '@/data/activities';
 import { formatDayVi, isISODate } from '@/lib/date';
-import { metKcal } from '@/lib/energy';
 import { formatNumber } from '@/lib/format';
 import { WORKOUT_CATEGORIES, WORKOUT_CATEGORY_LABELS, type Workout, type WorkoutCategory, type WorkoutStatus } from '@/types/db';
 import { ActivityIcon, CATEGORY_COLOR } from './ActivityIcon';
-import { buildTitle, categoryDefaultMet, defaultStatus, defaultVariant, normalizeTime, searchActivities, variantForMet } from './lib';
+import { ActivityPicker } from './ActivityPicker';
+import { checkDraft, draftFrom, type SheetMode, type WorkoutDraft } from './draft';
+import {
+  activityLabel,
+  buildTitle,
+  categoryDefaultMet,
+  defaultStatus,
+  defaultVariant,
+  distanceForDuration,
+  durationForDistance,
+  normalizeTime,
+  nowHHMM,
+  sessionKcal,
+  variantForMet,
+  variantForSpeed,
+} from './lib';
 
-export interface WorkoutDraft {
-  activity: string;
-  category: WorkoutCategory;
-  title: string;
-  met: number | null;
-  duration_min: number | null;
-  workout_on: string;
-  start_time: string;
-  status: WorkoutStatus;
-  notes: string;
-  template_id: string | null;
-}
-
-export type SheetMode =
-  | { kind: 'new'; date: string; preset?: Partial<WorkoutDraft> }
-  | { kind: 'edit'; workout: Workout };
+export type { SheetMode, WorkoutDraft } from './draft';
 
 interface Props {
   open: boolean;
@@ -50,37 +49,6 @@ interface Props {
 
 const DURATIONS = [15, 30, 45, 60, 90];
 
-function draftFrom(mode: SheetMode, today: string): WorkoutDraft {
-  if (mode.kind === 'edit') {
-    const w = mode.workout;
-    return {
-      activity: w.activity,
-      category: w.category,
-      title: w.title,
-      met: Number(w.met),
-      duration_min: w.duration_min,
-      workout_on: w.workout_on,
-      start_time: normalizeTime(w.start_time),
-      status: w.status,
-      notes: w.notes ?? '',
-      template_id: w.template_id,
-    };
-  }
-  return {
-    activity: '',
-    category: 'gym',
-    title: '',
-    met: null,
-    duration_min: 30,
-    workout_on: mode.date,
-    start_time: '',
-    status: defaultStatus(mode.date, today),
-    notes: '',
-    template_id: null,
-    ...mode.preset,
-  };
-}
-
 export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, onClose, onSave, onDelete, onSaveTemplate }: Props) {
   const [draft, setDraft] = useState<WorkoutDraft>(() => draftFrom(mode, today));
   const [titleTouched, setTitleTouched] = useState(false);
@@ -92,6 +60,18 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
   const [confirmDel, setConfirmDel] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
+  /** The user picked a status explicitly — stop inferring it from date/time. */
+  const [statusTouched, setStatusTouched] = useState(false);
+  /** Optional distance helper (not stored): with a speed-based activity it sets the intensity or the duration. */
+  const [distanceKm, setDistanceKm] = useState<number | null>(null);
+  /** Synchronous guard against double taps (state updates land a frame later). */
+  const inFlight = useRef(false);
+  const formRef = useRef<HTMLDivElement>(null);
+  /** Show validation errors and bring the first one into view (the form scrolls inside the sheet). */
+  const revealErrors = () => {
+    setShowErrors(true);
+    requestAnimationFrame(() => formRef.current?.querySelector('[role="alert"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+  };
 
   // Reset whenever the sheet (re)opens.
   useEffect(() => {
@@ -103,7 +83,9 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
     setQuery('');
     setCat('all');
     setShowErrors(false);
+    setStatusTouched(false);
     setConfirmDel(false);
+    setDistanceKm(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -117,6 +99,7 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
     const v = defaultVariant(a);
     setDraft((d) => ({ ...d, activity: a.key, category: a.category, met: v.met, title: titleTouched && d.title ? d.title : buildTitle(a, v), template_id: null }));
     setTitleTouched(false);
+    setDistanceKm(null);
     setPicking(false);
   };
 
@@ -124,6 +107,7 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
     const c: WorkoutCategory = cat === 'all' ? 'other' : cat;
     setDraft((d) => ({ ...d, activity: name.trim().slice(0, 60), category: c, met: categoryDefaultMet(c), title: name.trim().slice(0, 80), template_id: null }));
     setTitleTouched(true);
+    setDistanceKm(null);
     setPicking(false);
   };
 
@@ -140,63 +124,83 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
       template_id: w.template_id,
     }));
     setTitleTouched(true);
+    setDistanceKm(null);
     setPicking(false);
   };
 
   const chooseVariant = (met: number) => {
     const v = act?.variants.find((x) => x.met === met);
-    setDraft((d) => ({ ...d, met, title: !titleTouched && act ? buildTitle(act, v) : d.title }));
+    // With a distance entered, a different pace means a different duration.
+    const dur = distanceKm ? durationForDistance(distanceKm, v?.kmh) : null;
+    setDraft((d) => ({ ...d, met, title: !titleTouched && act ? buildTitle(act, v) : d.title, ...(dur ? { duration_min: Math.min(1440, dur) } : {}) }));
   };
 
-  const results = useMemo(() => searchActivities(query, cat), [query, cat]);
-  const grouped = useMemo(() => {
-    if (query.trim() || cat !== 'all') return null;
-    return WORKOUT_CATEGORIES.map((c) => ({ c, items: results.filter((a) => a.category === c) })).filter((g) => g.items.length);
-  }, [results, query, cat]);
+  /** Distance + duration → speed → closest intensity (keeps a hand-typed title). */
+  const intensityFor = (km: number | null, minutes: number | null): Partial<WorkoutDraft> => {
+    if (!act || !km || !minutes) return {};
+    const v = variantForSpeed(act, km / (minutes / 60));
+    return v ? { met: v.met, title: !titleTouched ? buildTitle(act, v) : draft.title } : {};
+  };
+
+  const changeDistance = (km: number | null) => {
+    setDistanceKm(km);
+    if (!km) return;
+    if (draft.duration_min) set(intensityFor(km, draft.duration_min));
+    else {
+      const dur = durationForDistance(km, curVariant?.kmh);
+      if (dur) set({ duration_min: Math.min(1440, dur) });
+    }
+  };
+
+  const changeDuration = (duration_min: number | null) => set({ duration_min, ...intensityFor(distanceKm, duration_min) });
 
   // Validation
-  const metOk = draft.met !== null && draft.met >= 1 && draft.met <= 25;
-  const durOk = draft.duration_min !== null && draft.duration_min >= 1 && draft.duration_min <= 1440;
-  const titleOk = draft.title.trim().length > 0;
-  const dateOk = isISODate(draft.workout_on);
-  const valid = metOk && durOk && titleOk && dateOk && !!draft.activity;
+  const check = checkDraft(draft, today);
+  const { met: metOk, duration: durOk, title: titleOk, date: dateOk, status: statusOk, valid } = check;
+  const speedBased = !!act?.variants.some((v) => v.kmh);
+  const estDistance = speedBased && !distanceKm ? distanceForDuration(draft.duration_min, curVariant?.kmh) : null;
 
-  const computed = metOk && durOk ? metKcal(draft.met!, weightKg, draft.duration_min!) : 0;
-  const kcal =
-    editing && Number(editing.met) === draft.met && editing.duration_min === draft.duration_min ? Math.round(Number(editing.kcal)) : computed;
+  const kcal = metOk && durOk ? sessionKcal(draft, weightKg, editing) : 0;
 
   const submit = async () => {
+    if (inFlight.current) return;
     if (!valid) {
-      setShowErrors(true);
+      revealErrors();
       return;
     }
+    inFlight.current = true;
     setSaving(true);
     try {
       await onSave({ ...draft, title: draft.title.trim(), kcal }, editing);
     } catch {
       /* toast shown by caller; keep the sheet open */
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   };
 
   const saveTemplate = async () => {
-    if (!valid) {
-      setShowErrors(true);
+    // A template has no date/status — only the activity fields must be valid.
+    if (inFlight.current) return;
+    if (!check.templateValid) {
+      revealErrors();
       return;
     }
+    inFlight.current = true;
     setSavingTpl(true);
     try {
       await onSaveTemplate({ ...draft, title: draft.title.trim() });
     } catch {
       /* toast shown by caller */
     } finally {
+      inFlight.current = false;
       setSavingTpl(false);
     }
   };
 
   const doDelete = async () => {
-    if (!editing) return;
+    if (!editing || deleting) return;
     setDeleting(true);
     try {
       await onDelete(editing);
@@ -227,7 +231,7 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
         <button
           type="button"
           onClick={saveTemplate}
-          disabled={savingTpl}
+          disabled={savingTpl || saving}
           className="glass pill mb-1 inline-flex shrink-0 items-center gap-1.5 text-[13px] font-semibold text-text disabled:opacity-50"
         >
           <BookmarkPlus className="h-4 w-4 text-gold" aria-hidden="true" />
@@ -244,97 +248,24 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
     <>
       <BottomSheet open={open} onClose={onClose} title={title} description={description} height="full" footer={footer}>
         {picking ? (
-          <div className="flex flex-col gap-4">
-            <Input
-              type="text"
-              placeholder="Tìm: chạy bộ, cầu lông, yoga…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              icon={<Search />}
-              aria-label="Tìm hoạt động"
-              enterKeyHint="search"
-              trailing={
-                query ? (
-                  <button type="button" onClick={() => setQuery('')} aria-label="Xóa tìm kiếm" className="-mr-2 grid h-11 w-11 place-items-center text-muted">
-                    <X className="h-4 w-4" />
-                  </button>
-                ) : undefined
-              }
-            />
-
-            <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5" role="group" aria-label="Nhóm hoạt động">
-              <Chip selected={cat === 'all'} onClick={() => setCat('all')}>
-                Tất cả
-              </Chip>
-              {WORKOUT_CATEGORIES.map((c) => (
-                <Chip key={c} selected={cat === c} onClick={() => setCat(c)} dot={CATEGORY_COLOR[c]}>
-                  {WORKOUT_CATEGORY_LABELS[c]}
-                </Chip>
-              ))}
-            </div>
-
-            {!query.trim() && cat === 'all' && recent.length > 0 && (
-              <section aria-label="Gần đây">
-                <p className="eyebrow mb-2 flex items-center gap-1.5">
-                  <History className="h-3.5 w-3.5" aria-hidden="true" /> Ghi lại nhanh
-                </p>
-                <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5">
-                  {recent.map((w) => (
-                    <button
-                      key={w.id}
-                      type="button"
-                      onClick={() => pickRecent(w)}
-                      className="glass-card flex min-h-[56px] w-[188px] shrink-0 items-center gap-2.5 p-2.5 pr-3 text-left transition-transform active:scale-[0.97]"
-                    >
-                      <ActivityIcon activity={w.activity} category={w.category} size={36} />
-                      <span className="min-w-0">
-                        <span className="block truncate text-[13.5px] font-bold text-text">{w.title}</span>
-                        <span className="block text-[12px] text-muted">
-                          {w.duration_min} phút · MET {formatNumber(w.met, 1)}
-                        </span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {query.trim() && (
-              <button
-                type="button"
-                onClick={() => pickCustom(query)}
-                className="flex min-h-[52px] items-center gap-3 rounded-2xl border border-dashed border-gold/40 px-3 text-left text-sm text-text hover:bg-white/[0.04]"
-              >
-                <span className="grid h-9 w-9 place-items-center rounded-xl bg-gold/15 text-gold">
-                  <PenLine className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  Dùng “<b className="font-bold">{query.trim()}</b>”
-                  <span className="block text-[12px] text-muted">Hoạt động tự nhập · chỉnh MET sau</span>
-                </span>
-              </button>
-            )}
-
-            {grouped ? (
-              grouped.map((g) => (
-                <section key={g.c} aria-label={WORKOUT_CATEGORY_LABELS[g.c]}>
-                  <p className="eyebrow mb-1.5 mt-1">{WORKOUT_CATEGORY_LABELS[g.c]}</p>
-                  <ActivityList items={g.items} onPick={pick} selected={draft.activity} />
-                </section>
-              ))
-            ) : results.length ? (
-              <ActivityList items={results} onPick={pick} selected={draft.activity} />
-            ) : (
-              <p className="py-6 text-center text-sm text-muted">Không thấy hoạt động phù hợp — dùng tên bạn vừa nhập ở trên.</p>
-            )}
-          </div>
+          <ActivityPicker
+            query={query}
+            onQuery={setQuery}
+            category={cat}
+            onCategory={setCat}
+            selected={draft.activity}
+            recent={recent}
+            onPick={pick}
+            onPickCustom={pickCustom}
+            onPickRecent={pickRecent}
+          />
         ) : (
-          <div className="flex flex-col gap-5 pb-2">
+          <div ref={formRef} className="flex flex-col gap-5 pb-2">
             {/* Selected activity */}
             <div className="glass-card flex items-center gap-3 p-3">
               <ActivityIcon activity={draft.activity} category={draft.category} size={48} />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[16px] font-bold tracking-[-0.02em] text-text">{act?.name ?? draft.activity}</p>
+                <p className="truncate text-[16px] font-bold tracking-[-0.02em] text-text">{activityLabel(draft.activity, draft.title)}</p>
                 <p className="text-[12.5px] text-muted">{WORKOUT_CATEGORY_LABELS[draft.category]}</p>
               </div>
               <Button size="sm" variant="secondary" onClick={() => setPicking(true)}>
@@ -392,7 +323,7 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
               <NumberField
                 label="Thời lượng"
                 value={draft.duration_min}
-                onChange={(duration_min) => set({ duration_min })}
+                onChange={changeDuration}
                 min={1}
                 max={1440}
                 step={5}
@@ -403,11 +334,30 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
               />
               <div className="flex flex-wrap gap-2" role="group" aria-label="Chọn nhanh thời lượng">
                 {DURATIONS.map((m) => (
-                  <Chip key={m} size="md" selected={draft.duration_min === m} onClick={() => set({ duration_min: m })}>
+                  <Chip key={m} size="md" selected={draft.duration_min === m} onClick={() => changeDuration(m)} ariaLabel={`${m} phút`}>
                     {m}′
                   </Chip>
                 ))}
               </div>
+              {speedBased && (
+                <NumberField
+                  label="Quãng đường"
+                  value={distanceKm}
+                  onChange={changeDistance}
+                  min={0.1}
+                  max={300}
+                  step={0.5}
+                  decimals={1}
+                  unit="km"
+                  icon={<Route className="h-4 w-4" />}
+                  placeholder={estDistance ? `≈ ${formatNumber(estDistance, 1)}` : 'Không bắt buộc'}
+                  hint={
+                    distanceKm && draft.duration_min
+                      ? `Tốc độ ≈ ${formatNumber(distanceKm / (draft.duration_min / 60), 1)} km/h — cường độ chọn theo tốc độ.`
+                      : 'Nhập km để tự chọn cường độ theo tốc độ (hoặc tính thời lượng).'
+                  }
+                />
+              )}
             </div>
 
             {/* When */}
@@ -418,7 +368,11 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
                 value={draft.workout_on}
                 onChange={(e) => {
                   const v = e.target.value;
-                  set({ workout_on: v, ...(mode.kind === 'new' && isISODate(v) ? { status: defaultStatus(v, today) } : {}) });
+                  if (!isISODate(v)) return set({ workout_on: v });
+                  // A future day can only be planned; otherwise infer (new) unless the user chose a status.
+                  const status =
+                    v > today ? 'planned' : mode.kind === 'new' && !statusTouched ? defaultStatus(v, today, draft.start_time, nowHHMM()) : draft.status;
+                  set({ workout_on: v, status });
                 }}
                 error={showErrors && !dateOk ? 'Ngày không hợp lệ.' : undefined}
               />
@@ -426,7 +380,13 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
                 label="Giờ bắt đầu"
                 type="time"
                 value={draft.start_time}
-                onChange={(e) => set({ start_time: e.target.value })}
+                onChange={(e) => {
+                  const t = e.target.value;
+                  set({
+                    start_time: t,
+                    ...(mode.kind === 'new' && !statusTouched && isISODate(draft.workout_on) ? { status: defaultStatus(draft.workout_on, today, t, nowHHMM()) } : {}),
+                  });
+                }}
                 hint="Không bắt buộc"
               />
             </div>
@@ -434,12 +394,20 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
             <Segmented<WorkoutStatus>
               ariaLabel="Trạng thái"
               value={draft.status}
-              onChange={(status) => set({ status })}
+              onChange={(status) => {
+                setStatusTouched(true);
+                set({ status });
+              }}
               options={[
                 { value: 'done', label: 'Đã tập', icon: <Check className="h-4 w-4" /> },
                 { value: 'planned', label: 'Lên lịch', icon: <CalendarClock className="h-4 w-4" /> },
               ]}
             />
+            {!statusOk && (
+              <p role="alert" className="-mt-3 pl-1 text-[12.5px] font-semibold text-[var(--danger-text)]">
+                Ngày này chưa tới — chỉ có thể lên lịch. Đánh dấu “Đã tập” khi bạn tập xong.
+              </p>
+            )}
 
             <Input
               label="Tên buổi tập"
@@ -478,40 +446,5 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
         onCancel={() => setConfirmDel(false)}
       />
     </>
-  );
-}
-
-function ActivityList({ items, onPick, selected }: { items: ActivityDef[]; onPick: (a: ActivityDef) => void; selected: string }) {
-  return (
-    <ul className="flex flex-col">
-      {items.map((a) => {
-        const mets = a.variants.map((v) => v.met);
-        const lo = Math.min(...mets);
-        const hi = Math.max(...mets);
-        const on = a.key === selected;
-        return (
-          <li key={a.key}>
-            <button
-              type="button"
-              onClick={() => onPick(a)}
-              className={clsx(
-                'flex min-h-[56px] w-full items-center gap-3 rounded-2xl px-2 py-1.5 text-left transition-colors hover:bg-white/[0.05] active:bg-white/[0.08]',
-                on && 'bg-gold/10',
-              )}
-            >
-              <ActivityIcon activity={a.key} category={a.category} size={40} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[15px] font-semibold text-text">{a.name}</span>
-                <span className="block text-[12px] text-muted">
-                  MET {lo === hi ? formatNumber(lo, 1) : `${formatNumber(lo, 1)}–${formatNumber(hi, 1)}`}
-                  {a.variants.length > 1 ? ` · ${a.variants.length} mức` : ''}
-                </span>
-              </span>
-              {on ? <Check className="h-5 w-5 text-gold" aria-hidden="true" /> : <Plus className="h-5 w-5 text-muted" aria-hidden="true" />}
-            </button>
-          </li>
-        );
-      })}
-    </ul>
   );
 }

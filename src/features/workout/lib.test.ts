@@ -2,7 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { ACTIVITIES, ACTIVITY_BY_KEY, findActivity } from '@/data/activities';
 import { WORKOUT_CATEGORIES, type Workout, type WorkoutTemplate } from '@/types/db';
 import {
+  activityLabel,
   buildTitle,
+  canMarkDone,
+  hasTemplateNamed,
+  nowHHMM,
+  distanceForDuration,
+  durationForDistance,
+  once,
+  recentActivityKeys,
+  sessionKcal,
+  stepsDistanceKm,
+  toInsert,
+  variantForSpeed,
   dayBurn,
   dayMarks,
   defaultStatus,
@@ -18,6 +30,7 @@ import {
   weekDays,
   workoutFromTemplate,
 } from './lib';
+import { checkDraft, draftFields, draftFrom, type WorkoutDraft } from './draft';
 
 const w = (p: Partial<Workout>): Workout => ({
   id: p.id ?? Math.random().toString(36).slice(2),
@@ -171,5 +184,159 @@ describe('templates & copies', () => {
       w({ id: 'c', workout_on: '2026-10-02', title: 'Yoga', activity: 'yoga_hatha' }),
     ]);
     expect(r.map((x) => x.id)).toEqual(['b', 'c']);
+  });
+});
+
+describe('hardening', () => {
+  it('resolves legacy / alias activity keys', () => {
+    expect(findActivity('running_8kmh')?.key).toBe('running');
+    expect(findActivity('yoga')?.key).toBe('yoga_hatha');
+    expect(findActivity('Cầu lông')?.key).toBe('badminton');
+    expect(findActivity('Leo cột điện')).toBeUndefined();
+    expect(findActivity('')).toBeUndefined();
+  });
+  it('labels activities without leaking raw keys', () => {
+    expect(activityLabel('running_8kmh', 'Chạy bộ 5 km')).toBe('Chạy bộ');
+    expect(activityLabel('foo_bar_baz', 'Buổi tự do')).toBe('Buổi tự do');
+    expect(activityLabel('Leo cột điện', 'Leo cột')).toBe('Leo cột điện');
+  });
+  it('searches by category label', () => {
+    expect(searchActivities('cardio').map((a) => a.key)).toContain('hiit');
+    expect(searchActivities('the thao doi').every((a) => a.category === 'team_sport')).toBe(true);
+  });
+  it('defaults to planned for a later start time today', () => {
+    expect(defaultStatus('2026-10-09', '2026-10-09', '20:00', '08:15')).toBe('planned');
+    expect(defaultStatus('2026-10-09', '2026-10-09', '07:00', '08:15')).toBe('done');
+    expect(defaultStatus('2026-10-09', '2026-10-09', '', '08:15')).toBe('done');
+    expect(defaultStatus('2026-10-08', '2026-10-09', '23:00', '08:15')).toBe('done');
+  });
+  it('never marks a future session done', () => {
+    expect(canMarkDone('2026-10-10', '2026-10-09')).toBe(false);
+    expect(canMarkDone('2026-10-09', '2026-10-09')).toBe(true);
+  });
+  it('formats now as HH:MM', () => {
+    expect(nowHHMM(new Date(2026, 9, 9, 7, 5))).toBe('07:05');
+  });
+  it('copies recompute kcal at current weight and skip past days', () => {
+    const src = [w({ id: '1', workout_on: '2026-09-28', met: 8, duration_min: 30, kcal: 999 }), w({ id: '2', workout_on: '2026-10-04', title: 'Yoga', activity: 'yoga_hatha', met: 2.5, duration_min: 60 })];
+    const rows = planCopies(src, [], 7, { weightKg: 70, minDate: '2026-10-09' });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ workout_on: '2026-10-11', kcal: 184, status: 'planned' });
+  });
+  it('detects duplicate template names', () => {
+    expect(hasTemplateNamed([{ name: 'Chạy sáng' }], ' chay  SANG ')).toBe(true);
+    expect(hasTemplateNamed([{ name: 'Chạy sáng' }], 'Chạy tối')).toBe(false);
+    expect(hasTemplateNamed(undefined, 'x')).toBe(false);
+  });
+  it('uses MET·3,5·kg/200·min and steps·0,04·kg/70', () => {
+    const t: WorkoutTemplate = { id: 't', user_id: 'u', name: 'x', category: 'gym', activity: 'weight_training', met: 5, duration_min: 60, notes: null, created_at: '', updated_at: '' };
+    expect(workoutFromTemplate(t, '2026-10-09', 'done', 76.6).kcal).toBe(402);
+    expect(dayBurn([], '2026-10-09', 3200, 76.6).stepsKcal).toBe(140);
+  });
+});
+
+describe('smarter search', () => {
+  it('ranks recently logged activities first within a tier', () => {
+    const plain = searchActivities('boi').map((a) => a.key);
+    const boosted = searchActivities('boi', 'all', undefined, ['swim_butterfly']).map((a) => a.key);
+    expect(boosted[0]).toBe('swim_butterfly');
+    expect(new Set(boosted)).toEqual(new Set(plain));
+  });
+  it('ranks an exact alias above loose matches', () => {
+    expect(searchActivities('gym')[0].key).toBe('weight_training');
+    expect(searchActivities('ĐÁ BÓNG')[0].key).toBe('football');
+  });
+  it('lists recent catalogue keys newest first, resolving legacy keys', () => {
+    const keys = recentActivityKeys([
+      w({ activity: 'yoga', workout_on: '2026-10-01' }),
+      w({ activity: 'running_8kmh', workout_on: '2026-10-03' }),
+      w({ activity: 'Leo cột', workout_on: '2026-10-04' }),
+      w({ activity: 'running', workout_on: '2026-10-02' }),
+    ]);
+    expect(keys).toEqual(['running', 'yoga_hatha']);
+  });
+});
+
+describe('distance & speed', () => {
+  it('speed-based variants carry km/h', () => {
+    expect(findActivity('running')!.variants.every((v) => v.kmh)).toBe(true);
+    expect(findActivity('walking')!.variants.every((v) => v.kmh)).toBe(true);
+    expect(findActivity('cycling_road')!.variants.every((v) => v.kmh)).toBe(true);
+    expect(findActivity('yoga_hatha')!.variants[0].kmh).toBeUndefined();
+  });
+  it('picks the intensity closest to the pace', () => {
+    const run = findActivity('running');
+    expect(variantForSpeed(run, 10)?.met).toBe(9.8); // 5 km in 30 min
+    expect(variantForSpeed(run, 30)?.met).toBe(14.5); // clamps to the fastest
+    expect(variantForSpeed(findActivity('yoga_hatha'), 5)).toBeUndefined();
+    expect(variantForSpeed(run, 0)).toBeUndefined();
+  });
+  it('converts distance ↔ duration', () => {
+    expect(durationForDistance(5, 10)).toBe(30);
+    expect(durationForDistance(0.05, 16)).toBe(1);
+    expect(durationForDistance(null, 10)).toBeNull();
+    expect(distanceForDuration(45, 8)).toBe(6);
+    expect(distanceForDuration(30, undefined)).toBeNull();
+  });
+  it('estimates step distance from height', () => {
+    expect(stepsDistanceKm(10000, 170, 'male')).toBe(7.1);
+    expect(stepsDistanceKm(10000, 160, 'female')).toBe(6.6);
+    expect(stepsDistanceKm(10000)).toBe(7);
+    expect(stepsDistanceKm(0, 170)).toBe(0);
+  });
+});
+
+describe('kcal & weight', () => {
+  it('recomputes kcal unless the session is untouched', () => {
+    const ex = w({ met: 8, duration_min: 30, kcal: 250, status: 'done' });
+    expect(sessionKcal({ met: 8, duration_min: 30, status: 'done' }, 70, ex)).toBe(250);
+    expect(sessionKcal({ met: 8, duration_min: 40, status: 'done' }, 70, ex)).toBe(392);
+    // finishing a planned session uses today's weight, like the row toggle
+    expect(sessionKcal({ met: 8, duration_min: 30, status: 'done' }, 70, { ...ex, status: 'planned' })).toBe(294);
+    expect(sessionKcal({ met: null, duration_min: 30, status: 'done' }, 70)).toBe(0);
+  });
+  it('MET kcal equals MET × kg × hours × 1,05', () => {
+    expect(sessionKcal({ met: 6, duration_min: 60, status: 'done' }, 80)).toBe(Math.round(6 * 80 * 1 * 1.05));
+  });
+  it('accepts string weights and ignores implausible ones', () => {
+    expect(resolveWeight('72.4' as unknown as number, null)).toEqual({ kg: 72.4, source: 'measured' });
+    expect(resolveWeight(7, 68)).toEqual({ kg: 68, source: 'profile' });
+    expect(resolveWeight(0, 900).source).toBe('fallback');
+  });
+});
+
+describe('draft', () => {
+  const base = (p: Partial<WorkoutDraft> = {}): WorkoutDraft => ({ ...draftFrom({ kind: 'new', date: '2026-10-09' }, '2026-10-09'), activity: 'running', title: 'Chạy bộ', met: 8.3, ...p });
+  it('starts a new draft for the day with an inferred status', () => {
+    expect(draftFrom({ kind: 'new', date: '2026-10-12' }, '2026-10-09')).toMatchObject({ status: 'planned', duration_min: 30, activity: '' });
+    expect(draftFrom({ kind: 'edit', workout: w({ activity: 'running_8kmh', start_time: '06:30:00' }) }, '2026-10-09')).toMatchObject({ activity: 'running', start_time: '06:30' });
+  });
+  it('validates fields', () => {
+    expect(checkDraft(base(), '2026-10-09').valid).toBe(true);
+    expect(checkDraft(base({ met: 0.5 }), '2026-10-09').met).toBe(false);
+    expect(checkDraft(base({ duration_min: 12.5 }), '2026-10-09').duration).toBe(false);
+    expect(checkDraft(base({ title: '   ' }), '2026-10-09').valid).toBe(false);
+    const future = checkDraft(base({ workout_on: '2026-10-10', status: 'done' }), '2026-10-09');
+    expect(future.status).toBe(false);
+    expect(future.templateValid).toBe(true);
+  });
+  it('maps a draft to DB fields', () => {
+    expect(draftFields({ ...base({ title: '  Chạy  ', notes: '  ', start_time: '' }), kcal: 300 })).toMatchObject({ title: 'Chạy', notes: null, start_time: null, kcal: 300 });
+  });
+});
+
+describe('undo helpers', () => {
+  it('recreates a deleted row without ids/timestamps', () => {
+    const ins = toInsert(w({ id: 'x', met: '8.3' as unknown as number }));
+    expect(ins).not.toHaveProperty('id');
+    expect(ins).not.toHaveProperty('created_at');
+    expect(ins.met).toBe(8.3);
+  });
+  it('runs undo once', () => {
+    let n = 0;
+    const f = once(() => n++);
+    f();
+    f();
+    expect(n).toBe(1);
   });
 });

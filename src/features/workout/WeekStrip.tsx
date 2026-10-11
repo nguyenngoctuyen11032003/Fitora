@@ -59,7 +59,7 @@ export function WeekStrip({ days, selected, today, marks, onSelect, onShiftWeek,
         </GlassButton>
       </div>
 
-      <div role="listbox" aria-label="Chọn ngày" className="grid grid-cols-7 gap-1.5">
+      <div role="listbox" aria-label="Chọn ngày" className="grid grid-cols-7 gap-0.5 min-[380px]:gap-1.5">
         {days.map((d, i) => {
           const on = d === selected;
           const isToday = d === today;
@@ -72,6 +72,7 @@ export function WeekStrip({ days, selected, today, marks, onSelect, onShiftWeek,
               type="button"
               role="option"
               aria-selected={on}
+              aria-current={isToday ? 'date' : undefined}
               aria-label={label}
               tabIndex={on ? 0 : -1}
               onClick={() => onSelect(d)}

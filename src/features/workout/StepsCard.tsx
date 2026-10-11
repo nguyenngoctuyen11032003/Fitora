@@ -9,13 +9,18 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { formatDayVi } from '@/lib/date';
 import { stepsKcal } from '@/lib/energy';
 import { formatNumber } from '@/lib/format';
-import { stepRatio } from './lib';
+import { stepRatio, stepsDistanceKm } from './lib';
 
 interface Props {
   date: string;
   steps: number | undefined;
   target: number;
   weightKg: number;
+  /** For the stride-based distance estimate. */
+  heightCm?: number | null;
+  sex?: 'male' | 'female' | null;
+  /** Selected day is after today — steps cannot be logged yet. */
+  future?: boolean;
   loading: boolean;
   onSave: (steps: number) => Promise<void>;
 }
@@ -23,19 +28,21 @@ interface Props {
 const QUICK = [1000, 2000, 5000];
 
 /** Manual step entry for the selected day: progress vs target + kcal. */
-export function StepsCard({ date, steps, target, weightKg, loading, onSave }: Props) {
+export function StepsCard({ date, steps, target, weightKg, heightCm, sex, future = false, loading, onSave }: Props) {
   const saved = steps ?? 0;
   const [value, setValue] = useState<number | null>(saved);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => setValue(steps ?? 0), [steps, date]);
+  useEffect(() => {
+    setValue(steps ?? 0);
+  }, [steps, date]);
 
   const dirty = value !== null && Math.round(value) !== saved;
   const shown = value ?? 0;
   const ratio = stepRatio(shown, target);
 
   const save = async () => {
-    if (value === null) return;
+    if (value === null || future || busy || !dirty) return;
     setBusy(true);
     try {
       await onSave(Math.round(value));
@@ -65,43 +72,58 @@ export function StepsCard({ date, steps, target, weightKg, loading, onSave }: Pr
         <div className="shrink-0 text-right">
           <p className="num text-[26px] text-gradient-ember">{formatNumber(stepsKcal(shown, weightKg))}</p>
           <p className="mt-1 text-[10.5px] font-bold uppercase tracking-[0.12em] text-muted">kcal</p>
+          {shown > 0 && <p className="mt-1.5 text-[12px] font-semibold text-muted">≈ {formatNumber(stepsDistanceKm(shown, heightCm, sex), 1)} km</p>}
         </div>
       </div>
 
       <div className="flex flex-col gap-1.5">
         <ProgressBar value={shown} max={Math.max(1, target)} color="var(--gold)" showOver={false} label="Tiến độ bước chân" />
         <p className="text-[12.5px] text-muted">
-          {ratio >= 1 ? 'Đã đạt mục tiêu — tuyệt vời!' : `Còn ${formatNumber(Math.max(0, target - shown))} bước để đạt mục tiêu`}
+          {future
+            ? `Mục tiêu ${formatNumber(target)} bước — nhập số bước khi ngày này tới.`
+            : ratio >= 1
+              ? 'Đã đạt mục tiêu — tuyệt vời!'
+              : `Còn ${formatNumber(Math.max(0, target - shown))} bước để đạt mục tiêu`}
         </p>
       </div>
 
-      <div className="flex items-end gap-2">
-        <NumberField
-          label="Số bước"
-          value={value}
-          onChange={setValue}
-          min={0}
-          max={200000}
-          decimals={0}
-          wrapperClassName="min-w-0 flex-1"
-          placeholder="0"
-        />
-        <Button onClick={save} loading={busy} disabled={!dirty} className="mb-0 shrink-0" variant={dirty ? 'primary' : 'secondary'}>
-          Lưu
-        </Button>
-      </div>
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Cộng nhanh">
-        {QUICK.map((q) => (
-          <Chip key={q} onClick={() => setValue((v) => Math.min(200000, (v ?? 0) + q))}>
-            +{formatNumber(q)}
-          </Chip>
-        ))}
-        {target > shown && (
-          <Chip onClick={() => setValue(target)} dot="var(--gold)">
-            Đạt mục tiêu
-          </Chip>
-        )}
-      </div>
+      {!future && (
+        <>
+          <form
+            className="flex items-end gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+          >
+            <NumberField
+              label="Số bước"
+              value={value}
+              onChange={setValue}
+              min={0}
+              max={200000}
+              decimals={0}
+              wrapperClassName="min-w-0 flex-1"
+              placeholder="0"
+            />
+            <Button type="submit" loading={busy} disabled={!dirty} className="mb-0 shrink-0" variant={dirty ? 'primary' : 'secondary'}>
+              Lưu
+            </Button>
+          </form>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Cộng nhanh">
+            {QUICK.map((q) => (
+              <Chip key={q} onClick={() => setValue((v) => Math.min(200000, (v ?? 0) + q))} ariaLabel={`Cộng ${formatNumber(q)} bước`}>
+                +{formatNumber(q)}
+              </Chip>
+            ))}
+            {target > shown && (
+              <Chip onClick={() => setValue(target)} dot="var(--gold)">
+                Đạt mục tiêu
+              </Chip>
+            )}
+          </div>
+        </>
+      )}
     </GlassCard>
   );
 }
