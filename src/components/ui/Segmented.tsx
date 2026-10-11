@@ -23,18 +23,23 @@ export interface SegmentedProps<T extends string> {
 /** Pill segmented control with a sliding gold indicator (radiogroup, arrow-key navigation). */
 export function Segmented<T extends string>({ options, value, onChange, ariaLabel, size = 'md', block = true, className }: SegmentedProps<T>) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
-  const idx = Math.max(0, options.findIndex((o) => o.value === value));
+  const found = options.findIndex((o) => o.value === value);
+  const idx = Math.max(0, found);
   const n = options.length;
+  // Roving tabindex target: the checked option, else the first enabled one (group stays keyboard-reachable).
+  const tabIdx = found >= 0 ? found : Math.max(0, options.findIndex((o) => !o.disabled));
 
   const onKey = (e: KeyboardEvent) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key) || !n) return;
     e.preventDefault();
-    let i = idx;
+    const fwd = e.key === 'ArrowRight' || e.key === 'ArrowDown';
+    let i = tabIdx;
     for (let k = 0; k < n; k++) {
-      i = e.key === 'Home' ? k : e.key === 'End' ? n - 1 - k : (i + (e.key === 'ArrowRight' ? 1 : -1) + n) % n;
+      i = e.key === 'Home' ? k : e.key === 'End' ? n - 1 - k : (i + (fwd ? 1 : -1) + n) % n;
       if (!options[i].disabled) break;
     }
-    onChange(options[i].value);
+    if (options[i].disabled) return;
+    if (options[i].value !== value) onChange(options[i].value);
     refs.current[i]?.focus();
   };
 
@@ -49,11 +54,15 @@ export function Segmented<T extends string>({ options, value, onChange, ariaLabe
         className,
       )}
     >
-      {block && (
+      {block && n > 0 && (
+        // Slides with transform (GPU) — translateX % is relative to the indicator's own width.
         <span
           aria-hidden="true"
-          className="absolute bottom-1 top-1 -z-10 rounded-full bg-gold shadow-[0_6px_20px_-8px_rgba(237,180,11,0.8)] transition-[left] duration-300 ease-out"
-          style={{ width: `calc((100% - 8px) / ${n})`, left: `calc(4px + (100% - 8px) / ${n} * ${idx})` }}
+          className={clsx(
+            'absolute bottom-1 left-1 top-1 -z-10 rounded-full bg-gold shadow-[0_6px_20px_-8px_rgba(237,180,11,0.8)] transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
+            found < 0 && 'opacity-0',
+          )}
+          style={{ width: `calc((100% - 8px) / ${n})`, transform: `translateX(${idx * 100}%)` }}
         />
       )}
       {options.map((o, i) => {
@@ -65,7 +74,7 @@ export function Segmented<T extends string>({ options, value, onChange, ariaLabe
             type="button"
             role="radio"
             aria-checked={on}
-            tabIndex={on ? 0 : -1}
+            tabIndex={i === tabIdx ? 0 : -1}
             disabled={o.disabled}
             onClick={() => onChange(o.value)}
             className={clsx(

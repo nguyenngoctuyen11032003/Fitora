@@ -6,6 +6,7 @@ import { Logo } from '@/components/ui/Logo';
 import { useProfile } from '@/context/ProfileContext';
 import { greetingVi } from '@/lib/date';
 import { MenuOverlay } from './MenuOverlay';
+import { prefetchHandlers } from './routes';
 
 export interface TopBarProps {
   /** Overrides the greeting line (small uppercase). */
@@ -36,7 +37,7 @@ export function TopBar({ eyebrow, title, right, className }: TopBarProps) {
   return (
     <>
       <div className={clsx('flex min-h-[var(--topbar-h)] items-center gap-3', className)}>
-        <Link to="/profile" aria-label="Hồ sơ của bạn" className="shrink-0 rounded-full transition active:scale-95">
+        <Link to="/profile" {...prefetchHandlers('/profile')} aria-label="Hồ sơ của bạn" className="shrink-0 rounded-full transition active:scale-95">
           <Avatar src={shared?.avatar_url} name={displayName} size={44} />
         </Link>
         <div className="min-w-0 flex-1 animate-fade-slide-down">

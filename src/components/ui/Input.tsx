@@ -85,6 +85,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
         id={fid}
         rows={rows}
         aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${fid}-err` : hint ? `${fid}-hint` : undefined}
         className={clsx('resize-none text-text', className)}
         {...rest}
       />

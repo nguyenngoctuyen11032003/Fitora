@@ -14,7 +14,8 @@
   --line-strong: rgba(255, 255, 255, 0.18);
   --text: #ede4d8;
   --muted: rgba(235, 220, 205, 0.6);
-  --muted-2: rgba(235, 220, 205, 0.4);
+  /* 0.5 (was 0.4): placeholders stay legible on the field fill (~4:1 instead of ~2.8:1) */
+  --muted-2: rgba(235, 220, 205, 0.5);
   --gold: #edb40b;
   --gold-soft: rgba(237, 180, 11, 0.16);
   --ember: #e1500a;
@@ -31,6 +32,11 @@
 
   --radius-card: 24px;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  /* Motion durations: micro (press/hover) · ui (sheets, toasts, segmented) · emphasis (progress) */
+  --dur-fast: 150ms;
+  --dur-ui: 300ms;
+  --dur-slow: 700ms;
 
   /* Shell metrics (consumed by Page / BottomNav / overlays) */
   --topbar-h: 64px;
@@ -88,6 +94,14 @@
     font: inherit;
     color: inherit;
   }
+  /* No double-tap-zoom delay on controls (instant taps on iOS) */
+  button,
+  a,
+  [role='button'],
+  [role='radio'],
+  label {
+    touch-action: manipulation;
+  }
   input[type='number']::-webkit-inner-spin-button,
   input[type='number']::-webkit-outer-spin-button {
     -webkit-appearance: none;
@@ -137,11 +151,17 @@
     mask-composite: exclude;
     pointer-events: none;
   }
-  .glass:hover {
-    background: rgba(255, 255, 255, 0.06);
+  /* Hover only on real pointers: on touch it would stick after a tap */
+  @media (hover: hover) {
+    .glass:hover {
+      background: rgba(255, 255, 255, 0.06);
+    }
   }
   .glass:active {
     transform: scale(0.96);
+  }
+  .glass:disabled:active {
+    transform: none;
   }
   .glass.circle {
     border-radius: 9999px;
@@ -185,7 +205,8 @@
 
   /* Dense chrome: bottom nav, sheets, toasts */
   .glass-strong {
-    background: rgba(20, 20, 30, 0.8);
+    /* Warm coffee tint (was a cool blue-grey that clashed with the ember palette) */
+    background: var(--card-strong);
     border: 1px solid var(--line);
     -webkit-backdrop-filter: blur(16px) saturate(1.4);
     backdrop-filter: blur(16px) saturate(1.4);
@@ -283,6 +304,20 @@
   }
   .field[data-invalid='true'] {
     border-color: rgba(255, 107, 94, 0.8);
+  }
+  .field[data-invalid='true']:focus-within {
+    box-shadow: 0 0 0 4px rgba(255, 107, 94, 0.14);
+  }
+  .field:has(> input:disabled, > textarea:disabled, > div > input:disabled) {
+    opacity: 0.55;
+  }
+  /* Chrome/Safari autofill: keep the dark glass field instead of a pale yellow box */
+  .field input:-webkit-autofill,
+  .field input:-webkit-autofill:hover,
+  .field input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--text);
+    caret-color: var(--text);
+    transition: background-color 600000s 0s;
   }
   .field input,
   .field textarea,
@@ -439,6 +474,7 @@
     font-size: 15px;
     font-weight: 600;
     z-index: 85;
+    background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 78%, rgba(18, 9, 6, 0) 100%);
     pointer-events: none;
   }
 
@@ -455,7 +491,13 @@
     animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
     scroll-behavior: auto !important;
+  }
+  /* Static placeholder instead of a frozen mid-sweep gradient */
+  .skeleton {
+    animation: none !important;
+    background: rgba(255, 255, 255, 0.07);
   }
 }
 

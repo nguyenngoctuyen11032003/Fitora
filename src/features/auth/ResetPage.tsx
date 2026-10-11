@@ -1,5 +1,5 @@
 import { Check, Lock } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -9,6 +9,7 @@ import { MIN_PASSWORD } from '@/lib/config';
 import { updatePassword } from '@/services/auth';
 import { errorMessage } from '@/services/errors';
 import { AuthLayout } from './AuthLayout';
+import { PasswordToggle } from './PasswordToggle';
 
 /** Set a new password after opening a recovery link (session already established). */
 export default function ResetPage() {
@@ -19,14 +20,22 @@ export default function ResetPage() {
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [show, setShow] = useState(false);
+  const inFlight = useRef(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (inFlight.current) return;
     setError(null);
+    if (password.length < MIN_PASSWORD) {
+      setError(`Mật khẩu tối thiểu ${MIN_PASSWORD} ký tự.`);
+      return;
+    }
     if (password !== confirm) {
       setError('Mật khẩu nhập lại không khớp.');
       return;
     }
+    inFlight.current = true;
     setBusy(true);
     try {
       await updatePassword(password);
@@ -36,6 +45,7 @@ export default function ResetPage() {
     } catch (err) {
       setError(errorMessage(err));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
@@ -50,18 +60,20 @@ export default function ResetPage() {
       <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
         <Input
           label="Mật khẩu mới"
-          type="password"
+          type={show ? 'text' : 'password'}
           autoComplete="new-password"
           placeholder={`Tối thiểu ${MIN_PASSWORD} ký tự`}
           icon={<Lock />}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          hint={password && password.length < MIN_PASSWORD ? `Còn thiếu ${MIN_PASSWORD - password.length} ký tự` : undefined}
+          trailing={<PasswordToggle shown={show} onToggle={() => setShow((s) => !s)} />}
           autoFocus
           required
         />
         <Input
           label="Nhập lại mật khẩu"
-          type="password"
+          type={show ? 'text' : 'password'}
           autoComplete="new-password"
           placeholder="••••••••"
           icon={<Lock />}

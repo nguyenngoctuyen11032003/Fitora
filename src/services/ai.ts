@@ -26,6 +26,16 @@ export interface ScanOptions {
   hint?: string;
   mode?: 'photo' | 'live';
   signal?: AbortSignal;
+  /** Give up after this many ms (default AI_TIMEOUT_MS). */
+  timeoutMs?: number;
+}
+
+/** Vision models answer in 3–15 s; past this the request is considered stuck. */
+export const AI_TIMEOUT_MS = 60_000;
+export const AI_TIMEOUT_MESSAGE = 'AI phản hồi quá lâu. Hãy kiểm tra mạng và thử lại.';
+
+function abortError(): Error {
+  return typeof DOMException === 'function' ? new DOMException('Đã hủy quét.', 'AbortError') : Object.assign(new Error('Đã hủy quét.'), { name: 'AbortError' });
 }
 
 const KNOWN: AiErrorCode[] = ['not_food', 'quota_exceeded', 'bad_request', 'ai_unavailable'];
@@ -35,28 +45,55 @@ const n = (v: unknown, min = 0) => {
   return Number.isFinite(x) ? Math.max(min, x) : min;
 };
 
-function normalizeDish(d: Partial<AiDish>): AiDish {
+const GRAM_UNITS = ['g', 'gr', 'gr.', 'gram', 'grams', 'gam'];
+
+export function normalizeDish(d: Partial<AiDish>): AiDish {
+  const quantity = n(d.quantity) || 1;
+  let unit = String(d.unit ?? 'phần').trim().slice(0, 20) || 'phần';
+  let grams = n(d.grams);
+  // "150 gram" / "150 gr." → unit 'g'; the quantity then IS the weight when grams is missing.
+  if (GRAM_UNITS.includes(unit.toLowerCase())) {
+    unit = 'g';
+    if (!grams) grams = quantity;
+  }
+  const protein_g = n(d.protein_g);
+  const carbs_g = n(d.carbs_g);
+  const fat_g = n(d.fat_g);
+  // Missing / zero kcal but macros present: derive it (Atwater 4/4/9).
+  const kcal = n(d.kcal) || Math.round(protein_g * 4 + carbs_g * 4 + fat_g * 9);
   return {
     name: String(d.name ?? 'Món ăn').trim().slice(0, 120) || 'Món ăn',
     ingredients: Array.isArray(d.ingredients) ? d.ingredients.map(String).slice(0, 20) : [],
-    quantity: n(d.quantity) || 1,
-    unit: String(d.unit ?? 'phần').trim().slice(0, 20) || 'phần',
-    grams: n(d.grams),
-    kcal: n(d.kcal),
-    protein_g: n(d.protein_g),
-    carbs_g: n(d.carbs_g),
-    fat_g: n(d.fat_g),
+    quantity,
+    unit,
+    grams,
+    kcal,
+    protein_g,
+    carbs_g,
+    fat_g,
     fiber_g: n(d.fiber_g),
-    confidence: Math.min(1, n(d.confidence)),
+    confidence: d.confidence === undefined || d.confidence === null ? 0.5 : Math.min(1, n(d.confidence)),
   };
 }
 
-async function errorFromResponse(res: Response | undefined): Promise<AiScanError> {
+/**
+ * The server's own Vietnamese explanation is more specific than ours ("Ảnh là bàn phím",
+ * "hết 40 lượt"); keep it when it looks like a short human sentence.
+ */
+export function serverMessage(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const m = v.replace(/\s+/g, ' ').trim();
+  return m.length >= 8 && m.length <= 300 ? m : undefined;
+}
+
+export async function errorFromResponse(res: Response | undefined): Promise<AiScanError> {
   if (!res) return new AiScanError('ai_unavailable');
   if (res.status === 401) return new AiScanError('unauthorized');
   try {
-    const body = (await res.clone().json()) as { error?: string };
-    if (body?.error && (KNOWN as string[]).includes(body.error)) return new AiScanError(body.error as AiErrorCode);
+    const body = (await res.clone().json()) as { error?: string; message?: unknown };
+    if (body?.error && (KNOWN as string[]).includes(body.error)) {
+      return new AiScanError(body.error as AiErrorCode, serverMessage(body.message));
+    }
   } catch {
     /* non-JSON body */
   }
@@ -77,28 +114,46 @@ export async function scanFood(dataUrl: string, opts: ScanOptions = {}): Promise
   const body: Record<string, unknown> = { image: dataUrl, mode: opts.mode ?? 'photo' };
   if (opts.hint?.trim()) body.hint = opts.hint.trim().slice(0, 200);
 
+  if (opts.signal?.aborted) throw abortError();
+
   let result: { data: unknown; error: unknown };
   try {
-    result = await db().functions.invoke(AI_FUNCTION, { body, ...(opts.signal ? { signal: opts.signal } : {}) } as Parameters<
-      ReturnType<typeof db>['functions']['invoke']
-    >[1]);
+    result = await db().functions.invoke(AI_FUNCTION, {
+      body,
+      // A stuck request would otherwise keep the scan spinner forever.
+      timeout: opts.timeoutMs ?? AI_TIMEOUT_MS,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    } as Parameters<ReturnType<typeof db>['functions']['invoke']>[1]);
   } catch (e) {
-    if ((e as Error)?.name === 'AbortError') throw e;
+    if (opts.signal?.aborted || (e as Error)?.name === 'AbortError') throw abortError();
     throw new AiScanError('network');
   }
 
   const { data, error } = result;
   if (error) {
-    if ((error as Error)?.name === 'AbortError') throw error;
+    // functions-js wraps an aborted fetch in FunctionsFetchError: tell the caller's own
+    // cancel (AbortError, ignored by the UI) apart from our timeout (AI too slow).
+    if (opts.signal?.aborted || (error as Error)?.name === 'AbortError') throw abortError();
     if (error instanceof FunctionsHttpError) throw await errorFromResponse(error.context as Response);
-    if (error instanceof FunctionsFetchError) throw new AiScanError('network');
+    if (error instanceof FunctionsFetchError) {
+      const cause = (error as { context?: { name?: string } }).context;
+      if (cause?.name === 'AbortError' || cause?.name === 'TimeoutError') throw new AiScanError('ai_unavailable', AI_TIMEOUT_MESSAGE);
+      throw new AiScanError('network');
+    }
     if (error instanceof FunctionsRelayError) throw new AiScanError('ai_unavailable');
     throw new AiScanError('ai_unavailable');
   }
 
-  const payload = (typeof data === 'string' ? JSON.parse(data) : data) as Partial<AiScanResponse> & { error?: string };
-  if (payload?.error && (KNOWN as string[]).includes(payload.error)) throw new AiScanError(payload.error as AiErrorCode);
+  let payload: (Partial<AiScanResponse> & { error?: string; message?: unknown }) | null;
+  try {
+    payload = (typeof data === 'string' ? JSON.parse(data) : data) as typeof payload;
+  } catch {
+    throw new AiScanError('ai_unavailable');
+  }
+  if (payload?.error && (KNOWN as string[]).includes(payload.error)) {
+    throw new AiScanError(payload.error as AiErrorCode, serverMessage(payload.message));
+  }
   const dishes = Array.isArray(payload?.dishes) ? payload.dishes.map(normalizeDish) : [];
-  if (payload?.is_food === false || !dishes.length) throw new AiScanError('not_food');
-  return { dishes, is_food: true, notes: typeof payload.notes === 'string' ? payload.notes : undefined };
+  if (payload?.is_food === false || !dishes.length) throw new AiScanError('not_food', serverMessage(payload?.notes));
+  return { dishes, is_food: true, notes: typeof payload?.notes === 'string' && payload.notes.trim() ? payload.notes.trim() : undefined };
 }

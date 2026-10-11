@@ -47,7 +47,7 @@ function writeCache(c: Cache | null) {
 }
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const uid = user?.id ?? null;
   const [fit, setFitState] = useState<FitProfile | null>(null);
   const [shared, setShared] = useState<SharedProfile | null>(null);
@@ -56,6 +56,9 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   // uid whose data (cache or network) is in state — avoids a frame where fit=null looks like 'not onboarded'.
   const [loadedUid, setLoadedUid] = useState<string | null>(null);
   const token = useRef(0);
+  const waitingForAuth = !uid && authLoading;
+  const sharedRef = useRef<SharedProfile | null>(null);
+  sharedRef.current = shared;
 
   const load = useCallback(
     async (opts: { silent?: boolean } = {}) => {
@@ -63,7 +66,8 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       const t = ++token.current;
       if (!opts.silent) setLoading(true);
       try {
-        const [f, s] = await Promise.all([getFitProfile(), getSharedProfile().catch(() => null)]);
+        // public.profiles is optional (Note_mytasks owns it): a failure there keeps what we had.
+        const [f, s] = await Promise.all([getFitProfile(), getSharedProfile().catch(() => sharedRef.current)]);
         if (t !== token.current) return;
         setFitState(f);
         setShared(s);
@@ -82,6 +86,9 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    // While the session is still being restored user is null: wiping the cache now would
+    // throw away the instant paint for the very user who is about to be signed in.
+    if (waitingForAuth) return;
     if (!uid) {
       token.current++;
       setFitState(null);
@@ -92,6 +99,8 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       return;
     }
     const cached = readCache(uid);
+    sharedRef.current = cached?.shared ?? null; // never fall back to another account's row
+    setError(null);
     if (cached) {
       // Paint from cache instantly, revalidate in the background.
       setFitState(cached.fit);
@@ -104,9 +113,17 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       setShared(null);
       void load();
     }
-  }, [uid, load]);
+  }, [uid, waitingForAuth, load]);
 
   useEffect(() => onDataChanged((kind) => kind === 'profile' && void load({ silent: true })), [load]);
+
+  // Offline at start-up (error, maybe nothing cached): retry by itself once the network is back.
+  useEffect(() => {
+    if (!uid || !error) return;
+    const retry = () => void load({ silent: true });
+    window.addEventListener('online', retry);
+    return () => window.removeEventListener('online', retry);
+  }, [uid, error, load]);
 
   const setFit = useCallback(
     (f: FitProfile | null) => {

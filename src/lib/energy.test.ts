@@ -7,7 +7,9 @@ import {
   calcBMR,
   calcTDEE,
   goalCalories,
+  isCalorieFloored,
   macroKcal,
+  proteinReferenceKg,
   metKcal,
   remainingKcal,
   scalePer100,
@@ -71,6 +73,21 @@ describe('goalCalories', () => {
     expect(goalCalories(1500, 'lose', 'fast', 'female')).toBe(1200);
     expect(goalCalories(1800, 'lose', 'fast', 'male')).toBe(1500);
   });
+  it('a deficit goal never becomes a surplus when TDEE is below the floor', () => {
+    // small, older, sedentary woman: TDEE 1014 < 1200 floor
+    expect(goalCalories(1014, 'lose', 'medium', 'female')).toBe(1010);
+    expect(goalCalories(1014, 'recomp', null, 'female')).toBe(1010);
+    expect(goalCalories(1400, 'lose', 'medium', 'male')).toBe(1400);
+    // non-deficit goals still respect the floor
+    expect(goalCalories(1014, 'maintain', null, 'female')).toBe(1200);
+    expect(goalCalories(1014, 'gain', null, 'female')).toBe(1310);
+  });
+  it('isCalorieFloored flags a shrunken deficit', () => {
+    expect(isCalorieFloored(2500, 'lose', 'medium', 'male')).toBe(false);
+    expect(isCalorieFloored(1800, 'lose', 'fast', 'male')).toBe(true);
+    expect(isCalorieFloored(1300, 'recomp', null, 'female')).toBe(true);
+    expect(isCalorieFloored(1000, 'gain', null, 'female')).toBe(false);
+  });
 });
 
 describe('suggestMacros', () => {
@@ -86,6 +103,24 @@ describe('suggestMacros', () => {
     expect(suggestMacros(2800, 'gain', 80).protein_g).toBe(144);
     expect(suggestMacros(2500, 'maintain', 80).protein_g).toBe(128);
     expect(suggestMacros(2500, 'maintain', 80).fat_g).toBe(Math.round(750 / 9));
+  });
+  it('macro kcal add up to the target (±2) across goals and sizes', () => {
+    for (const goal of ['lose', 'gain', 'maintain', 'recomp'] as const) {
+      for (const kcal of [1200, 1500, 1830, 2210, 3170]) {
+        for (const kg of [45, 70, 95]) {
+          const m = suggestMacros(kcal, goal, kg, 170);
+          expect(Math.abs(macroKcal(m) - kcal)).toBeLessThanOrEqual(2);
+        }
+      }
+    }
+  });
+  it('bases protein on the BMI-25 weight when overweight', () => {
+    // 172 cm → BMI 25 at 73.96 kg
+    expect(proteinReferenceKg(120, 172)).toBeCloseTo(73.96, 2);
+    expect(proteinReferenceKg(60, 172)).toBe(60);
+    expect(proteinReferenceKg(80, null)).toBe(80);
+    expect(suggestMacros(2400, 'lose', 120, 172).protein_g).toBe(148);
+    expect(suggestMacros(2400, 'lose', 60, 172).protein_g).toBe(120);
   });
   it('never returns negative carbs', () => {
     const m = suggestMacros(1200, 'recomp', 150);

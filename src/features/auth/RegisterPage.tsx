@@ -1,5 +1,5 @@
 import { ArrowRight, Lock, Mail, MailCheck, User } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -8,6 +8,7 @@ import { MIN_PASSWORD } from '@/lib/config';
 import { resendConfirmation, signUp } from '@/services/auth';
 import { errorMessage } from '@/services/errors';
 import { AuthLayout } from './AuthLayout';
+import { PasswordToggle, useCooldown } from './PasswordToggle';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -16,28 +17,56 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [cooldown, startCooldown] = useCooldown();
+  const inFlight = useRef(false);
 
   const mismatch = confirm.length > 0 && confirm !== password;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (inFlight.current) return;
     setError(null);
+    if (password.length < MIN_PASSWORD) {
+      setError(`Mật khẩu tối thiểu ${MIN_PASSWORD} ký tự.`);
+      return;
+    }
     if (password !== confirm) {
       setError('Mật khẩu nhập lại không khớp.');
       return;
     }
+    inFlight.current = true;
     setBusy(true);
     try {
       const data = await signUp(email, password, name);
       if (data?.session) navigate('/onboarding', { replace: true });
-      else setSent(true);
+      else {
+        setSent(true);
+        startCooldown(); // the confirmation e-mail just went out
+      }
     } catch (err) {
       setError(errorMessage(err));
     } finally {
+      inFlight.current = false;
       setBusy(false);
+    }
+  };
+
+  const resend = async () => {
+    if (resending || cooldown) return;
+    setResending(true);
+    try {
+      await resendConfirmation(email);
+      toast.success('Đã gửi lại email xác nhận.');
+      startCooldown();
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setResending(false);
     }
   };
 
@@ -50,21 +79,10 @@ export default function RegisterPage() {
           </span>
           <p className="text-[15px] leading-relaxed text-muted">
             Fitora đã gửi liên kết xác nhận tới <strong className="text-text">{email.trim()}</strong>. Mở email và bấm liên kết để kích hoạt tài khoản —
-            tài khoản này dùng được cho cả Note_mytasks.
+            tài khoản này dùng được cho cả Note_mytasks. Không thấy email? Hãy xem cả thư mục Spam.
           </p>
-          <Button
-            variant="secondary"
-            block
-            onClick={async () => {
-              try {
-                await resendConfirmation(email);
-                toast.success('Đã gửi lại email xác nhận.');
-              } catch (err) {
-                toast.error(err);
-              }
-            }}
-          >
-            Gửi lại email
+          <Button variant="secondary" block loading={resending} disabled={cooldown > 0} onClick={resend}>
+            {cooldown > 0 ? `Gửi lại email (${cooldown}s)` : 'Gửi lại email'}
           </Button>
         </div>
       </AuthLayout>
@@ -94,6 +112,7 @@ export default function RegisterPage() {
           inputMode="email"
           autoComplete="email"
           autoCapitalize="none"
+          spellCheck={false}
           placeholder="ban@email.com"
           icon={<Mail />}
           value={email}
@@ -102,18 +121,19 @@ export default function RegisterPage() {
         />
         <Input
           label="Mật khẩu"
-          type="password"
+          type={show ? 'text' : 'password'}
           autoComplete="new-password"
           placeholder={`Tối thiểu ${MIN_PASSWORD} ký tự`}
           icon={<Lock />}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           hint={password && password.length < MIN_PASSWORD ? `Còn thiếu ${MIN_PASSWORD - password.length} ký tự` : undefined}
+          trailing={<PasswordToggle shown={show} onToggle={() => setShow((s) => !s)} />}
           required
         />
         <Input
           label="Nhập lại mật khẩu"
-          type="password"
+          type={show ? 'text' : 'password'}
           autoComplete="new-password"
           placeholder="••••••••"
           icon={<Lock />}

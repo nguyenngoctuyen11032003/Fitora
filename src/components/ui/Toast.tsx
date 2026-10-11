@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { errorMessage } from '@/services/errors';
 import { Portal } from './Portal';
 
@@ -43,22 +43,80 @@ const COLORS = { success: 'text-ok', error: 'text-[var(--danger-text)]', info: '
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
   const seq = useRef(0);
+  // Mirror of the visible items so show() can de-duplicate synchronously.
+  const live = useRef<ToastItem[]>([]);
+  live.current = items;
+
+  // Auto-dismiss timers, pausable while the toast is hovered / focused (WCAG 2.2.1).
+  const timers = useRef(new Map<number, { handle?: ReturnType<typeof setTimeout>; remaining: number; startedAt: number }>());
+
+  useEffect(() => {
+    const map = timers.current;
+    return () => {
+      map.forEach((t) => clearTimeout(t.handle));
+      map.clear();
+    };
+  }, []);
 
   const dismiss = useCallback((id: number) => {
+    const t = timers.current.get(id);
+    if (t) clearTimeout(t.handle);
+    timers.current.delete(id);
     setItems((list) => list.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
     setTimeout(() => setItems((list) => list.filter((t) => t.id !== id)), 220);
   }, []);
 
-  const show = useCallback(
-    (message: string, opts: ToastOptions = {}) => {
-      const id = ++seq.current;
-      const kind = opts.kind ?? 'info';
-      const duration = opts.duration ?? (kind === 'error' ? 5000 : 3200);
-      setItems((list) => [...list.slice(-2), { id, message, kind, duration, action: opts.action }]);
-      if (duration > 0) setTimeout(() => dismiss(id), duration);
-      return id;
+  const startTimer = useCallback(
+    (id: number, ms: number) => {
+      const prev = timers.current.get(id);
+      if (prev) clearTimeout(prev.handle);
+      timers.current.set(id, { handle: setTimeout(() => dismiss(id), ms), remaining: ms, startedAt: Date.now() });
     },
     [dismiss],
+  );
+  const pause = useCallback((id: number) => {
+    const t = timers.current.get(id);
+    if (!t || t.handle === undefined) return;
+    clearTimeout(t.handle);
+    t.handle = undefined;
+    t.remaining = Math.max(800, t.remaining - (Date.now() - t.startedAt));
+  }, []);
+  const resume = useCallback(
+    (id: number) => {
+      const t = timers.current.get(id);
+      if (t && t.handle === undefined) startTimer(id, t.remaining);
+    },
+    [startTimer],
+  );
+
+  const show = useCallback(
+    (message: string, opts: ToastOptions = {}) => {
+      const kind = opts.kind ?? 'info';
+      const duration = opts.duration ?? (kind === 'error' ? 5000 : 3200);
+      // Several screens failing at once (offline…) must not stack the same message 3×.
+      const dup = live.current.find((t) => !t.leaving && t.kind === kind && t.message === message && !t.action && !opts.action);
+      if (dup) {
+        // Repeated message: keep it on screen for a full duration again.
+        if (dup.duration > 0 && timers.current.get(dup.id)?.handle !== undefined) startTimer(dup.id, dup.duration);
+        return dup.id;
+      }
+      const id = ++seq.current;
+      const item: ToastItem = { id, message, kind, duration, action: opts.action };
+      live.current = [...live.current, item]; // visible to a second show() in the same tick
+      setItems((list) => {
+        // Max 3 visible (leaving ones excluded): the oldest are evicted and drop their timers.
+        const active = list.filter((t) => !t.leaving);
+        const evict = new Set(active.slice(0, Math.max(0, active.length - 2)).map((t) => t.id));
+        evict.forEach((eid) => {
+          clearTimeout(timers.current.get(eid)?.handle);
+          timers.current.delete(eid);
+        });
+        return [...list.filter((t) => !evict.has(t.id)), item];
+      });
+      if (duration > 0) startTimer(id, duration);
+      return id;
+    },
+    [startTimer],
   );
 
   const api = useMemo<ToastApi>(
@@ -88,6 +146,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <div
                 key={t.id}
                 role={t.kind === 'error' ? 'alert' : 'status'}
+                onPointerEnter={() => pause(t.id)}
+                onPointerLeave={() => resume(t.id)}
+                onFocus={() => pause(t.id)}
+                onBlur={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) resume(t.id);
+                }}
                 className={clsx(
                   'glass-strong pointer-events-auto flex w-full max-w-[380px] items-center gap-3 rounded-2xl bg-[rgba(24,14,10,0.94)] py-2.5 pl-4 pr-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.45)] transition-[opacity,transform] duration-200',
                   t.leaving ? '-translate-y-2 opacity-0' : 'animate-drop-in',

@@ -10,6 +10,8 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Fitora" />
+    <meta name="application-name" content="Fitora" />
+    <meta name="format-detection" content="telephone=no" />
     <link rel="icon" href="./favicon.ico" sizes="48x48" />
     <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="./icons/favicon-16.png" />
@@ -19,9 +21,12 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Albert+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
     <title>Fitora</title>
+    <!-- Paint the warm background before the CSS bundle arrives (no white flash on cold start / PWA launch). -->
+    <style>html,body{background:#120906;color:#ede4d8;margin:0}</style>
   </head>
   <body>
     <div id="root"></div>
+    <noscript><p style="padding:24px;font-family:system-ui,sans-serif">Fitora cần bật JavaScript để hoạt động.</p></noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

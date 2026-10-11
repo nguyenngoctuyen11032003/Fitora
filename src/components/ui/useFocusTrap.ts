@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 
 const FOCUSABLE =
   'a[href], area[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
@@ -8,6 +8,10 @@ const FOCUSABLE =
  * and restores it to the previously focused element on close.
  */
 export function useFocusTrap(ref: RefObject<HTMLElement>, active: boolean, onEscape?: () => void, initialFocus?: RefObject<HTMLElement>) {
+  // Latest handler: callers pass inline closures (e.g. dismissible ? onClose : undefined)
+  // whose captured state changes after the trap was activated.
+  const escRef = useRef(onEscape);
+  escRef.current = onEscape;
   useEffect(() => {
     if (!active) return;
     const root = ref.current;
@@ -21,9 +25,9 @@ export function useFocusTrap(ref: RefObject<HTMLElement>, active: boolean, onEsc
     const id = requestAnimationFrame(focusFirst);
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && onEscape) {
+      if (e.key === 'Escape') {
         e.stopPropagation();
-        onEscape();
+        escRef.current?.();
         return;
       }
       if (e.key !== 'Tab') return;

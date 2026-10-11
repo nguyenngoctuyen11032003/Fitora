@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import { X } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type AnimationEvent as RAnimationEvent, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react';
 import { Portal } from './Portal';
 import { useFocusTrap } from './useFocusTrap';
 
@@ -22,6 +22,8 @@ export interface BottomSheetProps {
 }
 
 const CLOSE_MS = 280;
+/** Pointer travel (px) before a press becomes a drag — taps never move the sheet. */
+const DRAG_SLOP = 4;
 
 /**
  * Bottom sheet inside the phone frame: drag handle + swipe-down to close,
@@ -31,6 +33,8 @@ export function BottomSheet({ open, onClose, title, description, children, foote
   const [mounted, setMounted] = useState(open);
   const [closing, setClosing] = useState(false);
   const [drag, setDrag] = useState(0);
+  // Entrance finished → a released drag snaps back with a transition instead of replaying the slide-up.
+  const [entered, setEntered] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const start = useRef<{ y: number; t: number } | null>(null);
@@ -42,11 +46,14 @@ export function BottomSheet({ open, onClose, title, description, children, foote
       setMounted(true);
       setClosing(false);
       setDrag(0);
+      setEntered(false);
     } else if (mounted) {
       setClosing(true);
+      start.current = null;
       const t = setTimeout(() => {
         setMounted(false);
         setClosing(false);
+        setDrag(0);
       }, CLOSE_MS);
       return () => clearTimeout(t);
     }
@@ -59,17 +66,23 @@ export function BottomSheet({ open, onClose, title, description, children, foote
   useFocusTrap(panel, open && mounted, requestClose, initialFocus);
 
   const onPointerDown = (e: RPointerEvent) => {
-    if (!dismissible) return;
+    if (!dismissible || closing || e.button > 0) return;
     // Only start a drag from the handle area, or from the body when it is scrolled to top.
     const fromHandle = (e.target as HTMLElement).closest('[data-sheet-handle]');
     if (!fromHandle && (body.current?.scrollTop ?? 0) > 0) return;
     if ((e.target as HTMLElement).closest('input, textarea, select, button, a, [role="slider"]') && !fromHandle) return;
     start.current = { y: e.clientY, t: performance.now() };
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
   };
   const onPointerMove = (e: RPointerEvent) => {
     if (!start.current) return;
-    setDrag(Math.max(0, e.clientY - start.current.y));
+    const dy = e.clientY - start.current.y;
+    if (dy <= DRAG_SLOP) {
+      if (drag) setDrag(0);
+      return;
+    }
+    // Capture only once it is a real drag, so plain clicks on rows/buttons keep working.
+    if (!drag) (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    setDrag(dy - DRAG_SLOP);
   };
   const onPointerUp = () => {
     if (!start.current) return;
@@ -80,8 +93,20 @@ export function BottomSheet({ open, onClose, title, description, children, foote
     if (drag > h * 0.28 || (velocity > 0.6 && drag > 40)) onClose();
     else setDrag(0);
   };
+  // The browser took the gesture over (native scroll / overscroll): never treat it as a swipe-to-close.
+  const onPointerCancel = () => {
+    start.current = null;
+    setDrag(0);
+  };
+  const onAnimationEnd = (e: RAnimationEvent) => {
+    // Children's own animations bubble here too.
+    if (e.target === e.currentTarget) setEntered(true);
+  };
 
   if (!mounted) return null;
+
+  // Closing wins over a drag in progress: the sheet slides out from where the finger let go.
+  const dragging = drag > 0 && !closing;
 
   return (
     <Portal>
@@ -90,7 +115,7 @@ export function BottomSheet({ open, onClose, title, description, children, foote
           aria-hidden="true"
           onClick={requestClose}
           className={clsx('absolute inset-0 bg-black/55 backdrop-blur-[2px] transition-opacity duration-300', closing ? 'opacity-0' : 'animate-fade-in')}
-          style={drag ? { opacity: Math.max(0.2, 1 - drag / 500) } : undefined}
+          style={dragging ? { opacity: Math.max(0.2, 1 - drag / 500) } : undefined}
         />
         <div
           ref={panel}
@@ -102,14 +127,21 @@ export function BottomSheet({ open, onClose, title, description, children, foote
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
+          onPointerCancel={onPointerCancel}
+          onAnimationEnd={onAnimationEnd}
           className={clsx(
             'glass-strong relative flex max-h-[92%] flex-col rounded-t-[28px] border-b-0 bg-[rgba(24,14,10,0.94)] shadow-[0_-20px_60px_rgba(0,0,0,0.5)] outline-none',
             height === 'full' && 'h-[92%]',
-            !drag && (closing ? 'translate-y-full transition-transform duration-300 ease-in' : 'animate-sheet-up'),
+            closing
+              ? 'translate-y-full transition-transform duration-300 ease-in'
+              : dragging
+                ? 'will-change-transform'
+                : entered
+                  ? 'transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]'
+                  : 'animate-sheet-up',
             className,
           )}
-          style={drag ? { transform: `translateY(${drag}px)` } : undefined}
+          style={dragging ? { transform: `translateY(${drag}px)` } : undefined}
         >
           <div data-sheet-handle className="flex shrink-0 cursor-grab touch-none justify-center pb-1 pt-3 active:cursor-grabbing">
             <span className="h-[5px] w-10 rounded-full bg-white/25" aria-hidden="true" />

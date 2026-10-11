@@ -50,6 +50,52 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number):
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b), type, quality));
 }
 
+/** The AI endpoint rejects images above ~1.5 MB decoded; stay safely below it. */
+export const MAX_ENCODED_BYTES = 1_300_000;
+
+/**
+ * Encode a canvas: falls back to JPEG when the browser ignores the requested type
+ * (Safari < 17 returns a multi-MB PNG for webp), and lowers the JPEG quality until
+ * the result fits MAX_ENCODED_BYTES (very detailed photos).
+ */
+export async function encodeCanvas(canvas: HTMLCanvasElement, type: string, quality: number): Promise<{ blob: Blob | null; width: number; height: number }> {
+  let blob = await canvasToBlob(canvas, type, quality);
+  if (!blob || (type !== 'image/png' && blob.type !== type)) blob = await canvasToBlob(canvas, 'image/jpeg', quality);
+  for (const q of [0.7, 0.55, 0.4]) {
+    if (!blob || blob.size <= MAX_ENCODED_BYTES) break;
+    if (q < quality) blob = (await canvasToBlob(canvas, 'image/jpeg', q)) ?? blob;
+  }
+  // Still too big at the lowest quality (huge noisy photo, or a large maxSide): shrink
+  // the pixels instead of sending something the AI endpoint will reject.
+  let src = canvas;
+  while (blob && blob.size > MAX_ENCODED_BYTES && Math.max(src.width, src.height) > 480) {
+    const next = document.createElement('canvas');
+    next.width = Math.max(1, Math.round(src.width * 0.75));
+    next.height = Math.max(1, Math.round(src.height * 0.75));
+    const ctx = next.getContext('2d');
+    if (!ctx) break;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, 0, 0, next.width, next.height);
+    if (src !== canvas) releaseCanvas(src);
+    src = next;
+    blob = (await canvasToBlob(src, 'image/jpeg', Math.min(quality, 0.7))) ?? blob;
+  }
+  const out = { blob, width: src.width, height: src.height };
+  if (src !== canvas) releaseCanvas(src);
+  return out;
+}
+
+/**
+ * Free a canvas' backing store right away. iOS Safari caps total canvas memory
+ * (~256–384 MB) and reclaims it lazily, so repeated captures (live scan) would
+ * eventually fail with a blank/zero-size canvas.
+ */
+export function releaseCanvas(canvas: HTMLCanvasElement): void {
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
 export function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -65,8 +111,15 @@ export async function compressImage(file: Blob, opts: CompressOptions = {}): Pro
   if (!file || !file.size) throw new Error('Ảnh trống hoặc không hợp lệ.');
   if (file.type && !file.type.startsWith('image/')) throw new Error('Tệp đã chọn không phải là ảnh.');
 
-  const { img, width, height, close } = await decode(file);
+  const decoded = await decode(file);
+  const { img, width, height } = decoded;
+  let closed = false;
+  const close = () => {
+    if (!closed) decoded.close();
+    closed = true;
+  };
   try {
+    if (!width || !height) throw new Error('Không đọc được ảnh. Hãy thử ảnh JPG hoặc PNG khác.');
     const scale = Math.min(1, maxSide / Math.max(width, height));
     const w = Math.max(1, Math.round(width * scale));
     const h = Math.max(1, Math.round(height * scale));
@@ -82,15 +135,14 @@ export async function compressImage(file: Blob, opts: CompressOptions = {}): Pro
       ctx.fillRect(0, 0, w, h);
     }
     ctx.drawImage(img, 0, 0, w, h);
+    close(); // decoded bitmap no longer needed — free it before encoding
 
-    let blob = await canvasToBlob(canvas, type, quality);
-    // Safari < 17 silently returns PNG (or null) for webp → use JPEG.
-    if (!blob || (type === 'image/webp' && blob.type !== 'image/webp')) {
-      blob = await canvasToBlob(canvas, 'image/jpeg', quality);
-    }
+    const enc = await encodeCanvas(canvas, type, quality);
+    releaseCanvas(canvas);
+    const blob = enc.blob;
     if (!blob) throw new Error('Không nén được ảnh. Hãy thử lại.');
     const dataUrl = await blobToDataUrl(blob);
-    return { blob, dataUrl, width: w, height: h, type: blob.type };
+    return { blob, dataUrl, width: enc.width, height: enc.height, type: blob.type };
   } finally {
     close();
   }
@@ -109,8 +161,9 @@ export async function captureVideoFrame(video: HTMLVideoElement, opts: CompressO
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Trình duyệt không hỗ trợ xử lý ảnh.');
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  let blob = await canvasToBlob(canvas, type, quality);
-  if (!blob) blob = await canvasToBlob(canvas, 'image/jpeg', quality);
+  const enc = await encodeCanvas(canvas, type, quality);
+  releaseCanvas(canvas);
+  const blob = enc.blob;
   if (!blob) throw new Error('Không chụp được khung hình.');
-  return { blob, dataUrl: await blobToDataUrl(blob), width: canvas.width, height: canvas.height, type: blob.type };
+  return { blob, dataUrl: await blobToDataUrl(blob), width: enc.width, height: enc.height, type: blob.type };
 }

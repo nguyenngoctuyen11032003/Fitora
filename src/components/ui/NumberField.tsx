@@ -1,8 +1,9 @@
 import clsx from 'clsx';
 import { Minus, Plus } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { formatNumber, parseDecimal } from '@/lib/format';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { parseDecimal } from '@/lib/format';
 import { FieldShell } from './Input';
+import { clampNumber, formatNumberInput as fmt, sanitizeNumberInput } from './numberFieldLogic';
 
 export interface NumberFieldProps {
   value: number | null;
@@ -33,12 +34,10 @@ export interface NumberFieldProps {
   onBlur?: () => void;
 }
 
-const fmt = (v: number | null, decimals: number) =>
-  v === null || !Number.isFinite(v) ? '' : formatNumber(v, Math.min(2, decimals) as 0 | 1 | 2).replace(/\./g, '');
-
 /**
  * Numeric input that accepts "68,5" or "68.5" (vi keyboards), uses
  * inputMode="decimal", clamps to [min,max] on blur and optional steppers.
+ * ArrowUp / ArrowDown step the value (Shift = ×10).
  */
 export function NumberField({
   value,
@@ -75,13 +74,9 @@ export function NumberField({
     }
   }, [value, decimals]);
 
-  const clamp = (v: number) => {
-    let x = v;
-    if (min !== undefined) x = Math.max(min, x);
-    if (max !== undefined) x = Math.min(max, x);
-    const f = 10 ** decimals;
-    return Math.round(x * f) / f;
-  };
+  const clamp = (v: number) => clampNumber(v, { min, max, decimals });
+  // Opt-in: "-" is only accepted when the caller explicitly allows negatives.
+  const allowNegative = min !== undefined && min < 0;
 
   const emit = (v: number | null) => {
     lastEmitted.current = v;
@@ -89,10 +84,11 @@ export function NumberField({
   };
 
   const handleText = (raw: string) => {
-    const cleaned = raw.replace(decimals === 0 ? /[^\d]/g : /[^\d.,]/g, '');
+    const cleaned = sanitizeNumberInput(raw, decimals, allowNegative);
     setText(cleaned);
     const n = parseDecimal(cleaned);
-    emit(n === null ? null : n);
+    // "68" → "68," keeps the same number: skip the redundant parent update.
+    if (n !== lastEmitted.current) emit(n);
   };
 
   const handleBlur = () => {
@@ -101,16 +97,30 @@ export function NumberField({
       const c = clamp(n);
       setText(fmt(c, decimals));
       if (c !== value) emit(c);
+    } else if (text) {
+      // Leftover junk ("," or "-") → empty field, consistent with the null value.
+      setText('');
+      if (value !== null) emit(null);
     }
     onBlur?.();
   };
 
-  const bump = (dir: 1 | -1) => {
-    const base = value ?? min ?? 0;
-    const c = clamp(base + dir * step);
+  const bump = (dir: 1 | -1, mult = 1) => {
+    const base = value !== null && Number.isFinite(value) ? value : (min ?? 0);
+    const c = clamp(base + dir * step * mult);
     setText(fmt(c, decimals));
-    emit(c);
+    if (c !== value) emit(c);
   };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    bump(e.key === 'ArrowUp' ? 1 : -1, e.shiftKey ? 10 : 1);
+  };
+
+  const describedBy = error ? `${fid}-err` : hint ? `${fid}-hint` : undefined;
+  const atMin = min !== undefined && (value ?? min) <= min;
+  const atMax = max !== undefined && value !== null && value >= max;
 
   const big = size === 'lg';
   const input = (
@@ -126,7 +136,9 @@ export function NumberField({
       disabled={disabled}
       autoFocus={autoFocus}
       aria-invalid={error ? true : undefined}
+      aria-describedby={describedBy}
       onChange={(e) => handleText(e.target.value)}
+      onKeyDown={onKeyDown}
       onBlur={handleBlur}
       className={clsx('tabular text-text', big && '!py-2 text-center !text-[44px] font-extrabold tracking-[-0.04em]')}
     />
@@ -150,7 +162,8 @@ export function NumberField({
         <button
           type="button"
           aria-label="Giảm"
-          disabled={disabled || (min !== undefined && (value ?? min) <= min)}
+          aria-controls={fid}
+          disabled={disabled || atMin}
           onClick={() => bump(-1)}
           className="glass circle -ml-2 !h-11 !w-11 text-text disabled:opacity-30"
         >
@@ -163,7 +176,8 @@ export function NumberField({
           <button
             type="button"
             aria-label="Tăng"
-            disabled={disabled || (max !== undefined && (value ?? 0) >= max)}
+            aria-controls={fid}
+            disabled={disabled || atMax}
             onClick={() => bump(1)}
             className="glass circle -mr-2 !h-11 !w-11 text-text disabled:opacity-30"
           >

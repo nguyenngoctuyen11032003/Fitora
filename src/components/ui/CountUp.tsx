@@ -13,7 +13,10 @@ export interface CountUpProps {
 
 const reduced = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
-/** Animated number (from the previous value to the new one). Instant under reduced motion. */
+/**
+ * Animated number (from the previous value to the new one). Instant under reduced motion.
+ * Screen readers read the live text on demand (no live region), so it isn't announced per frame.
+ */
 export function CountUp({ value, duration = 2200, decimals = 0, format, className }: CountUpProps) {
   const [n, setN] = useState(() => (reduced() ? value : 0));
   const from = useRef(reduced() ? value : 0);
@@ -41,9 +44,7 @@ export function CountUp({ value, duration = 2200, decimals = 0, format, classNam
   }, [value, duration]);
 
   const text = format ? format(n) : formatNumber(n, decimals);
-  return (
-    <span className={className} aria-label={format ? format(value) : formatNumber(value, decimals)}>
-      <span aria-hidden="true">{text}</span>
-    </span>
-  );
+  // Plain text: aria-label on a generic <span> is ignored by most screen readers, and the old
+  // aria-hidden inner span left the number with no accessible text at all.
+  return <span className={className}>{text}</span>;
 }

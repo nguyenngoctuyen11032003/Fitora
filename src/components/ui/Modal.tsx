@@ -108,10 +108,11 @@ export function ConfirmDialog({ open, title, message, confirmLabel = 'Xác nhậ
       }
       footer={
         <>
-          <Button variant="secondary" onClick={onCancel} disabled={loading} block>
+          {/* Destructive dialogs focus "Hủy" first so a stray Enter / Space never deletes. */}
+          <Button variant="secondary" onClick={onCancel} disabled={loading} block data-autofocus={danger ? true : undefined}>
             {cancelLabel}
           </Button>
-          <Button variant={danger ? 'danger' : 'primary'} onClick={onConfirm} loading={loading} block data-autofocus>
+          <Button variant={danger ? 'danger' : 'primary'} onClick={onConfirm} loading={loading} block data-autofocus={danger ? undefined : true}>
             {confirmLabel}
           </Button>
         </>

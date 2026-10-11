@@ -6,3 +6,4 @@ export { Page, type PageProps } from './Page';
 export { ShellContext, useShell, type ShellState } from './ShellContext';
 export { MenuButton, TopBar, type TopBarProps } from './TopBar';
 export { ShellLayout } from './ShellLayout';
+export { prefetchOnIdle, prefetchRoute, ROUTE_LOADERS } from './routes';

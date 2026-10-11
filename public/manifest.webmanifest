@@ -1,6 +1,10 @@
 {
   "name": "Fitora — AI Nutrition & Fitness Coach",
   "short_name": "Fitora",
+  "id": "./",
+  "description": "Huấn luyện viên dinh dưỡng & thể hình AI: chụp món ăn để đếm calo, theo dõi tập luyện, cân nặng và tiến trình.",
+  "dir": "ltr",
+  "categories": ["health", "fitness", "food"],
   "lang": "vi",
   "start_url": "./",
   "scope": "./",
@@ -8,6 +12,11 @@
   "orientation": "portrait",
   "background_color": "#120906",
   "theme_color": "#120906",
+  "shortcuts": [
+    { "name": "Quét món ăn bằng AI", "short_name": "Scan", "url": "./#/scan", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Nhật ký ăn", "short_name": "Nhật ký", "url": "./#/diary", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Tập luyện", "short_name": "Tập luyện", "url": "./#/workout", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ],
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },

@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { initials } from '@/lib/format';
 
 export interface AvatarProps {
@@ -13,6 +13,8 @@ export interface AvatarProps {
 /** Round avatar from profiles.avatar_url with initials fallback (gold → ember). */
 export function Avatar({ src, name, size = 40, className }: AvatarProps) {
   const [broken, setBroken] = useState(false);
+  // A new avatar URL (e.g. just uploaded) gets a fresh chance to load.
+  useEffect(() => setBroken(false), [src]);
   const showImg = src && !broken;
   return (
     <span

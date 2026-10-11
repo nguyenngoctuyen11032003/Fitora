@@ -7,6 +7,7 @@ import { Portal } from '@/components/ui/Portal';
 import { useFocusTrap } from '@/components/ui/useFocusTrap';
 import { useAuth } from '@/context/AuthContext';
 import { useProfile } from '@/context/ProfileContext';
+import { prefetchHandlers } from './routes';
 
 export const MENU_LINKS: { to: string; label: string; hint: string }[] = [
   { to: '/', label: 'Hôm nay', hint: 'Calo, macro, nước, bước' },
@@ -57,8 +58,8 @@ export function MenuOverlay({ open, onClose }: MenuOverlayProps) {
         aria-label="Menu"
         tabIndex={-1}
         className={clsx(
-          'menu-ember pointer-events-auto absolute inset-0 z-[80] flex flex-col overflow-hidden outline-none transition-[opacity,transform] duration-300 ease-out',
-          leaving ? 'scale-[1.02] opacity-0' : 'animate-fade-in',
+          'menu-ember absolute inset-0 z-[80] flex flex-col overflow-hidden outline-none transition-[opacity,transform] duration-300 ease-out',
+          leaving ? 'pointer-events-none scale-[1.02] opacity-0' : 'pointer-events-auto animate-fade-in',
         )}
       >
         {/* glow + grain */}
@@ -71,13 +72,13 @@ export function MenuOverlay({ open, onClose }: MenuOverlayProps) {
             <span className="display text-[22px] text-white">Fitora</span>
           </span>
           <button type="button" onClick={onClose} aria-label="Đóng menu" className="glass circle text-white" data-autofocus>
-            <X className="h-5 w-5" />
+            <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
 
         <p className="relative mt-6 px-6 text-[13px] font-semibold uppercase tracking-[0.18em] text-white/60">Xin chào, {displayName}</p>
 
-        <nav className="no-scrollbar relative mt-3 flex-1 overflow-y-auto px-3 pb-4" aria-label="Điều hướng chính">
+        <nav className="no-scrollbar relative mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-6 [mask-image:linear-gradient(to_bottom,black_calc(100%-28px),transparent)]" aria-label="Điều hướng chính">
           <ul className="flex flex-col">
             {MENU_LINKS.map((l, i) => (
               <li key={l.to} className="animate-fade-slide-left" style={{ animationDelay: `${80 + i * 55}ms` }}>
@@ -85,6 +86,7 @@ export function MenuOverlay({ open, onClose }: MenuOverlayProps) {
                   to={l.to}
                   end={l.to === '/'}
                   onClick={onClose}
+                  {...prefetchHandlers(l.to)}
                   className={({ isActive }) =>
                     clsx(
                       'group flex min-h-[56px] items-center justify-between gap-3 rounded-2xl px-3 py-2 transition-colors hover:bg-black/10',

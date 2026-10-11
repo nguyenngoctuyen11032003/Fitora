@@ -34,9 +34,10 @@ export function bmiCategory(bmi: number): { key: BmiCategory; label: string } {
   return { key, label: BMI_LABELS[key] };
 }
 
-/** Mifflin–St Jeor BMR (kcal/day), rounded. */
+/** Mifflin–St Jeor BMR (kcal/day), rounded. 0 when weight or height is missing/invalid. */
 export function calcBMR(sex: Sex, weightKg: number, heightCm: number, age: number): number {
-  const base = 10 * weightKg + 6.25 * heightCm - 5 * age;
+  if (!(weightKg > 0) || !(heightCm > 0)) return 0;
+  const base = 10 * weightKg + 6.25 * heightCm - 5 * Math.max(0, Number(age) || 0);
   return Math.round(sex === 'male' ? base + 5 : base - 161);
 }
 
@@ -60,14 +61,41 @@ export const MIN_KCAL: Record<Sex, number> = { female: 1200, male: 1500 };
  * Daily calorie target from TDEE.
  * lose: −250/−500/−750 by pace (default medium) · gain: +300 · recomp: −10% · maintain: 0.
  * Floor: 1200 (female) / 1500 (male). Rounded to the nearest 10.
+ * A deficit goal (lose / recomp) never ends up ABOVE maintenance: when TDEE itself
+ * is below the floor (small, older, sedentary bodies) the target stays at TDEE
+ * instead of silently turning a "lose" plan into a surplus.
  */
 export function goalCalories(tdee: number, goal: Goal, pace: GoalPace | null | undefined, sex: Sex): number {
-  let kcal = tdee;
-  if (goal === 'lose') kcal = tdee - LOSE_DEFICIT[pace ?? 'medium'];
-  else if (goal === 'gain') kcal = tdee + GAIN_SURPLUS;
-  else if (goal === 'recomp') kcal = tdee * 0.9;
-  kcal = Math.max(MIN_KCAL[sex] ?? 1200, kcal);
+  const floor = MIN_KCAL[sex] ?? 1200;
+  const planned = plannedCalories(tdee, goal, pace);
+  const deficitGoal = goal === 'lose' || goal === 'recomp';
+  const kcal = Math.max(deficitGoal ? Math.min(floor, tdee) : floor, planned);
   return Math.round(kcal / 10) * 10;
+}
+
+/** TDEE ± the goal adjustment, before the safety floor. */
+function plannedCalories(tdee: number, goal: Goal, pace: GoalPace | null | undefined): number {
+  if (goal === 'lose') return tdee - (LOSE_DEFICIT[pace ?? 'medium'] ?? LOSE_DEFICIT.medium);
+  if (goal === 'gain') return tdee + GAIN_SURPLUS;
+  if (goal === 'recomp') return tdee * 0.9;
+  return tdee;
+}
+
+/** True when goalCalories had to stop at the safety floor (or at TDEE) instead of the planned deficit. */
+export function isCalorieFloored(tdee: number, goal: Goal, pace: GoalPace | null | undefined, sex: Sex): boolean {
+  if (goal !== 'lose' && goal !== 'recomp') return false;
+  return goalCalories(tdee, goal, pace, sex) > Math.round(plannedCalories(tdee, goal, pace) / 10) * 10;
+}
+
+/**
+ * Body weight used for protein g/kg. With a lot of body fat, g/kg of TOTAL weight
+ * over-shoots (≈240 g/day for a 120 kg person), so above BMI 25 (Asian obesity
+ * cut-off) protein is based on the weight at BMI 25 for that height.
+ */
+export function proteinReferenceKg(weightKg: number, heightCm?: number | null): number {
+  if (!(heightCm && heightCm > 0) || !(weightKg > 0)) return weightKg;
+  const m = heightCm / 100;
+  return Math.min(weightKg, 25 * m * m);
 }
 
 export const PROTEIN_PER_KG: Record<Goal, number> = { lose: 2.0, recomp: 2.2, gain: 1.8, maintain: 1.6 };
@@ -82,11 +110,13 @@ export interface Macros {
  * Macro split: protein by g/kg (lose 2.0, recomp 2.2, gain 1.8, maintain 1.6),
  * fat 25% of kcal (30% for gain/maintain), the rest carbs (≥ 0).
  * Protein is capped so that protein + fat never exceed the calorie budget.
+ * Pass `heightCm` to base protein on {@link proteinReferenceKg} (recommended).
+ * 4P + 4C + 9F lands within ±2 kcal of `kcal` (carbs absorb the rounding).
  */
-export function suggestMacros(kcal: number, goal: Goal, weightKg: number): Macros {
+export function suggestMacros(kcal: number, goal: Goal, weightKg: number, heightCm?: number | null): Macros {
   const fatPct = goal === 'gain' || goal === 'maintain' ? 0.3 : 0.25;
   const fat_g = Math.round((kcal * fatPct) / 9);
-  let protein_g = Math.round((PROTEIN_PER_KG[goal] ?? 1.6) * weightKg);
+  let protein_g = Math.round((PROTEIN_PER_KG[goal] ?? 1.6) * proteinReferenceKg(weightKg, heightCm));
   const maxProtein = Math.floor((kcal - fat_g * 9) / 4);
   if (protein_g > maxProtein) protein_g = Math.max(0, maxProtein);
   const carbs_g = Math.max(0, Math.round((kcal - protein_g * 4 - fat_g * 9) / 4));
@@ -108,6 +138,17 @@ export function metKcal(met: number, weightKg: number, minutes: number): number 
 export function stepsKcal(steps: number, weightKg: number): number {
   if (!(steps > 0) || !(weightKg > 0)) return 0;
   return Math.round((steps * 0.04 * weightKg) / 70);
+}
+
+/**
+ * Calories earned back by activity (PLAN §4): the target already includes the profile's
+ * activity factor, so only what goes beyond it counts — max(0, BMR·1.2 + burned − TDEE).
+ * Without a BMR / TDEE model the whole burn counts.
+ */
+export function exerciseBonus(bmr: number | null | undefined, tdee: number | null | undefined, burned: number): number {
+  const b = Math.max(0, Number(burned) || 0);
+  if (!(bmr && bmr > 0) || !(tdee && tdee > 0)) return Math.round(b);
+  return Math.max(0, Math.round(bmr * ACTIVITY_FACTORS.sedentary + b - tdee));
 }
 
 /** target − eaten + burned */

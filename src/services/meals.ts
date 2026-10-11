@@ -1,12 +1,19 @@
 import { db } from '@/lib/supabase';
 import type { MealEntry, MealEntryPatch, NewMealEntry } from '@/types/db';
-import { invalid, run } from './errors';
+import { MEAL_TYPES } from '@/types/db';
+import { invalid, run, runRead, vDate } from './errors';
 import { removeImages, signedUrl, uploadImage } from './storage';
 
 export const MEAL_COLS =
   'id, user_id, eaten_on, meal, name, quantity, unit, grams, kcal, protein_g, carbs_g, fat_g, fiber_g, source, custom_food_id, photo_path, ai_meta, created_at, updated_at';
 
-const nonNeg = (v: unknown) => Math.max(0, Number(v) || 0);
+const SOURCES = ['ai', 'search', 'custom', 'manual'];
+
+/** Finite, ≥ 0 (NaN / Infinity / negative → 0). */
+const nonNeg = (v: unknown) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(0, n) : 0;
+};
 const r1 = (v: unknown) => Math.round(nonNeg(v) * 10) / 10;
 
 function clean<T extends Partial<NewMealEntry>>(e: T): T {
@@ -17,7 +24,13 @@ function clean<T extends Partial<NewMealEntry>>(e: T): T {
     out.name = name;
   }
   if ('unit' in e) out.unit = String(e.unit ?? '').trim().slice(0, 20) || 'phần';
-  if ('quantity' in e && !(Number(e.quantity) > 0)) invalid('Số lượng phải lớn hơn 0.');
+  if ('quantity' in e) {
+    const q = Number(e.quantity);
+    if (!(q > 0) || !Number.isFinite(q)) invalid('Số lượng phải lớn hơn 0.');
+  }
+  if ('eaten_on' in e) vDate(e.eaten_on, 'Ngày ăn không hợp lệ.');
+  if ('meal' in e && !(MEAL_TYPES as string[]).includes(String(e.meal))) invalid('Bữa ăn không hợp lệ.');
+  if ('source' in e && e.source != null && !SOURCES.includes(String(e.source))) out.source = 'manual';
   for (const k of ['grams', 'kcal', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g'] as const) {
     if (k in e) out[k] = r1(e[k]);
   }
@@ -26,8 +39,10 @@ function clean<T extends Partial<NewMealEntry>>(e: T): T {
 
 /** Entries of one day, ordered by meal then creation time. */
 export async function listMeals(date: string): Promise<MealEntry[]> {
-  const rows = await run(
-    db().from('fit_meal_entries').select(MEAL_COLS).eq('eaten_on', date).order('created_at', { ascending: true }).returns<MealEntry[]>(),
+  vDate(date);
+  const rows = await runRead(
+    (signal) =>
+      db().from('fit_meal_entries').select(MEAL_COLS).eq('eaten_on', date).order('created_at', { ascending: true }).abortSignal(signal).returns<MealEntry[]>(),
     'Không tải được nhật ký ăn.',
   );
   return rows ?? [];
@@ -35,15 +50,19 @@ export async function listMeals(date: string): Promise<MealEntry[]> {
 
 /** Entries in a date range (inclusive). */
 export async function listMealsRange(from: string, to: string): Promise<MealEntry[]> {
-  const rows = await run(
-    db()
-      .from('fit_meal_entries')
-      .select(MEAL_COLS)
-      .gte('eaten_on', from)
-      .lte('eaten_on', to)
-      .order('eaten_on', { ascending: true })
-      .order('created_at', { ascending: true })
-      .returns<MealEntry[]>(),
+  vDate(from);
+  vDate(to);
+  const rows = await runRead(
+    (signal) =>
+      db()
+        .from('fit_meal_entries')
+        .select(MEAL_COLS)
+        .gte('eaten_on', from)
+        .lte('eaten_on', to)
+        .order('eaten_on', { ascending: true })
+        .order('created_at', { ascending: true })
+        .abortSignal(signal)
+        .returns<MealEntry[]>(),
     'Không tải được nhật ký ăn.',
   );
   return rows ?? [];
@@ -65,7 +84,24 @@ export async function updateMeal(id: string, patch: MealEntryPatch): Promise<Mea
   );
 }
 
-/** Deletes the entry; its photo is removed too unless another entry still uses it (multi-dish scans share one photo). */
+/**
+ * How long a deleted entry's photo is kept before cleanup. Must outlast the diary's
+ * "Hoàn tác" toast: undo re-inserts the row with the same photo_path, so the file has
+ * to still exist then.
+ */
+export const PHOTO_CLEANUP_DELAY_MS = 15_000;
+
+/** True when some entry still points at `path`. A failed check counts as "in use": an orphan file is harmless, a lost photo is not. */
+async function photoInUse(path: string): Promise<boolean> {
+  const { count, error } = await db().from('fit_meal_entries').select('id', { count: 'exact', head: true }).eq('photo_path', path);
+  return !!error || !!count;
+}
+
+/**
+ * Deletes the entry. Its photo is removed only after PHOTO_CLEANUP_DELAY_MS and only if
+ * no entry uses it by then (multi-dish scans share one photo; an undo restores the row).
+ * If the app closes before then the file stays as a harmless orphan.
+ */
 export async function deleteMeal(id: string): Promise<void> {
   const row = await run(
     db().from('fit_meal_entries').delete().eq('id', id).select('photo_path').maybeSingle<{ photo_path: string | null }>(),
@@ -73,8 +109,11 @@ export async function deleteMeal(id: string): Promise<void> {
   );
   const path = row?.photo_path;
   if (path) {
-    const { count } = await db().from('fit_meal_entries').select('id', { count: 'exact', head: true }).eq('photo_path', path);
-    if (!count) await removeImages([path]).catch(() => {});
+    setTimeout(() => {
+      photoInUse(path)
+        .then((used) => (used ? undefined : removeImages([path])))
+        .catch(() => {});
+    }, PHOTO_CLEANUP_DELAY_MS);
   }
 }
 

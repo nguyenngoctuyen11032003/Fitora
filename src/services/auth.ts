@@ -44,16 +44,27 @@ export async function resendConfirmation(email: string) {
   return run(db().auth.resend({ type: 'signup', email: vEmail(email), options: { emailRedirectTo: `${appBaseUrl()}?flow=signup` } }));
 }
 
+/**
+ * Signs out of Fitora on this device. A global sign-out is attempted first; when the
+ * server can't be reached (offline, 5xx) supabase-js keeps the local session, so we
+ * fall back to a local sign-out — otherwise the user would be "signed out" until the
+ * next reload logs them straight back in.
+ */
 export async function signOut(): Promise<void> {
-  let res;
+  const auth = db().auth;
+  let failed = false;
   try {
-    res = await db().auth.signOut();
-  } catch (e) {
-    throw toFitoraError(e);
+    const res = await auth.signOut();
+    failed = Boolean(res?.error) && !/session missing|session_not_found/i.test(`${res.error?.message} ${(res.error as { code?: string } | null)?.code}`);
+  } catch {
+    failed = true;
   }
-  // Local session is cleared by supabase-js even when the server call fails.
-  if (res?.error && !/session missing|session_not_found/i.test(`${res.error.message} ${(res.error as { code?: string }).code}`)) {
-    throw toFitoraError(res.error);
+  if (!failed) return;
+  try {
+    const res = await auth.signOut({ scope: 'local' });
+    if (res?.error) throw res.error;
+  } catch (e) {
+    throw toFitoraError(e, 'Không đăng xuất được. Vui lòng thử lại.');
   }
 }
 

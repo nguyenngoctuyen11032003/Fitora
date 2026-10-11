@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import { useEffect, useId, useState, type ReactNode } from 'react';
+import { clampRatio } from './progress';
 
 export interface RingProps {
   value: number;
@@ -33,16 +34,14 @@ export function Ring({
   className,
 }: RingProps) {
   const gid = useId().replace(/:/g, '');
-  const r = (size - stroke) / 2;
+  const r = Math.max(0, (size - stroke) / 2);
   const c = 2 * Math.PI * r;
-  const ratio = max > 0 ? value / max : 0;
-  const target = Math.max(0, Math.min(1, ratio));
+  const { ratio, clamped: target, over } = clampRatio(value, max);
   const [shown, setShown] = useState(0);
   useEffect(() => {
     const id = requestAnimationFrame(() => setShown(target));
     return () => cancelAnimationFrame(id);
   }, [target]);
-  const over = ratio > 1;
   const stroke1 = over ? `url(#over-${gid})` : gradient ? `url(#g-${gid})` : color;
 
   return (
@@ -76,6 +75,8 @@ export function Ring({
           strokeLinecap="round"
           strokeDasharray={c}
           strokeDashoffset={c * (1 - shown)}
+          // A zero-length dash with round caps still paints a dot at 12 o'clock: hide it at 0%.
+          strokeOpacity={shown > 0 ? 1 : 0}
           style={{ transition: 'stroke-dashoffset 1.4s cubic-bezier(0.22,1,0.36,1)' }}
         />
       </svg>

@@ -1,9 +1,11 @@
-import type { Session, User } from '@supabase/supabase-js';
+import type { Session, SupabaseClient, User } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase';
 import { signOut as authSignOut, verifyEmailLink } from '@/services/auth';
+import { forgetSignedUrls } from '@/services/storage';
+import { linkErrorMessage, readAuthRedirect } from './authLinks';
 
 export interface AuthState {
   session: Session | null;
@@ -19,36 +21,81 @@ export interface AuthState {
 
 const Ctx = createContext<AuthState | null>(null);
 
-const LINK_ERRORS: Record<string, string> = {
-  otp_expired: 'Liên kết trong email đã hết hạn hoặc đã được dùng. Hãy yêu cầu gửi lại liên kết mới.',
-  access_denied: 'Liên kết không còn hợp lệ. Hãy yêu cầu gửi lại liên kết mới.',
-};
+const WELCOME = 'Đã xác nhận email. Chào mừng bạn đến với Fitora!';
 
-/** Query params from both the real search (?a=b) and the hash route (#/x?a=b). */
-function allParams(): URLSearchParams {
-  const url = new URL(window.location.href);
-  const out = new URLSearchParams(url.search);
-  const q = url.hash.indexOf('?');
-  if (q >= 0) new URLSearchParams(url.hash.slice(q + 1)).forEach((v, k) => out.set(k, v));
+interface BootResult {
+  session: Session | null;
+  recovery: boolean;
+  navTo: string | null;
+  toast: { kind: 'success' | 'error'; message: unknown } | null;
+}
+
+/**
+ * The boot (session + e-mail link) runs ONCE per page load and is shared: under
+ * React StrictMode the effect mounts twice, and spending a one-time token_hash twice
+ * would fail the second time ("link expired") or race the first.
+ */
+let bootPromise: Promise<BootResult> | null = null;
+let bootApplied = false;
+
+// Mirrors Note_mytasks/src/main.js boot(): PKCE ?code is exchanged inside getSession();
+// token_hash links (custom e-mail templates) are spent here with verifyOtp.
+async function boot(client: SupabaseClient): Promise<BootResult> {
+  const out: BootResult = { session: null, recovery: false, navTo: null, toast: null };
+  try {
+    out.session = (await client.auth.getSession()).data.session;
+  } catch (e) {
+    out.toast = { kind: 'error', message: e };
+  }
+  let link;
+  try {
+    link = readAuthRedirect(window.location.href);
+    if (link.cleanUrl) window.history.replaceState(window.history.state, '', link.cleanUrl);
+  } catch {
+    return out; // malformed URL: nothing to do
+  }
+  const { tokenHash, type, flow, hadCode, errorCode, errorDescription } = link;
+
+  if (tokenHash && type) {
+    try {
+      const data = await verifyEmailLink(tokenHash, type);
+      out.session = data?.session ?? out.session;
+      if (type === 'recovery') {
+        out.recovery = true;
+        out.navTo = '/reset';
+      } else {
+        out.toast = { kind: 'success', message: WELCOME };
+        out.navTo = out.session ? '/' : '/login';
+      }
+    } catch (e) {
+      out.toast = { kind: 'error', message: e };
+      out.navTo = type === 'recovery' ? '/forgot' : '/login';
+    }
+  } else if (flow === 'recovery' && hadCode && out.session) {
+    // Legacy PKCE recovery link: PASSWORD_RECOVERY fired inside getSession() before we subscribed.
+    out.recovery = true;
+    out.navTo = '/reset';
+  } else if (flow === 'signup' && hadCode && out.session) {
+    out.toast = { kind: 'success', message: WELCOME };
+    out.navTo = '/';
+  } else if (errorCode || errorDescription) {
+    const msg = linkErrorMessage(errorCode, errorDescription);
+    if (msg) out.toast = { kind: 'error', message: msg };
+    if (flow === 'recovery' || errorCode === 'otp_expired' || errorCode === 'access_denied') out.navTo = '/forgot';
+  }
   return out;
 }
 
-/** Remove auth params (?code, ?flow, ?token_hash, errors) from the address bar. Returns a link error code if any. */
-function cleanAuthParams(): { code: string | null; raw: string | null } {
-  const url = new URL(window.location.href);
-  const hashBody = url.hash.replace(/^#\/?/, '');
-  const hashParams = new URLSearchParams(hashBody.includes('=') && !hashBody.includes('/') ? hashBody : '');
-  const hashError = hashParams.has('error') || hashParams.has('error_code');
-  const code =
-    url.searchParams.get('error_code') || hashParams.get('error_code') || url.searchParams.get('error') || hashParams.get('error');
-  const raw = url.searchParams.get('error_description') || hashParams.get('error_description');
-  const keys = ['code', 'error', 'error_code', 'error_description', 'type', 'flow', 'token_hash'];
-  if (keys.some((k) => url.searchParams.has(k)) || hashError) {
-    keys.forEach((k) => url.searchParams.delete(k));
-    if (hashError) url.hash = '#/login';
-    window.history.replaceState(window.history.state, '', url);
-  }
-  return { code, raw };
+/** Same user (id, e-mail, metadata, updated_at) → keep the old object so `user` deps don't re-fire on every token refresh. */
+function sameUser(a: User | null, b: User | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.id === b.id &&
+    a.email === b.email &&
+    a.updated_at === b.updated_at &&
+    JSON.stringify(a.user_metadata ?? null) === JSON.stringify(b.user_metadata ?? null)
+  );
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -63,63 +110,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   toastRef.current = toast;
 
   useEffect(() => {
-    if (!supabase) {
+    const client = supabase;
+    if (!client) {
       setLoading(false);
       return;
     }
     let alive = true;
+    // Once onAuthStateChange has spoken (INITIAL_SESSION fires after supabase-js finished
+    // its own init), it is the source of truth: the boot result must not overwrite a
+    // newer state, e.g. a sign-out in another tab while the e-mail link was verified.
+    let eventSeen = false;
     const go = (path: string) => navRef.current(path, { replace: true });
 
-    // Mirrors Note_mytasks/src/main.js boot(): PKCE ?code is exchanged inside getSession();
-    // token_hash links (custom e-mail templates) are spent here with verifyOtp.
-    (async () => {
-      let s: Session | null = null;
-      try {
-        s = (await supabase.auth.getSession()).data.session;
-      } catch (e) {
-        toastRef.current.error(e);
-      }
-      const params = allParams();
-      const tokenHash = params.get('token_hash');
-      const type = params.get('type');
-      const flow = params.get('flow');
-      const hadCode = params.has('code');
-      const { code: errCode, raw } = cleanAuthParams();
-
-      if (tokenHash && type) {
-        try {
-          const data = await verifyEmailLink(tokenHash, type);
-          s = data?.session ?? s;
-          if (type === 'recovery') {
-            setRecovery(true);
-            go('/reset');
-          } else {
-            toastRef.current.success('Đã xác nhận email. Chào mừng bạn đến với Fitora!');
-            go(s ? '/' : '/login');
-          }
-        } catch (e) {
-          toastRef.current.error(e);
-          go(type === 'recovery' ? '/forgot' : '/login');
-        }
-      } else if (flow === 'recovery' && hadCode && s) {
-        // Legacy PKCE recovery link: PASSWORD_RECOVERY fired inside getSession() before we subscribed.
-        setRecovery(true);
-        go('/reset');
-      } else if (flow === 'signup' && hadCode && s) {
-        toastRef.current.success('Đã xác nhận email. Chào mừng bạn đến với Fitora!');
-        go('/');
-      } else if (errCode || raw) {
-        const msg = (errCode && LINK_ERRORS[errCode]) || (raw ? decodeURIComponent(raw.replace(/\+/g, ' ')) : null);
-        if (msg) toastRef.current.error(msg);
-        if (errCode === 'otp_expired' || errCode === 'access_denied') go('/forgot');
-      }
+    const { data } = client.auth.onAuthStateChange((event, s) => {
       if (!alive) return;
-      setSession(s);
-      setLoading(false);
-    })();
-
-    const { data } = supabase.auth.onAuthStateChange((event, s) => {
-      if (!alive) return;
+      eventSeen = true;
       if (event === 'PASSWORD_RECOVERY') {
         setRecovery(true);
         setSession(s);
@@ -129,31 +134,69 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event === 'SIGNED_OUT') {
         setRecovery(false);
         setSession(null);
+        forgetSignedUrls();
         return;
       }
       setSession((prev) => (prev?.access_token === s?.access_token ? prev : s));
     });
+
+    bootPromise ??= boot(client);
+    bootPromise
+      .then((r) => {
+        if (!alive) return;
+        const first = !bootApplied;
+        bootApplied = true;
+        if (first) {
+          if (r.recovery) setRecovery(true);
+          if (r.toast) {
+            if (r.toast.kind === 'success') toastRef.current.success(String(r.toast.message));
+            else toastRef.current.error(r.toast.message);
+          }
+          if (r.navTo) go(r.navTo);
+        }
+        setSession((prev) => (eventSeen ? prev : r.session));
+        setLoading(false);
+      })
+      .catch(() => {
+        /* boot never rejects, but never leave the splash up */
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+
     return () => {
       alive = false;
       data.subscription.unsubscribe();
     };
   }, []);
 
-  const signOut = useCallback(async () => {
-    try {
-      await authSignOut();
-    } finally {
-      setRecovery(false);
-      setSession(null);
-      navRef.current('/login', { replace: true });
-    }
+  const signingOut = useRef<Promise<void> | null>(null);
+  const signOut = useCallback(() => {
+    // A double tap on "Đăng xuất" shares one request.
+    signingOut.current ??= (async () => {
+      try {
+        await authSignOut();
+      } finally {
+        setRecovery(false);
+        setSession(null);
+        forgetSignedUrls();
+        signingOut.current = null;
+        navRef.current('/login', { replace: true });
+      }
+    })();
+    return signingOut.current;
   }, []);
 
   const endRecovery = useCallback(() => setRecovery(false), []);
 
+  const userRef = useRef<User | null>(null);
+  const nextUser = session?.user ?? null;
+  if (!sameUser(userRef.current, nextUser)) userRef.current = nextUser;
+  const user = userRef.current;
+
   const value = useMemo<AuthState>(
-    () => ({ session, user: session?.user ?? null, loading, recovery, endRecovery, signOut }),
-    [session, loading, recovery, endRecovery, signOut],
+    () => ({ session, user, loading, recovery, endRecovery, signOut }),
+    [session, user, loading, recovery, endRecovery, signOut],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

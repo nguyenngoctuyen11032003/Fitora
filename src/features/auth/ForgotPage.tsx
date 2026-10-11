@@ -1,28 +1,35 @@
 import { Mail, MailCheck, Send } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { requestPasswordReset } from '@/services/auth';
 import { errorMessage } from '@/services/errors';
 import { AuthLayout } from './AuthLayout';
+import { useCooldown } from './PasswordToggle';
 
 export default function ForgotPage() {
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const [cooldown, startCooldown] = useCooldown();
+  const inFlight = useRef(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (inFlight.current || cooldown > 0) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
       await requestPasswordReset(email);
       setSent(true);
+      startCooldown();
     } catch (err) {
       setError(errorMessage(err));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
@@ -48,8 +55,8 @@ export default function ForgotPage() {
             Nếu <strong className="text-text">{email.trim()}</strong> có tài khoản, bạn sẽ nhận được email trong vài phút. Mở liên kết trên thiết bị này để
             đặt mật khẩu mới.
           </p>
-          <Button variant="secondary" block onClick={() => setSent(false)}>
-            Gửi lại
+          <Button variant="secondary" block disabled={cooldown > 0} onClick={() => setSent(false)}>
+            {cooldown > 0 ? `Gửi lại (${cooldown}s)` : 'Gửi lại'}
           </Button>
         </div>
       ) : (
@@ -60,6 +67,8 @@ export default function ForgotPage() {
             inputMode="email"
             autoComplete="email"
             autoCapitalize="none"
+            spellCheck={false}
+            autoFocus
             placeholder="ban@email.com"
             icon={<Mail />}
             value={email}

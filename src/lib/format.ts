@@ -11,8 +11,9 @@ const finite = (n: unknown): number => {
 
 /** Number with vi-VN separators; `digits` = max fraction digits (0–2). */
 export function formatNumber(n: number | string | null | undefined, digits: 0 | 1 | 2 = 0): string {
-  const v = finite(n);
-  return (digits === 0 ? nf0 : digits === 1 ? nf1 : nf2).format(digits === 0 ? Math.round(v) : v);
+  // Round first and drop the sign of a zero result: Intl prints -0.3 → "-0".
+  const r = round(finite(n), digits);
+  return (digits === 0 ? nf0 : digits === 1 ? nf1 : nf2).format(r);
 }
 
 /** "1.850 kcal" */
@@ -24,7 +25,7 @@ export function formatKcal(n: number | string | null | undefined, withUnit = tru
 /** "25 g" / "2,5 g" (≥ 10 g rounded, below 1 decimal) */
 export function formatGrams(n: number | string | null | undefined, withUnit = true): string {
   const v = finite(n);
-  const s = formatNumber(v, Math.abs(v) >= 10 ? 0 : 1);
+  const s = formatNumber(v, Math.abs(v) >= 9.95 ? 0 : 1);
   return withUnit ? `${s} g` : s;
 }
 
@@ -36,7 +37,7 @@ export function formatKg(n: number | string | null | undefined, withUnit = true)
 
 /** "1,5 L" for ≥ 1000 ml, else "250 ml" */
 export function formatMl(n: number | string | null | undefined): string {
-  const v = finite(n);
+  const v = Math.round(finite(n)); // 999,6 ml → "1 L", not "1.000 ml"
   return Math.abs(v) >= 1000 ? `${formatNumber(v / 1000, 2)} L` : `${formatNumber(v)} ml`;
 }
 
@@ -56,7 +57,7 @@ export function formatPercent(ratio: number, digits: 0 | 1 = 0): string {
 
 /** Signed: "+120" / "−80" (true minus sign). */
 export function formatSigned(n: number, digits: 0 | 1 = 0): string {
-  const v = finite(n);
+  const v = round(finite(n), digits); // the sign follows what is shown: 0.4 → "0", not "+0"
   const s = formatNumber(Math.abs(v), digits);
   return v > 0 ? `+${s}` : v < 0 ? `−${s}` : s;
 }
@@ -77,8 +78,14 @@ export function parseDecimal(input: string | number | null | undefined): number 
     if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
     else s = s.replace(/,/g, '');
   } else if (hasComma) {
-    s = s.replace(',', '.');
+    // "1,234,567" → thousands; "68,5" → decimal
+    s = (s.match(/,/g)?.length ?? 0) > 1 ? s.replace(/,/g, '') : s.replace(',', '.');
+  } else if (hasDot && (s.match(/\./g)?.length ?? 0) > 1) {
+    // "1.234.567" (vi thousands) → 1234567
+    s = s.replace(/\./g, '');
   }
+  // Plain decimals only: Number() would also accept '0x10', '1e5', 'Infinity'.
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(s)) return null;
   const v = Number(s);
   return Number.isFinite(v) ? v : null;
 }
@@ -86,7 +93,8 @@ export function parseDecimal(input: string | number | null | undefined): number 
 /** Round to `digits` decimals (for storing nutrients). */
 export function round(n: number, digits = 1): number {
   const f = 10 ** digits;
-  return Math.round(finite(n) * f) / f;
+  const r = Math.round(finite(n) * f) / f;
+  return r === 0 ? 0 : r; // never -0
 }
 
 /** Initials for an avatar fallback. */

@@ -40,7 +40,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={clsx(
-        'relative inline-flex select-none items-center justify-center whitespace-nowrap tracking-[-0.01em] transition-[transform,filter,background-color] duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50',
+        'relative inline-flex select-none items-center justify-center whitespace-nowrap tracking-[-0.01em] transition-[transform,filter,background-color] duration-150 touch-manipulation active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100',
         SIZES[size],
         VARIANTS[variant],
         block && 'w-full',
