@@ -1,9 +1,10 @@
 import clsx from 'clsx';
 import { Flame, Target, Utensils } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type ComponentType, type CSSProperties } from 'react';
+import { memo, useEffect, useId, useRef, useState, type ComponentType, type CSSProperties } from 'react';
 import { CountUp } from '@/components/ui/CountUp';
 import { formatNumber } from '@/lib/format';
-import type { EnergyBalance } from '../metrics';
+import { ACTIVITY_LABELS, type ActivityLevel } from '@/types/db';
+import { heroSummary, progressPercent, type EnergyBalance } from '../metrics';
 
 // 240° arc gauge: starts lower-left (150°), sweeps clockwise over the top to lower-right (30°).
 const CX = 150;
@@ -22,6 +23,23 @@ const ARC = (() => {
   return `M ${a.x.toFixed(2)} ${a.y.toFixed(2)} A ${R} ${R} 0 1 1 ${b.x.toFixed(2)} ${b.y.toFixed(2)}`;
 })();
 
+/** Gauge tick marks: static geometry, built once instead of on every animation frame. */
+const TICKS = Array.from({ length: 25 }, (_, i) => {
+  const deg = START + (SWEEP * i) / 24;
+  const major = i % 6 === 0;
+  const inR = R - (major ? 27 : 23);
+  return {
+    x1: CX + (R - 18) * Math.cos(rad(deg)),
+    y1: CY + (R - 18) * Math.sin(rad(deg)),
+    x2: CX + inR * Math.cos(rad(deg)),
+    y2: CY + inR * Math.sin(rad(deg)),
+    major,
+  };
+});
+
+/** Ring + count-up share one duration so the number lands when the arc does. */
+const ANIM_MS = 1600;
+
 /** Digit size shrinks with length so "−1.250" still fits a 360px screen. */
 function heroSize(text: string): string {
   const len = text.length;
@@ -33,18 +51,32 @@ function heroSize(text: string): string {
 
 interface Props {
   energy: EnergyBalance;
+  /** Profile activity level, named in the note about activity already in the target. */
+  activityLevel?: ActivityLevel | null;
 }
 
-export function CalorieHero({ energy }: Props) {
+export const CalorieHero = memo(function CalorieHero({ energy, activityLevel }: Props) {
+  // With an activity allowance only the activity beyond it is added ("Cộng thêm");
+  // the hint shows everything burned today so the user sees both numbers.
+  const hasAllowance = energy.allowance > 0;
+  const burnHint = hasAllowance
+    ? energy.burned > 0
+      ? `đã đốt ${formatNumber(energy.burned)}`
+      : undefined
+    : energy.stepsKcal > 0
+      ? `${formatNumber(energy.stepsKcal)} từ bước`
+      : undefined;
   const gid = useId().replace(/:/g, '');
   const { over, remaining, progress } = energy;
   const shownValue = Math.abs(remaining);
-  const sizeCls = heroSize(formatNumber(shownValue));
+  // Measure with the "+" sign shown when over budget so the digits never overflow.
+  const sizeCls = heroSize((over ? '+' : '') + formatNumber(shownValue));
 
   // Sweep from 0 on mount; JS tween so the glowing tip follows the arc.
-  const p = useTween(over ? 1 : progress, 1600);
+  const p = useTween(over ? 1 : progress, ANIM_MS);
   const tip = pt(START + SWEEP * Math.max(0.0001, p));
-  const pctLabel = Math.round((energy.budget > 0 ? energy.eaten / energy.budget : 0) * 100);
+  // Same rule as the other progress labels: never "100 %" before the budget is actually used.
+  const pctLabel = progressPercent(energy.eaten, energy.budget);
 
   return (
     <section
@@ -61,6 +93,9 @@ export function CalorieHero({ energy }: Props) {
       />
 
       <div className="relative mx-auto w-full max-w-[300px]">
+        <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {heroSummary(energy)}
+        </p>
         <svg viewBox={`0 0 300 ${VIEW_H}`} className="block w-full" aria-hidden="true">
           <defs>
             <linearGradient id={`arc-${gid}`} x1="0" y1="1" x2="1" y2="0">
@@ -78,23 +113,18 @@ export function CalorieHero({ energy }: Props) {
           </defs>
           {/* track + tick marks */}
           <path d={ARC} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={STROKE} strokeLinecap="round" />
-          {Array.from({ length: 25 }, (_, i) => {
-            const deg = START + (SWEEP * i) / 24;
-            const o = { x: CX + (R - 18) * Math.cos(rad(deg)), y: CY + (R - 18) * Math.sin(rad(deg)) };
-            const inner = { x: CX + (R - (i % 6 === 0 ? 27 : 23)) * Math.cos(rad(deg)), y: CY + (R - (i % 6 === 0 ? 27 : 23)) * Math.sin(rad(deg)) };
-            return (
-              <line
-                key={i}
-                x1={o.x}
-                y1={o.y}
-                x2={inner.x}
-                y2={inner.y}
-                stroke={i % 6 === 0 ? 'rgba(237,228,216,0.35)' : 'rgba(237,228,216,0.12)'}
-                strokeWidth={i % 6 === 0 ? 2 : 1.25}
-                strokeLinecap="round"
-              />
-            );
-          })}
+          {TICKS.map((t, i) => (
+            <line
+              key={i}
+              x1={t.x1}
+              y1={t.y1}
+              x2={t.x2}
+              y2={t.y2}
+              stroke={t.major ? 'rgba(237,228,216,0.35)' : 'rgba(237,228,216,0.12)'}
+              strokeWidth={t.major ? 2 : 1.25}
+              strokeLinecap="round"
+            />
+          ))}
           {/* progress */}
           <path
             d={ARC}
@@ -129,7 +159,7 @@ export function CalorieHero({ energy }: Props) {
               )}
             >
               {over && <span aria-hidden="true">+</span>}
-              <CountUp value={shownValue} />
+              <CountUp value={shownValue} duration={ANIM_MS} />
             </span>
           </div>
           <span className="mt-1 text-[13px] font-semibold tracking-[0.02em] text-muted">
@@ -138,8 +168,8 @@ export function CalorieHero({ energy }: Props) {
         </div>
       </div>
 
-      {/* Equation: Mục tiêu − Đã ăn + Đã tập */}
-      <div className="relative mt-1 flex items-stretch justify-between gap-1" aria-label="Công thức calo còn lại">
+      {/* Equation: Mục tiêu − Đã ăn + Tiêu hao (tập luyện + bước chân vượt mức đã tính trong mục tiêu) */}
+      <div className="relative mt-1 flex items-stretch justify-between gap-1" role="group" aria-label="Công thức calo còn lại">
         <EqItem icon={Target} color="var(--text)" label="Mục tiêu" value={energy.target} />
         <Op>−</Op>
         <EqItem icon={Utensils} color="var(--gold)" label="Đã ăn" value={energy.eaten} />
@@ -147,14 +177,20 @@ export function CalorieHero({ energy }: Props) {
         <EqItem
           icon={Flame}
           color="var(--burn)"
-          label="Đã tập"
-          value={energy.burned}
-          hint={energy.stepsKcal > 0 ? `${formatNumber(energy.stepsKcal)} từ bước` : undefined}
+          label={hasAllowance ? 'Cộng thêm' : 'Tiêu hao'}
+          value={energy.bonus}
+          hint={burnHint}
         />
       </div>
+      {hasAllowance && (
+        <p className="relative mt-2.5 text-center text-[11.5px] leading-snug text-muted">
+          Mục tiêu đã tính sẵn ~{formatNumber(energy.allowance)} kcal vận động/ngày
+          {activityLevel ? ` (mức “${ACTIVITY_LABELS[activityLevel]}”)` : ''}. Chỉ phần đốt vượt mức này mới được cộng thêm.
+        </p>
+      )}
     </section>
   );
-}
+});
 
 function Op({ children }: { children: string }) {
   return (
@@ -195,11 +231,12 @@ function EqItem({
 
 /** Eased (out-quart) tween toward `target`; instant under prefers-reduced-motion. */
 function useTween(target: number, duration: number): number {
-  const [v, setV] = useState(0);
-  const cur = useRef(0);
+  const reduced = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  // Under reduced motion start at the target: no one-frame flash of an empty ring.
+  const [v, setV] = useState(() => (reduced() ? target : 0));
+  const cur = useRef(v);
   useEffect(() => {
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    if (reduce) {
+    if (reduced()) {
       cur.current = target;
       setV(target);
       return;

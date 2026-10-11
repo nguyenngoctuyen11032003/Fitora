@@ -3,7 +3,8 @@ import { Leaf } from 'lucide-react';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { formatNumber } from '@/lib/format';
 import type { DaySummary } from '@/types/db';
-import type { Targets } from '../metrics';
+import { macroStatus, type Targets } from '../metrics';
+import { memo } from 'react';
 
 const ITEMS = [
   { key: 'protein_g', label: 'Đạm', color: 'var(--protein)' },
@@ -12,14 +13,12 @@ const ITEMS = [
 ] as const;
 
 /** Protein / Carbs / Fat cards (eaten / target g) + a small fiber line. */
-export function MacroCards({ summary, targets, className }: { summary: DaySummary; targets: Targets; className?: string }) {
+export const MacroCards = memo(function MacroCards({ summary, targets, className }: { summary: DaySummary; targets: Targets; className?: string }) {
   return (
     <section aria-label="Dinh dưỡng đa lượng" className={className}>
       <div className="grid grid-cols-3 gap-2.5">
         {ITEMS.map((m) => {
-          const eaten = summary[m.key];
-          const target = targets[m.key];
-          const left = target - eaten;
+          const { eaten, target, left } = macroStatus(summary[m.key], targets[m.key]);
           const over = left < 0;
           return (
             <div key={m.key} className="glass-card flex min-w-0 flex-col px-3 pb-3.5 pt-3">
@@ -52,4 +51,4 @@ export function MacroCards({ summary, targets, className }: { summary: DaySummar
       </div>
     </section>
   );
-}
+});

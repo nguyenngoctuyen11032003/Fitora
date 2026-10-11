@@ -1,5 +1,5 @@
-import { Droplet, Undo2 } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { Droplet, Minus, Undo2 } from 'lucide-react';
+import { memo, useEffect, useId, useState } from 'react';
 import { CountUp } from '@/components/ui/CountUp';
 import { formatMl, formatNumber } from '@/lib/format';
 import { dropletFills } from '../metrics';
@@ -8,29 +8,39 @@ interface Props {
   waterMl: number;
   targetMl: number;
   date: string;
-  onSet: (ml: number) => void;
+  /** Relative change (ml); the owner applies it to the latest optimistic value and clamps at 0. */
+  onAdd: (deltaMl: number) => void;
   className?: string;
 }
 
 const DROP = 'M12 1.5C12 1.5 3 12.6 3 20.2a9 9 0 0 0 18 0C21 12.6 12 1.5 12 1.5Z';
 
 /** Glass droplets that fill up, +250/+500 quick adds and a one-tap undo. */
-export function WaterCard({ waterMl, targetMl, date, onSet, className }: Props) {
+export const WaterCard = memo(function WaterCard({ waterMl, targetMl, date, onAdd, className }: Props) {
   const [history, setHistory] = useState<number[]>([]);
   useEffect(() => setHistory([]), [date]);
   const fills = dropletFills(waterMl, targetMl);
   const done = waterMl >= targetMl;
   const per = Math.round(targetMl / fills.length);
 
+  // History of added deltas (not absolute values), so undo stays correct after quick
+  // taps or a +250 from the quick-action row in between.
   const add = (delta: number) => {
-    setHistory((h) => [...h.slice(-19), waterMl]);
-    onSet(waterMl + delta);
+    setHistory((h) => [...h.slice(-19), delta]);
+    onAdd(delta);
   };
   const undo = () => {
-    const prev = history[history.length - 1];
-    if (prev === undefined) return;
+    const last = history[history.length - 1];
+    if (last === undefined) return;
     setHistory((h) => h.slice(0, -1));
-    onSet(prev);
+    onAdd(-last);
+  };
+  // No undo history (e.g. after a reload): the same button removes one glass instead,
+  // so an over-count can always be corrected from here.
+  const canUndo = history.length > 0;
+  const minus = () => {
+    if (waterMl <= 0) return;
+    onAdd(-Math.min(250, waterMl));
   };
 
   return (
@@ -49,7 +59,7 @@ export function WaterCard({ waterMl, targetMl, date, onSet, className }: Props) 
             <span className="mb-1 text-[13px] font-semibold text-muted">/ {formatNumber(targetMl)} ml</span>
           </div>
         </div>
-        <span className={`mt-0.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${done ? 'bg-water/20 text-water' : 'bg-white/[0.06] text-muted'}`}>
+        <span className={`mt-0.5 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${done ? 'bg-water/20 text-water' : 'bg-white/[0.06] text-muted'}`}>
           {done ? 'Đã đủ' : `Còn ${formatMl(Math.max(0, targetMl - waterMl))}`}
         </span>
       </div>
@@ -72,19 +82,30 @@ export function WaterCard({ waterMl, targetMl, date, onSet, className }: Props) 
         <button type="button" onClick={() => add(500)} className="glass pill flex-1 !px-3 text-[14px] font-bold text-text">
           <span className="text-water">+</span>500 ml
         </button>
-        <button
-          type="button"
-          onClick={undo}
-          disabled={!history.length}
-          aria-label="Hoàn tác lần thêm nước gần nhất"
-          className="glass circle text-text disabled:pointer-events-none disabled:opacity-30"
-        >
-          <Undo2 className="h-[18px] w-[18px]" />
-        </button>
+        {canUndo ? (
+          <button
+            type="button"
+            onClick={undo}
+            aria-label="Hoàn tác lần thêm nước gần nhất"
+            className="glass circle text-text"
+          >
+            <Undo2 className="h-[18px] w-[18px]" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={minus}
+            disabled={waterMl <= 0}
+            aria-label="Bớt 250 ml nước"
+            className="glass circle text-text disabled:pointer-events-none disabled:opacity-30"
+          >
+            <Minus className="h-[18px] w-[18px]" />
+          </button>
+        )}
       </div>
     </section>
   );
-}
+});
 
 function DropletGlass({ fill, index }: { fill: number; index: number }) {
   const id = useId().replace(/:/g, '');

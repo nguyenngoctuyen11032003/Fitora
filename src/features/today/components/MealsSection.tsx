@@ -4,6 +4,7 @@ import { formatNumber } from '@/lib/format';
 import { MEAL_LABELS, type MealType } from '@/types/db';
 import type { MealGroup } from '../metrics';
 import { SectionHeader } from './SectionHeader';
+import { memo } from 'react';
 
 const ICONS: Record<MealType, typeof Coffee> = { breakfast: Coffee, lunch: Soup, dinner: Moon, snack: Cookie };
 
@@ -15,7 +16,7 @@ interface Props {
 }
 
 /** Prominent "Scan bữa ăn" CTA + 4-meal summary (tap → /diary). */
-export function MealsSection({ groups, date, suggestedMeal, className }: Props) {
+export const MealsSection = memo(function MealsSection({ groups, date, suggestedMeal, className }: Props) {
   const diary = `/diary?date=${date}`;
   return (
     <section aria-labelledby="today-meals" className={className}>
@@ -84,4 +85,4 @@ export function MealsSection({ groups, date, suggestedMeal, className }: Props) 
       </ul>
     </section>
   );
-}
+});

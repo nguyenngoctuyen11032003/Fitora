@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import { AlertTriangle, ChevronRight, Sparkles, ThumbsUp } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import type { Insight } from '../insights';
 
 const TONE = {
@@ -10,7 +10,7 @@ const TONE = {
 } as const;
 
 /** "Nhận xét" coaching line; tap to cycle through the other insights. */
-export function InsightStrip({ insights, className }: { insights: Insight[]; className?: string }) {
+export const InsightStrip = memo(function InsightStrip({ insights, className }: { insights: Insight[]; className?: string }) {
   const [idx, setIdx] = useState(0);
   const key = insights.map((i) => i.id).join('|');
   useEffect(() => setIdx(0), [key]);
@@ -53,10 +53,10 @@ export function InsightStrip({ insights, className }: { insights: Insight[]; cla
   );
 
   return multi ? (
-    <button type="button" className={cls} onClick={() => setIdx((i) => (i + 1) % insights.length)} aria-label={`Nhận xét: ${cur.text}. Chạm để xem nhận xét tiếp theo.`}>
+    <button type="button" className={cls} onClick={() => setIdx((i) => (i + 1) % insights.length)} aria-label={`Nhận xét: ${cur.text.replace(/\.\s*$/, '')}. Chạm để xem nhận xét tiếp theo.`}>
       {body}
     </button>
   ) : (
     <div className={cls}>{body}</div>
   );
-}
+});

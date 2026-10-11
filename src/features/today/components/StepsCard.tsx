@@ -1,5 +1,5 @@
 import { Footprints, Pencil } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { BottomSheet } from '@/components/ui/BottomSheet';
 import { Button } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
@@ -7,28 +7,39 @@ import { CountUp } from '@/components/ui/CountUp';
 import { NumberField } from '@/components/ui/NumberField';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { formatNumber } from '@/lib/format';
+import { progressPercent } from '../metrics';
 
 interface Props {
   steps: number;
   target: number;
   kcal: number;
   onSave: (steps: number) => void;
+  /** Optional controlled sheet state (the quick-action row opens it). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   className?: string;
 }
 
 const QUICK = [1000, 2000, 5000];
 
 /** Steps progress; tap to edit in a bottom sheet (manual entry — no wearable sync in v1). */
-export function StepsCard({ steps, target, kcal, onSave, className }: Props) {
-  const [open, setOpen] = useState(false);
+export const StepsCard = memo(function StepsCard({ steps, target, kcal, onSave, open: openProp, onOpenChange, className }: Props) {
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = (v: boolean) => {
+    if (openProp === undefined) setOpenState(v);
+    onOpenChange?.(v);
+  };
   const [draft, setDraft] = useState<number | null>(steps);
   useEffect(() => {
     if (open) setDraft(steps);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-  const pct = target > 0 ? Math.round((steps / target) * 100) : 0;
+  const pct = progressPercent(steps, target);
+  const reached = target > 0 && steps >= target;
 
   const save = () => {
+    if (draft === null) return;
     onSave(Math.max(0, Math.round(draft ?? 0)));
     setOpen(false);
   };
@@ -61,7 +72,7 @@ export function StepsCard({ steps, target, kcal, onSave, className }: Props) {
         </div>
         <ProgressBar value={steps} max={target} height={8} showOver={false} className="relative mt-4" />
         <div className="relative mt-2.5 flex justify-between text-[12px] font-medium text-muted">
-          <span>{pct >= 100 ? 'Đã đạt mục tiêu' : `${pct}% mục tiêu`}</span>
+          <span>{reached ? 'Đã đạt mục tiêu' : `${pct}% mục tiêu`}</span>
           <span>
             ≈ <span className="tabular font-semibold text-burn">{formatNumber(kcal)}</span> kcal
           </span>
@@ -74,7 +85,7 @@ export function StepsCard({ steps, target, kcal, onSave, className }: Props) {
         title="Bước chân hôm nay"
         description="Nhập số bước từ điện thoại hoặc đồng hồ của bạn."
         footer={
-          <Button block size="lg" onClick={save}>
+          <Button block size="lg" onClick={save} disabled={draft === null}>
             Lưu số bước
           </Button>
         }
@@ -98,10 +109,10 @@ export function StepsCard({ steps, target, kcal, onSave, className }: Props) {
                 +{formatNumber(q)}
               </Chip>
             ))}
-            <Chip onClick={() => setDraft(target)}>Đạt mục tiêu</Chip>
+            {(draft ?? 0) < target && <Chip onClick={() => setDraft(target)}>Đạt mục tiêu</Chip>}
           </div>
         </div>
       </BottomSheet>
     </>
   );
-}
+});

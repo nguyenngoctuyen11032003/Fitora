@@ -1,5 +1,5 @@
 import { Activity, Bike, Check, Dumbbell, Flower2, Footprints, HeartPulse, Plus, Trophy, Waves, Zap } from 'lucide-react';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
@@ -27,7 +27,7 @@ interface Props {
 }
 
 /** Today's workouts (planned / done). Planned ones can be checked off inline. */
-export function WorkoutsSection({ workouts, onComplete, className }: Props) {
+export const WorkoutsSection = memo(function WorkoutsSection({ workouts, onComplete, className }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const sorted = [...workouts].sort((a, b) => (a.status === b.status ? 0 : a.status === 'planned' ? -1 : 1));
 
@@ -107,4 +107,4 @@ export function WorkoutsSection({ workouts, onComplete, className }: Props) {
       )}
     </section>
   );
-}
+});
