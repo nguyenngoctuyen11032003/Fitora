@@ -452,7 +452,7 @@ export function PlanStep({
       <section className="relative px-1 pb-2 pt-1">
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -right-16 -top-10 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(237,180,11,0.22),transparent_65%)]"
+          className="pointer-events-none absolute -right-5 -top-10 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(237,180,11,0.22),transparent_65%)]"
         />
         <div className="flex items-center justify-between gap-2">
           <span className="eyebrow text-[rgba(237,180,11,0.9)]">Mục tiêu mỗi ngày</span>

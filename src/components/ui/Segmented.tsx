@@ -71,7 +71,7 @@ export function Segmented<T extends string>({ options, value, onChange, ariaLabe
             className={clsx(
               'relative inline-flex items-center justify-center gap-1.5 rounded-full font-semibold transition-colors duration-200 disabled:opacity-40',
               block && 'flex-1',
-              size === 'sm' ? 'min-h-[36px] px-3 text-[13px]' : 'min-h-[40px] px-4 text-sm',
+              size === 'sm' ? 'min-h-[44px] px-3 text-[13px]' : 'min-h-[44px] px-4 text-sm',
               on ? 'text-[#1a0e02]' : 'text-muted hover:text-text',
               !block && on && 'bg-gold',
             )}
