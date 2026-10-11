@@ -47,6 +47,18 @@ const n = (v: unknown, min = 0) => {
 
 const GRAM_UNITS = ['g', 'gr', 'gr.', 'gram', 'grams', 'gam'];
 
+const r1 = (v: number) => Math.round(v * 10) / 10;
+
+/** Confidence a dish drops to when its own numbers contradict each other ("Cần kiểm tra"). */
+export const LOW_CONFIDENCE = 0.4;
+
+/**
+ * Clean one AI dish: safe strings/numbers, gram-like units folded to 'g', and
+ * plausibility checks — macros can't outweigh the dish, kcal must roughly match
+ * Atwater 4/4/9 from the macros, energy can't be denser than pure fat (9 kcal/g).
+ * A dish that contradicts itself is corrected and dropped to LOW_CONFIDENCE so the
+ * review screen shows "Cần kiểm tra".
+ */
 export function normalizeDish(d: Partial<AiDish>): AiDish {
   const quantity = n(d.quantity) || 1;
   let unit = String(d.unit ?? 'phần').trim().slice(0, 20) || 'phần';
@@ -56,11 +68,45 @@ export function normalizeDish(d: Partial<AiDish>): AiDish {
     unit = 'g';
     if (!grams) grams = quantity;
   }
-  const protein_g = n(d.protein_g);
-  const carbs_g = n(d.carbs_g);
-  const fat_g = n(d.fat_g);
-  // Missing / zero kcal but macros present: derive it (Atwater 4/4/9).
-  const kcal = n(d.kcal) || Math.round(protein_g * 4 + carbs_g * 4 + fat_g * 9);
+  let protein_g = n(d.protein_g);
+  let carbs_g = n(d.carbs_g);
+  let fat_g = n(d.fat_g);
+  let fiber_g = n(d.fiber_g);
+  let confidence = d.confidence === undefined || d.confidence === null ? 0.5 : Math.min(1, n(d.confidence));
+
+  if (grams > 0) {
+    // Macros (and fiber) cannot weigh more than the whole dish.
+    const mass = protein_g + carbs_g + fat_g;
+    if (mass > grams) {
+      const k = grams / mass;
+      protein_g = r1(protein_g * k);
+      carbs_g = r1(carbs_g * k);
+      fat_g = r1(fat_g * k);
+      confidence = Math.min(confidence, LOW_CONFIDENCE);
+    }
+    if (fiber_g > grams) fiber_g = r1(grams);
+  }
+
+  const fromMacros = Math.round(protein_g * 4 + carbs_g * 4 + fat_g * 9);
+  let kcal = n(d.kcal);
+  if (!kcal) {
+    // Missing / zero kcal but macros present: derive it (Atwater 4/4/9).
+    kcal = fromMacros;
+  } else if (fromMacros > kcal && fromMacros - kcal > Math.max(60, kcal * 0.3)) {
+    // The macros alone guarantee more energy than the stated kcal → the kcal is wrong.
+    kcal = fromMacros;
+    confidence = Math.min(confidence, LOW_CONFIDENCE);
+  } else if (fromMacros > 0 && kcal - fromMacros > Math.max(100, fromMacros)) {
+    // kcal is more than double what the macros account for: one of them is off. Keep the
+    // kcal (the macros may just be incomplete) but flag the dish for review.
+    confidence = Math.min(confidence, LOW_CONFIDENCE);
+  }
+  // Denser than pure fat is physically impossible.
+  if (grams > 0 && kcal > grams * 9) {
+    kcal = Math.round(grams * 9);
+    confidence = Math.min(confidence, LOW_CONFIDENCE);
+  }
+
   return {
     name: String(d.name ?? 'Món ăn').trim().slice(0, 120) || 'Món ăn',
     ingredients: Array.isArray(d.ingredients) ? d.ingredients.map(String).slice(0, 20) : [],
@@ -71,8 +117,8 @@ export function normalizeDish(d: Partial<AiDish>): AiDish {
     protein_g,
     carbs_g,
     fat_g,
-    fiber_g: n(d.fiber_g),
-    confidence: d.confidence === undefined || d.confidence === null ? 0.5 : Math.min(1, n(d.confidence)),
+    fiber_g,
+    confidence,
   };
 }
 

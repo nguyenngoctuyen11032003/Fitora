@@ -1,6 +1,6 @@
 // /onboarding — 5-step survey → BMI/BMR/TDEE → calorie & macro plan → save.
 import clsx from 'clsx';
-import { ArrowRight, ChevronLeft, LogOut, Sparkles } from 'lucide-react';
+import { ArrowRight, ChevronLeft, LogOut, Sparkles, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
@@ -114,10 +114,20 @@ export default function OnboardingPage() {
       </Page>
     );
   }
-  return <OnboardingFlow uid={uid} initial={initial} />;
+  const latestKg = weightQ.data?.weight_kg != null ? Number(weightQ.data.weight_kg) : null;
+  return <OnboardingFlow uid={uid} initial={initial} latestKg={latestKg} />;
 }
 
-function OnboardingFlow({ uid, initial }: { uid: string; initial: { draft: GoalDraft; step: number } }) {
+function OnboardingFlow({
+  uid,
+  initial,
+  latestKg,
+}: {
+  uid: string;
+  initial: { draft: GoalDraft; step: number };
+  /** Latest logged weigh-in (re-run only) — not logged again when unchanged. */
+  latestKg: number | null;
+}) {
   const navigate = useNavigate();
   const toast = useToast();
   const { signOut } = useAuth();
@@ -240,16 +250,21 @@ function OnboardingFlow({ uid, initial }: { uid: string; initial: { draft: GoalD
         onboarded_at: rerun && fit?.onboarded_at ? fit.onboarded_at : new Date().toISOString(),
       });
       setFit(saved);
-      try {
-        await upsertMeasurement({ measured_on: todayISO(), weight_kg: weight });
-        notifyDataChanged('body');
-      } catch (err) {
-        // Profile is saved — the first weigh-in can be added later from /body.
-        toast.error(err);
+      // First run: the start weight becomes the first weigh-in. Re-run: only log a NEW
+      // weight (re-confirming the latest weigh-in must not add a duplicate entry today).
+      if (!rerun || latestKg == null || Math.abs(latestKg - weight) >= 0.05) {
+        try {
+          await upsertMeasurement({ measured_on: todayISO(), weight_kg: weight });
+          notifyDataChanged('body');
+        } catch (err) {
+          // Profile is saved — the first weigh-in can be added later from /body.
+          toast.error(err);
+        }
       }
+      notifyDataChanged('profile');
       writeDraft(uid, null);
       await refresh();
-      toast.success('Đã lưu kế hoạch. Chào mừng đến với Fitora!');
+      toast.success(rerun ? 'Đã cập nhật kế hoạch của bạn.' : 'Đã lưu kế hoạch. Chào mừng đến với Fitora!');
       navigate('/', { replace: true });
     } catch (err) {
       toast.error(err);
@@ -334,7 +349,7 @@ function OnboardingFlow({ uid, initial }: { uid: string; initial: { draft: GoalD
         <p className="eyebrow mb-3 animate-fade-in text-[rgba(237,180,11,0.9)]">
           <span className="tabular">0{step + 1}</span> · {meta.eyebrow}
         </p>
-        <h1 ref={headingRef} tabIndex={-1} className="display animate-speed-reveal text-[42px] text-text outline-none">
+        <h1 ref={headingRef} tabIndex={-1} className="display animate-speed-reveal break-words text-[42px] text-text outline-none [overflow-wrap:anywhere]">
           {step === 0 && displayName !== 'bạn' ? (
             <>
               Chào {displayName.split(' ').slice(-1)[0]},<br />
@@ -360,7 +375,20 @@ function OnboardingFlow({ uid, initial }: { uid: string; initial: { draft: GoalD
         )}
       </div>
 
-      {step === 0 && (
+      {step === 0 && fit?.onboarded_at && (
+        <button
+          type="button"
+          onClick={() => {
+            writeDraft(uid, null);
+            navigate('/', { replace: true });
+          }}
+          className="mx-auto mt-8 inline-flex min-h-[44px] items-center gap-2 rounded-full px-4 text-[13px] font-semibold text-muted hover:text-text"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+          Giữ kế hoạch hiện tại, quay lại
+        </button>
+      )}
+      {step === 0 && !fit?.onboarded_at && (
         <button
           type="button"
           onClick={() => void signOut()}

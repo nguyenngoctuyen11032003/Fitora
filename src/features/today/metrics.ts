@@ -174,13 +174,23 @@ export function greetingName(displayName: string): string {
   return parts.length ? parts[parts.length - 1] : 'bạn';
 }
 
-/** Meal most likely being logged at this hour (pre-selects the scan screen). */
-export function mealForHour(hour: number): MealType {
-  if (hour >= 4 && hour < 10) return 'breakfast';
-  if (hour >= 10 && hour < 14) return 'lunch';
-  if (hour >= 14 && hour < 17) return 'snack';
-  if (hour >= 17 && hour < 22) return 'dinner';
+/**
+ * Meal most likely being logged at this time (pre-selects scan / search / "Ăn lại nhanh").
+ * Same boundaries as the food search's guessMeal(), so every screen suggests the same meal:
+ * sáng 04:00–10:29 · trưa 10:30–14:29 · tối 17:00–21:29 · ăn vặt otherwise.
+ */
+export function mealForHour(hour: number, minute = 0): MealType {
+  const h = ((Math.floor(Number(hour) || 0) % 24) + 24) % 24;
+  const m = h * 60 + Math.max(0, Math.min(59, Math.floor(Number(minute) || 0)));
+  if (m >= 4 * 60 && m < 10 * 60 + 30) return 'breakfast';
+  if (m >= 10 * 60 + 30 && m < 14 * 60 + 30) return 'lunch';
+  if (m >= 17 * 60 && m < 21 * 60 + 30) return 'dinner';
   return 'snack';
+}
+
+/** Coarse clock key: changes when the hour or the suggested meal changes (drives re-renders). */
+export function clockKey(d: Date): string {
+  return `${d.getDate()}-${d.getHours()}-${mealForHour(d.getHours(), d.getMinutes())}`;
 }
 
 export interface MealGroup {
@@ -270,9 +280,72 @@ export function computeStreaks(
   };
 }
 
+/**
+ * Consecutive days (ending today) whose intake exceeded the calorie target even after
+ * crediting the day's whole workout burn (generous on purpose: a hard-training day is
+ * never flagged unfairly, so when the streak fires it is solid). Today counts only when
+ * `today.over`; while today is still under budget the streak is 0 — the insight is only
+ * meaningful once today is over as well. Unlogged days break the streak (no data ≠ over).
+ */
+export function overBudgetStreak(
+  history: Pick<RangeSummaryRow, 'day' | 'kcal_in' | 'workout_kcal'>[],
+  today: { date: string; over: boolean },
+  kcalTarget: number,
+): number {
+  if (!today.over || !(kcalTarget > 0)) return 0;
+  const byDay = new Map(history.map((r) => [r.day, r]));
+  let n = 1;
+  let d = addDays(today.date, -1);
+  for (let guard = 0; guard < 400; guard++) {
+    const r = byDay.get(d);
+    if (!r || !(nn(r.kcal_in) > kcalTarget + nn(r.workout_kcal))) break;
+    n++;
+    d = addDays(d, -1);
+  }
+  return n;
+}
+
 /** Screen-reader sentence for the calorie gauge (the SVG itself is decorative). */
 export function heroSummary(e: Pick<EnergyBalance, 'remaining' | 'eaten' | 'budget' | 'over'>): string {
   const pct = progressPercent(e.eaten, e.budget);
   const head = e.over ? `Đã vượt ${formatNumber(-e.remaining)} kcal` : `Còn ${formatNumber(e.remaining)} kcal`;
   return `${head}. Đã ăn ${formatNumber(e.eaten)} trên ngân sách ${formatNumber(e.budget)} kcal (${pct}%).`;
+}
+
+/**
+ * Today's meals and totals after entries were added / removed on this screen (optimistic
+ * view until the refetch lands). Ignores rows of another day and ids already present, so
+ * applying the same delta twice is harmless. Returns the same arrays when nothing changed.
+ */
+export function applyMealDelta(
+  meals: MealEntry[],
+  summary: DaySummary,
+  date: string,
+  added: MealEntry[],
+  removedIds: string[] = [],
+): { meals: MealEntry[]; summary: DaySummary } {
+  const have = new Set(meals.map((m) => m.id));
+  const removeSet = new Set(removedIds);
+  const removed = meals.filter((m) => removeSet.has(m.id));
+  const fresh: MealEntry[] = [];
+  for (const e of added) {
+    if (!e || e.eaten_on !== date || have.has(e.id) || removeSet.has(e.id)) continue;
+    have.add(e.id);
+    fresh.push(e);
+  }
+  if (!removed.length && !fresh.length) return { meals, summary };
+  const keys = ['kcal', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g'] as const;
+  const delta = (k: (typeof keys)[number]) => fresh.reduce((a, m) => a + nn(m[k]), 0) - removed.reduce((a, m) => a + nn(m[k]), 0);
+  const fix = (v: number) => Math.max(0, Math.round(v * 10) / 10);
+  return {
+    meals: [...meals.filter((m) => !removeSet.has(m.id)), ...fresh],
+    summary: {
+      ...summary,
+      kcal_in: fix(nn(summary.kcal_in) + delta('kcal')),
+      protein_g: fix(nn(summary.protein_g) + delta('protein_g')),
+      carbs_g: fix(nn(summary.carbs_g) + delta('carbs_g')),
+      fat_g: fix(nn(summary.fat_g) + delta('fat_g')),
+      fiber_g: fix(nn(summary.fiber_g) + delta('fiber_g')),
+    },
+  };
 }

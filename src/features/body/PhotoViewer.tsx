@@ -33,7 +33,14 @@ export function PhotoViewer({ photos, index, urls, rows, onIndex, onDelete, onCo
   const [deleting, setDeleting] = useState(false);
   useEffect(() => setConfirm(false), [index]);
   const close = () => onIndex(null);
-  useFocusTrap(panel, open, close);
+  // Escape first dismisses the inline delete confirmation, then the viewer.
+  useFocusTrap(panel, open, confirm ? () => setConfirm(false) : close);
+  // The focused control can unmount (delete confirm closes, photo deleted → next one shown);
+  // pull focus back into the dialog so Escape / Tab / arrows keep working.
+  useEffect(() => {
+    const el = panel.current;
+    if (open && el && !el.contains(document.activeElement)) el.focus({ preventScroll: true });
+  }, [open, confirm, index, photos.length]);
 
   const go = (d: 1 | -1) => {
     if (index === null) return;

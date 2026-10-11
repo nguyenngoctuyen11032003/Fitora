@@ -1,17 +1,19 @@
 import clsx from 'clsx';
-import { ChevronDown, Pencil, Trash2 } from 'lucide-react';
+import { BookmarkCheck, ChevronDown, Pencil, Sparkles, Trash2 } from 'lucide-react';
 import { useId } from 'react';
 import { Chip } from '@/components/ui/Chip';
 import { GlassButton } from '@/components/ui/GlassButton';
 import { MACROS } from '@/components/ui/MacroBar';
 import { NumberField } from '@/components/ui/NumberField';
 import { formatGrams, formatNumber } from '@/lib/format';
+import type { CustomFood } from '@/types/db';
+import { remembers, servingNutrients, servingText } from './saved';
 import { confidenceLevel, macroShares, SCAN_UNITS, setGrams, setQuantity, setUnit, type ScanDish } from './scale';
 
 const CONF = {
-  high: { label: 'Chắc chắn', cls: 'border-ok/40 bg-ok/10 text-ok' },
-  medium: { label: 'Khá chắc', cls: 'border-gold/40 bg-gold/10 text-gold' },
-  low: { label: 'Cần kiểm tra', cls: 'border-[var(--danger-text)]/40 bg-danger/10 text-[var(--danger-text)]' },
+  high: { label: 'Chắc chắn', cls: 'border-[rgba(127,209,139,0.4)] bg-[rgba(127,209,139,0.1)] text-ok' },
+  medium: { label: 'Khá chắc', cls: 'border-[rgba(237,180,11,0.4)] bg-[rgba(237,180,11,0.1)] text-gold' },
+  low: { label: 'Cần kiểm tra', cls: 'border-[rgba(255,107,94,0.4)] bg-[rgba(225,6,0,0.1)] text-[var(--danger-text)]' },
 } as const;
 
 export function ConfidenceBadge({ value }: { value: number | null }) {
@@ -80,9 +82,45 @@ interface DishCardProps {
   index: number;
   onChange: (d: ScanDish) => void;
   onRemove: () => void;
+  /** Saved food with the same name ("Món của tôi"), if any. */
+  saved?: CustomFood | null;
+  onApplySaved?: (food: CustomFood) => void;
+  onRevertSaved?: () => void;
 }
 
-export function DishCard({ dish, index, onChange, onRemove }: DishCardProps) {
+/** On/off switch row (44px+ target). */
+export function RememberSwitch({ checked, onChange, title, hint }: { checked: boolean; onChange: (v: boolean) => void; title: string; hint: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="flex min-h-[48px] w-full items-center gap-3 rounded-2xl px-1 text-left"
+    >
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="text-[14px] font-bold text-text">{title}</span>
+        <span className="mt-0.5 text-[12px] leading-snug text-muted">{hint}</span>
+      </span>
+      <span
+        aria-hidden="true"
+        className={clsx(
+          'relative h-7 w-12 shrink-0 rounded-full border transition-colors duration-200 motion-reduce:transition-none',
+          checked ? 'border-[rgba(237,180,11,0.7)] bg-gold' : 'border-line bg-white/[0.08]',
+        )}
+      >
+        <span
+          className={clsx(
+            'absolute top-0.5 h-[22px] w-[22px] rounded-full shadow transition-transform duration-200 motion-reduce:transition-none',
+            checked ? 'translate-x-[22px] bg-[#1a0e02]' : 'translate-x-0.5 bg-text/80',
+          )}
+        />
+      </span>
+    </button>
+  );
+}
+
+export function DishCard({ dish, index, onChange, onRemove, saved, onApplySaved, onRevertSaved }: DishCardProps) {
   const nameId = useId();
   const isGrams = dish.unit === 'g';
   const nameMissing = !dish.name.trim();
@@ -105,8 +143,8 @@ export function DishCard({ dish, index, onChange, onRemove }: DishCardProps) {
           </label>
           <div
             className={clsx(
-              'group flex items-center gap-2 rounded-xl border border-transparent px-1 transition-colors focus-within:border-gold/60 focus-within:bg-white/[0.05]',
-              nameMissing && '!border-[var(--danger-text)]/70',
+              'group flex items-center gap-2 rounded-xl border border-transparent px-1 transition-colors focus-within:border-[rgba(237,180,11,0.6)] focus-within:bg-white/[0.05]',
+              nameMissing && '!border-[rgba(255,107,94,0.7)]',
             )}
           >
             <input
@@ -136,6 +174,34 @@ export function DishCard({ dish, index, onChange, onRemove }: DishCardProps) {
           {extra > 0 && <Chip size="sm">+{extra}</Chip>}
         </div>
       )}
+
+      {dish.savedFoodId ? (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border border-[rgba(127,209,139,0.3)] bg-ok/[0.07] px-3 py-2">
+          <BookmarkCheck className="h-4 w-4 shrink-0 text-ok" aria-hidden="true" />
+          <span className="min-w-0 flex-1 text-[13px] font-semibold text-text/90">Đang dùng số liệu đã lưu của bạn</span>
+          {dish.aiBackup && onRevertSaved && (
+            <button type="button" onClick={onRevertSaved} className="min-h-[44px] shrink-0 text-[13px] font-bold text-gold">
+              Dùng ước tính AI
+            </button>
+          )}
+        </div>
+      ) : saved && onApplySaved ? (
+        <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-[rgba(237,180,11,0.3)] bg-gold/[0.07] p-3">
+          <p className="flex items-start gap-2 text-[13px] leading-snug text-text/90">
+            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
+            <span className="min-w-0">
+              Bạn đã lưu <span className="font-bold">{saved.name}</span>: <span className="tabular font-bold text-gold">{formatNumber(servingNutrients(saved).kcal)} kcal</span> / <span className="whitespace-nowrap">{servingText(saved)}</span>
+            </span>
+          </p>
+          <button
+            type="button"
+            onClick={() => onApplySaved(saved)}
+            className="min-h-[44px] rounded-full bg-[rgba(237,180,11,0.9)] px-4 text-[14px] font-bold text-[#1a0e02] transition-transform active:scale-[0.98]"
+          >
+            Dùng số liệu đã lưu
+          </button>
+        </div>
+      ) : null}
 
       <div className="mt-4 grid grid-cols-[1fr_112px] gap-2.5">
         <NumberField
@@ -179,6 +245,19 @@ export function DishCard({ dish, index, onChange, onRemove }: DishCardProps) {
 
       <div className="mt-4 border-t border-line pt-3.5">
         <MacroMini dish={dish} />
+      </div>
+
+      <div className="mt-3 border-t border-line pt-2">
+        <RememberSwitch
+          checked={remembers(dish)}
+          onChange={(v) => onChange({ ...dish, remember: v })}
+          title="Ghi nhớ món này"
+          hint={
+            saved || dish.savedFoodId
+              ? 'Cập nhật trong Món của tôi với số liệu này'
+              : 'Lưu vào Món của tôi — lần sau chọn lại, không cần quét'
+          }
+        />
       </div>
     </article>
   );

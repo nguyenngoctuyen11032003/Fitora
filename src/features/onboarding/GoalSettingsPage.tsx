@@ -89,10 +89,11 @@ export default function GoalSettingsPage() {
   // recomputed from the latest weigh-in, so it may already differ when the page opens.
   const saved = useMemo(() => savedPatch(fit), [fit]);
   const changedKeys = useMemo(() => (draft && plan ? patchDiff(draftToPatch(draft, plan), saved) : []), [draft, plan, saved]);
-  const baseChangedKeys = useMemo(() => {
+  const basePatch = useMemo(() => {
     const p = base ? computePlan(base.draft) : null;
-    return base && p ? patchDiff(draftToPatch(base.draft, p), saved) : [];
-  }, [base, saved]);
+    return base && p ? draftToPatch(base.draft, p) : null;
+  }, [base]);
+  const baseChangedKeys = useMemo(() => (basePatch ? patchDiff(basePatch, saved) : []), [basePatch, saved]);
   // Targets refreshed only because the inputs moved on (new weigh-in, birthday) since the last save.
   const refreshed = Boolean(base && draft === base.draft && baseChangedKeys.length > 0);
 
@@ -100,10 +101,18 @@ export default function GoalSettingsPage() {
   // An invalid edit (no plan) still counts as a change, so the footer stays and Save explains what is wrong.
   const dirty = Boolean(draft && (plan ? weightChanged || changedKeys.length > 0 : base && draft !== base.draft));
   const pageRef = useRef<HTMLElement>(null);
+  // Only edits the user made deserve a "leave without saving?" prompt — not a plan that
+  // was merely refreshed from a newer weigh-in (the banner already explains that one).
+  const userEdited = Boolean(
+    draft &&
+      base &&
+      draft !== base.draft &&
+      (!plan || !basePatch || weightChanged || patchDiff(draftToPatch(draft, plan), basePatch).length > 0),
+  );
 
   // Dirty-state guard: reload / close tab, and in-app exits (header back button, links).
   useEffect(() => {
-    if (!dirty || saving) return;
+    if (!userEdited || saving) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = '';
@@ -122,7 +131,7 @@ export default function GoalSettingsPage() {
       window.removeEventListener('beforeunload', onBeforeUnload);
       document.removeEventListener('click', onClick, true);
     };
-  }, [dirty, saving]);
+  }, [userEdited, saving]);
 
   // Live: a target pointing the wrong way for the goal is flagged while typing.
   const shownErrors = useMemo<StepErrors>(() => {
@@ -238,7 +247,7 @@ export default function GoalSettingsPage() {
         <div className={clsx('flex flex-col gap-8', !dirty && 'pb-2')}>
           {refreshed && (
             <p role="status" className="-mb-4 rounded-2xl border border-[rgba(237,180,11,0.35)] bg-[rgba(237,180,11,0.08)] px-4 py-3 text-[13px] leading-snug text-[rgba(237,228,216,0.9)]">
-              Kế hoạch đã được tính lại theo cân nặng mới nhất ({formatNumber(draft.weight_kg ?? 0, 1)} kg)
+              Kế hoạch đã được tính lại theo số liệu mới nhất ({formatNumber(draft.weight_kg ?? 0, 1)} kg · {shownPlan.age} tuổi)
               {fit?.calorie_target ? <> — kế hoạch đã lưu là {formatNumber(fit.calorie_target)} kcal</> : null}. Nhấn <b>Lưu</b> để áp dụng.
             </p>
           )}

@@ -1,6 +1,6 @@
-import { ChevronLeft, ChevronRight, CopyPlus, Plus, ScanLine, Utensils } from 'lucide-react';
+import { BookmarkCheck, ChevronLeft, ChevronRight, CopyPlus, Layers, Plus, ScanLine, Utensils } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
 import { BigNumber, Button, EmptyState, GlassButton, GlassCard, MacroBar, ProgressBar, ScreenHeader, Skeleton, useToast } from '@/components/ui';
 import { useProfile } from '@/context/ProfileContext';
@@ -10,17 +10,32 @@ import { notifyDataChanged, onDataChanged } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { useAsync } from '@/lib/hooks';
 import { latestWeight } from '@/services/body';
-import { listCustomFoods } from '@/services/foods';
+import { listCustomFoods, markCustomFoodUsed } from '@/services/foods';
 import { addMealEntries, deleteMeal, listMeals } from '@/services/meals';
 import { getDaySummary } from '@/services/summary';
-import { MEAL_LABELS, MEAL_TYPES, type MealEntry, type MealType } from '@/types/db';
+import { MEAL_LABELS, MEAL_TYPES, type MealEntry, type MealTemplate, type MealType } from '@/types/db';
 import { FoodSheet } from './components/FoodSheet';
 import { EntryThumb, MacroInline, MEAL_ICONS, portionLabel, useMealPhotoUrls } from './components/parts';
+import { MealTemplatesSheet } from './components/MealTemplatesSheet';
 import { QuickAddSheet } from './components/QuickAddSheet';
-import { copyEntries, diaryBalance, entryToInsert, groupByMeal, guessMeal, optionForEdit, sortByLogged, sumNutrients } from './lib';
+import { SaveTemplateSheet } from './components/SaveTemplateSheet';
+import {
+  copyEntries,
+  diaryBalance,
+  entryToInsert,
+  groupByMeal,
+  guessMeal,
+  optionForEdit,
+  sameDishes,
+  sortByLogged,
+  sumNutrients,
+  templatesForMeal,
+} from './lib';
+import { useMealTemplates, type LogCallbacks } from './useSmartLog';
 
 export default function DiaryPage() {
   const toast = useToast();
+  const navigate = useNavigate();
   const { fit } = useProfile();
   const [params, setParams] = useSearchParams();
   const today = todayISO();
@@ -31,6 +46,9 @@ export default function DiaryPage() {
 
   const meals = useAsync(async () => ({ date, rows: await listMeals(date) }), [date]);
   const customs = useAsync(() => listCustomFoods(), []);
+  const reloadCustoms = customs.reload;
+  useEffect(() => onDataChanged((k) => (k === 'foods' || k === 'any') && void reloadCustoms()), [reloadCustoms]);
+  const tpl = useMealTemplates();
   const { reload } = meals;
   useEffect(() => onDataChanged((k) => (k === 'meals' || k === 'any') && void reload()), [reload]);
   // Burn side of the balance (workouts + steps) — same source and formula as Today.
@@ -137,6 +155,9 @@ export default function DiaryPage() {
       const added = await addMealEntries(copyEntries(source, date, meal));
       setRows((d) => (d && d.date === date ? { ...d, rows: [...d.rows, ...added] } : d));
       notifyDataChanged('meals');
+      // Saved foods eaten again count as a use (best effort, never throws).
+      const ids = added.map((x) => x.custom_food_id).filter((x): x is string => !!x);
+      if (ids.length) void markCustomFoodUsed(ids, meal).then((r) => r.length && notifyDataChanged('foods'));
       const label = MEAL_LABELS[meal].toLowerCase();
       toast.show(`Đã chép ${added.length} món vào ${label}.`, {
         action: {
@@ -159,6 +180,28 @@ export default function DiaryPage() {
       copyBusy.current = false;
       setCopying(null);
     }
+  };
+
+  // ---- meal templates ("Bữa mẫu") -------------------------------------------
+  const [saveFor, setSaveFor] = useState<MealType | null>(null);
+  const [templatesFor, setTemplatesFor] = useState<MealType | null>(null);
+  const [templateBusy, setTemplateBusy] = useState<string | null>(null);
+  const logCb: LogCallbacks = useMemo(
+    () => ({
+      onAdded: (added) => setRows((d) => (d && d.date === date ? { ...d, rows: [...d.rows, ...added] } : d)),
+      onRemoved: (ids) => {
+        const gone = new Set(ids);
+        setRows((d) => d && { ...d, rows: d.rows.filter((x) => !gone.has(x.id)) });
+      },
+    }),
+    [setRows, date],
+  );
+  const logTemplate = async (t: MealTemplate, meal: MealType) => {
+    if (templateBusy) return false;
+    setTemplateBusy(t.id);
+    const added = await tpl.log(t, date, meal, logCb);
+    setTemplateBusy(null);
+    return !!added;
   };
 
   return (
@@ -228,6 +271,13 @@ export default function DiaryPage() {
             copyLabel={date === today ? 'hôm qua' : 'ngày trước'}
             copying={copying === m}
             onCopy={copyMeal}
+            templates={templatesForMeal(tpl.templates, m, 2)}
+            allTemplates={tpl.templates.length}
+            savedAs={groups[m].length ? tpl.templates.find((t) => sameDishes(t.items, groups[m])) : undefined}
+            templateBusy={templateBusy}
+            onLogTemplate={(t) => void logTemplate(t, m)}
+            onOpenTemplates={() => setTemplatesFor(m)}
+            onSaveTemplate={() => setSaveFor(m)}
           />
         ))}
       </div>
@@ -239,9 +289,9 @@ export default function DiaryPage() {
           title={date === today ? 'Hôm nay chưa ghi món nào' : 'Ngày này chưa có món nào'}
           description="Chụp ảnh để AI tính calo, hoặc tìm trong hơn 150 món Việt quen thuộc."
           action={
-            <Link to={`/scan?meal=${nextMeal}&date=${date}`}>
-              <Button icon={<ScanLine className="h-4 w-4" />}>Scan bữa ăn</Button>
-            </Link>
+            <Button icon={<ScanLine className="h-4 w-4" />} onClick={() => navigate(`/scan?meal=${nextMeal}&date=${date}`)}>
+              Scan bữa ăn
+            </Button>
           }
         />
       )}
@@ -265,6 +315,23 @@ export default function DiaryPage() {
         onSaved={upsert}
         onDelete={remove}
       />
+      <SaveTemplateSheet
+        open={!!saveFor}
+        onClose={() => setSaveFor(null)}
+        meal={saveFor ?? 'breakfast'}
+        entries={saveFor ? groups[saveFor] : []}
+        existingNames={tpl.templates.map((t) => t.name)}
+        onSave={tpl.create}
+      />
+      <MealTemplatesSheet
+        open={!!templatesFor}
+        onClose={() => setTemplatesFor(null)}
+        templates={tpl.templates}
+        meal={templatesFor ?? nextMeal}
+        onLog={logTemplate}
+        onRename={tpl.rename}
+        onDelete={tpl.remove}
+      />
     </Page>
   );
 }
@@ -281,6 +348,13 @@ function MealCard({
   copyLabel,
   copying,
   onCopy,
+  templates,
+  allTemplates,
+  savedAs,
+  templateBusy,
+  onLogTemplate,
+  onOpenTemplates,
+  onSaveTemplate,
 }: {
   meal: MealType;
   date: string;
@@ -294,6 +368,16 @@ function MealCard({
   copyLabel: string;
   copying: boolean;
   onCopy: (meal: MealType) => void;
+  /** Templates offered on an empty meal (one tap logs the whole meal). */
+  templates: MealTemplate[];
+  /** Total number of templates (for "Bữa mẫu khác"). */
+  allTemplates: number;
+  /** Template with exactly these dishes, if any. */
+  savedAs?: MealTemplate;
+  templateBusy: string | null;
+  onLogTemplate: (t: MealTemplate) => void;
+  onOpenTemplates: () => void;
+  onSaveTemplate: () => void;
 }) {
   const Icon = MEAL_ICONS[meal];
   const sum = useMemo(() => sumNutrients(entries), [entries]);
@@ -344,6 +428,37 @@ function MealCard({
         </button>
       )}
 
+      {!loading && entries.length === 0 && templates.length > 0 && (
+        <div className="mt-3 flex flex-col gap-2">
+          {templates.map((t) => {
+            const busy = templateBusy === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => onLogTemplate(t)}
+                disabled={!!templateBusy}
+                aria-busy={busy}
+                aria-label={`Ghi bữa mẫu ${t.name} (${t.items.length} món, ${formatNumber(t.total_kcal)} kcal) vào ${MEAL_LABELS[meal].toLowerCase()}`}
+                className="flex min-h-[44px] w-full items-center gap-2 rounded-2xl border border-gold/25 bg-gold/[0.06] px-3 py-2 text-left text-[13px] text-muted transition-colors hover:bg-gold/10 disabled:opacity-60"
+              >
+                <Layers className="h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate">
+                  <span className="font-semibold text-text">{busy ? 'Đang ghi…' : t.name}</span>
+                  {' · '}
+                  {t.items.length} món · <span className="tabular">{formatNumber(t.total_kcal)} kcal</span>
+                </span>
+              </button>
+            );
+          })}
+          {allTemplates > templates.length && (
+            <button type="button" onClick={onOpenTemplates} className="min-h-[44px] self-start rounded-full px-1 text-[13px] font-semibold text-gold">
+              Bữa mẫu khác…
+            </button>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <Skeleton className="mt-4 h-14 w-full" />
       ) : (
@@ -371,6 +486,30 @@ function MealCard({
             ))}
           </ul>
         )
+      )}
+
+      {!loading && entries.length > 0 && (
+        <div className="mt-1 flex justify-end">
+          {savedAs ? (
+            <button
+              type="button"
+              onClick={onOpenTemplates}
+              className="inline-flex min-h-[44px] max-w-full items-center gap-1.5 rounded-full px-2 text-[13px] font-semibold text-muted transition-colors hover:text-text"
+            >
+              <BookmarkCheck className="h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
+              <span className="truncate">Đã có bữa mẫu “{savedAs.name}”</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onSaveTemplate}
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full px-2 text-[13px] font-semibold text-gold transition-opacity hover:opacity-80"
+            >
+              <Layers className="h-4 w-4" aria-hidden="true" />
+              Lưu thành bữa mẫu
+            </button>
+          )}
+        </div>
       )}
     </GlassCard>
   );

@@ -15,7 +15,7 @@ import { formatNumber } from '@/lib/format';
 import { WORKOUT_CATEGORIES, WORKOUT_CATEGORY_LABELS, type Workout, type WorkoutCategory, type WorkoutStatus } from '@/types/db';
 import { ActivityIcon, CATEGORY_COLOR } from './ActivityIcon';
 import { ActivityPicker } from './ActivityPicker';
-import { checkDraft, draftFrom, type SheetMode, type WorkoutDraft } from './draft';
+import { checkDraft, draftFrom, modeKey, type SheetMode, type WorkoutDraft } from './draft';
 import {
   activityLabel,
   buildTitle,
@@ -26,7 +26,9 @@ import {
   durationForDistance,
   normalizeTime,
   nowHHMM,
+  paceLabel,
   sessionKcal,
+  splitDistanceNote,
   variantForMet,
   variantForSpeed,
 } from './lib';
@@ -62,10 +64,10 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
   const [showErrors, setShowErrors] = useState(false);
   /** The user picked a status explicitly — stop inferring it from date/time. */
   const [statusTouched, setStatusTouched] = useState(false);
-  /** Optional distance helper (not stored): with a speed-based activity it sets the intensity or the duration. */
-  const [distanceKm, setDistanceKm] = useState<number | null>(null);
   /** Synchronous guard against double taps (state updates land a frame later). */
   const inFlight = useRef(false);
+  /** Unsaved work kept across an accidental close; restored when the same target reopens. */
+  const stash = useRef<{ key: string; draft: WorkoutDraft; titleTouched: boolean; statusTouched: boolean } | null>(null);
   const formRef = useRef<HTMLDivElement>(null);
   /** Show validation errors and bring the first one into view (the form scrolls inside the sheet). */
   const revealErrors = () => {
@@ -73,21 +75,28 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
     requestAnimationFrame(() => formRef.current?.querySelector('[role="alert"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
   };
 
-  // Reset whenever the sheet (re)opens.
+  // Reset whenever the sheet (re)opens — restoring a kept draft after an accidental close.
   useEffect(() => {
     if (!open) return;
-    const d = draftFrom(mode, today);
+    const kept = stash.current?.key === modeKey(mode) ? stash.current : null;
+    const d = kept ? kept.draft : draftFrom(mode, today);
     setDraft(d);
-    setTitleTouched(mode.kind === 'edit' || !!mode.preset?.title);
+    setTitleTouched(kept ? kept.titleTouched : mode.kind === 'edit' || !!mode.preset?.title);
     setPicking(!d.activity);
     setQuery('');
     setCat('all');
     setShowErrors(false);
-    setStatusTouched(false);
+    setStatusTouched(kept ? kept.statusTouched : false);
     setConfirmDel(false);
-    setDistanceKm(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // While open, remember the current draft so an accidental close loses nothing.
+  useEffect(() => {
+    if (!open) return;
+    stash.current = { key: modeKey(mode), draft, titleTouched, statusTouched };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, draft, titleTouched, statusTouched]);
 
   const editing = mode.kind === 'edit' ? mode.workout : undefined;
   const act = findActivity(draft.activity);
@@ -97,41 +106,40 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
 
   const pick = (a: ActivityDef) => {
     const v = defaultVariant(a);
-    setDraft((d) => ({ ...d, activity: a.key, category: a.category, met: v.met, title: titleTouched && d.title ? d.title : buildTitle(a, v), template_id: null }));
+    setDraft((d) => ({ ...d, activity: a.key, category: a.category, met: v.met, title: titleTouched && d.title ? d.title : buildTitle(a, v), template_id: null, distance_km: null }));
     setTitleTouched(false);
-    setDistanceKm(null);
     setPicking(false);
   };
 
   const pickCustom = (name: string) => {
     const c: WorkoutCategory = cat === 'all' ? 'other' : cat;
-    setDraft((d) => ({ ...d, activity: name.trim().slice(0, 60), category: c, met: categoryDefaultMet(c), title: name.trim().slice(0, 80), template_id: null }));
+    setDraft((d) => ({ ...d, activity: name.trim().slice(0, 60), category: c, met: categoryDefaultMet(c), title: name.trim().slice(0, 80), template_id: null, distance_km: null }));
     setTitleTouched(true);
-    setDistanceKm(null);
     setPicking(false);
   };
 
   const pickRecent = (w: Workout) => {
+    const { km, rest } = splitDistanceNote(w.notes);
     setDraft((d) => ({
       ...d,
-      activity: w.activity,
+      activity: findActivity(w.activity)?.key ?? w.activity,
       category: w.category,
       title: w.title,
       met: Number(w.met),
       duration_min: w.duration_min,
       start_time: d.start_time || normalizeTime(w.start_time),
-      notes: w.notes ?? '',
+      notes: rest,
       template_id: w.template_id,
+      distance_km: km,
     }));
     setTitleTouched(true);
-    setDistanceKm(null);
     setPicking(false);
   };
 
   const chooseVariant = (met: number) => {
     const v = act?.variants.find((x) => x.met === met);
     // With a distance entered, a different pace means a different duration.
-    const dur = distanceKm ? durationForDistance(distanceKm, v?.kmh) : null;
+    const dur = draft.distance_km ? durationForDistance(draft.distance_km, v?.kmh) : null;
     setDraft((d) => ({ ...d, met, title: !titleTouched && act ? buildTitle(act, v) : d.title, ...(dur ? { duration_min: Math.min(1440, dur) } : {}) }));
   };
 
@@ -143,21 +151,20 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
   };
 
   const changeDistance = (km: number | null) => {
-    setDistanceKm(km);
-    if (!km) return;
-    if (draft.duration_min) set(intensityFor(km, draft.duration_min));
-    else {
-      const dur = durationForDistance(km, curVariant?.kmh);
-      if (dur) set({ duration_min: Math.min(1440, dur) });
-    }
+    const distance_km = km && km > 0 ? km : null;
+    if (!distance_km) return set({ distance_km });
+    if (draft.duration_min) return set({ distance_km, ...intensityFor(distance_km, draft.duration_min) });
+    const dur = durationForDistance(distance_km, curVariant?.kmh);
+    set({ distance_km, ...(dur ? { duration_min: Math.min(1440, dur) } : {}) });
   };
 
-  const changeDuration = (duration_min: number | null) => set({ duration_min, ...intensityFor(distanceKm, duration_min) });
+  const changeDuration = (duration_min: number | null) => set({ duration_min, ...intensityFor(draft.distance_km, duration_min) });
 
   // Validation
   const check = checkDraft(draft, today);
   const { met: metOk, duration: durOk, title: titleOk, date: dateOk, status: statusOk, valid } = check;
   const speedBased = !!act?.variants.some((v) => v.kmh);
+  const distanceKm = speedBased ? draft.distance_km : null;
   const estDistance = speedBased && !distanceKm ? distanceForDuration(draft.duration_min, curVariant?.kmh) : null;
 
   const kcal = metOk && durOk ? sessionKcal(draft, weightKg, editing) : 0;
@@ -172,6 +179,7 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
     setSaving(true);
     try {
       await onSave({ ...draft, title: draft.title.trim(), kcal }, editing);
+      stash.current = null; // saved — nothing to restore
     } catch {
       /* toast shown by caller; keep the sheet open */
     } finally {
@@ -204,6 +212,7 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
     setDeleting(true);
     try {
       await onDelete(editing);
+      stash.current = null; // row is gone — nothing to restore
       setConfirmDel(false);
     } catch {
       /* toast shown by caller */
@@ -353,7 +362,7 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
                   placeholder={estDistance ? `≈ ${formatNumber(estDistance, 1)}` : 'Không bắt buộc'}
                   hint={
                     distanceKm && draft.duration_min
-                      ? `Tốc độ ≈ ${formatNumber(distanceKm / (draft.duration_min / 60), 1)} km/h — cường độ chọn theo tốc độ.`
+                      ? `Tốc độ ≈ ${formatNumber(distanceKm / (draft.duration_min / 60), 1)} km/h${draft.category === 'running' || draft.category === 'walking' ? ` · ${paceLabel(distanceKm, draft.duration_min)}` : ''} — cường độ chọn theo tốc độ.`
                       : 'Nhập km để tự chọn cường độ theo tốc độ (hoặc tính thời lượng).'
                   }
                 />

@@ -16,12 +16,12 @@
 //  - Weeks are ISO (Monday–Sunday); all date math is local, on 'YYYY-MM-DD' strings (no UTC drift).
 
 import { addDays, diffDays, endOfMonth, endOfWeek, formatMonthVi, parseISODate, rangeDays, startOfMonth, startOfWeek, weekdayShort } from '@/lib/date';
-import { ACTIVITY_FACTORS, calcAge, calcBMI, calcBMR, GAIN_SURPLUS, LOSE_DEFICIT, stepsKcal } from '@/lib/energy';
+import { ACTIVITY_FACTORS, calcAge, calcBMI, calcBMR, exerciseBonus, GAIN_SURPLUS, LOSE_DEFICIT, stepsKcal } from '@/lib/energy';
 import type { FitProfile, Goal, RangeSummaryRow } from '@/types/db';
 
 /** kcal ≈ 1 kg of body mass. */
 export const KCAL_PER_KG = 7700;
-/** A day counts as "on target" when intake is within ±10 % of its budget (target + burned). */
+/** A day counts as "on target" when intake is within ±10 % of its budget (target + activity bonus). */
 export const ON_TARGET_TOLERANCE = 0.1;
 /** Fewer complete days than this → no verdict. */
 export const MIN_DAYS_FOR_VERDICT = 3;
@@ -129,7 +129,12 @@ export interface DayPoint {
   burned: number | null;
   /** Estimated total expenditure of the day (null if unknown or future). */
   expenditure: number | null;
-  /** Day budget = target + burned (null if no target or future). */
+  /**
+   * Activity kcal added on top of the target: only what exceeds the activity the profile's level
+   * already assumes (same model as Today / Diary, never counted twice). Equals `burned` without a BMR.
+   */
+  bonus: number;
+  /** Day budget = target + bonus (null if no target or future). */
   budget: number | null;
   onTarget: boolean;
   water: number;
@@ -348,8 +353,9 @@ export function buildReport({ rows, from, to, period, today, profile, refWeightK
   const byDay = new Map(sortedRows.map((r) => [r.day, r]));
   const target = profile?.calorie_target && profile.calorie_target > 0 ? Number(profile.calorie_target) : null;
   const height = profile?.height_cm ? Number(profile.height_cm) : null;
-  const waterTarget = profile?.water_target_ml ?? 2000;
-  const stepTarget = profile?.step_target ?? 8000;
+  // Same fallbacks as Today's targetsFromProfile: an unset / zero target never means "target 0".
+  const waterTarget = profile?.water_target_ml && profile.water_target_ml > 0 ? Number(profile.water_target_ml) : 2000;
+  const stepTarget = profile?.step_target && profile.step_target > 0 ? Number(profile.step_target) : 8000;
   const partialThreshold = target != null ? Math.round(target * PARTIAL_DAY_RATIO) : PARTIAL_DAY_FALLBACK_KCAL;
 
   // Body weight of the period: latest weigh-in inside the range, else the latest known, else the start weight.
@@ -372,7 +378,8 @@ export function buildReport({ rows, from, to, period, today, profile, refWeightK
     const burned = future ? null : Math.round(workoutKcal + sk);
     const logged = !future && kcalIn > 0;
     const complete = logged && !isToday && kcalIn >= partialThreshold;
-    const budget = target != null && !future ? target + (burned ?? 0) : null;
+    const bonus = future ? 0 : exerciseBonus(maint.bmr, maint.kcal, burned ?? 0);
+    const budget = target != null && !future ? target + bonus : null;
     const weight = r?.weight_kg != null && r.weight_kg > 0 ? Number(r.weight_kg) : null;
     return {
       day,
@@ -387,6 +394,7 @@ export function buildReport({ rows, from, to, period, today, profile, refWeightK
       stepsKcal: future ? 0 : sk,
       burned,
       expenditure: future ? null : dayExpenditure(maint, burned ?? 0),
+      bonus,
       budget,
       onTarget: logged && budget != null && budget > 0 && Math.abs(kcalIn - budget) <= budget * ON_TARGET_TOLERANCE,
       water: future ? 0 : r ? Number(r.water_ml) || 0 : 0,
@@ -447,8 +455,10 @@ export function buildReport({ rows, from, to, period, today, profile, refWeightK
   }
 
   // Current streak: consecutive logged days ending today (an empty today does not break it yet).
+  // Only meaningful while the period contains today — a past week has no "current" streak.
   let currentStreak = 0;
-  for (let i = elapsed.length - 1; i >= 0; i--) {
+  const containsToday = from <= today && today <= to;
+  for (let i = elapsed.length - 1; containsToday && i >= 0; i--) {
     const d = elapsed[i];
     if (d.logged) currentStreak++;
     else if (d.isToday && currentStreak === 0) continue;

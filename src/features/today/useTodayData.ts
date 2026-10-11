@@ -7,7 +7,7 @@ import { listMeals } from '@/services/meals';
 import { getDaySummary, getRangeSummary } from '@/services/summary';
 import { listWorkouts, updateWorkout } from '@/services/workouts';
 import type { DaySummary, MealEntry, RangeSummaryRow, Workout } from '@/types/db';
-import { summaryFromParts } from './metrics';
+import { applyMealDelta, clockKey, summaryFromParts } from './metrics';
 
 export interface TodayData {
   summary: DaySummary;
@@ -152,13 +152,14 @@ export function useTodayData(onError: (err: unknown) => void) {
   }, [load]);
 
   // Clock: keeps hour-based insights fresh and reloads when the local date rolls over
-  // while the app stays open (no focus event needed). `now` only changes when the hour
-  // does, so the dashboard does not re-render every tick.
+  // while the app stays open (no focus event needed). `now` only changes when the hour or
+  // the suggested meal (10:30, 14:30, 21:30 boundaries) does, so the dashboard does not
+  // re-render every tick.
   const dateRef = useRef(state.date);
   dateRef.current = state.date;
   const tickClock = useCallback(() => {
     const d = new Date();
-    setNow((prev) => (prev.getHours() === d.getHours() && prev.getDate() === d.getDate() ? prev : d));
+    setNow((prev) => (clockKey(prev) === clockKey(d) ? prev : d));
   }, []);
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -316,6 +317,28 @@ export function useTodayData(onError: (err: unknown) => void) {
     [enqueue, invalidateInFlightLoad, load],
   );
 
+  /**
+   * Reflect meal entries written elsewhere on this screen (one-tap re-log, undo) right
+   * away: adds `added` / drops `removedIds` from today's list and adjusts the totals.
+   * Rows of another day are ignored. The caller still broadcasts notifyDataChanged('meals'),
+   * which triggers the authoritative refetch (a load already in flight is dropped, since
+   * it may predate the write).
+   */
+  const applyMeals = useCallback(
+    (added: MealEntry[], removedIds: string[] = []) => {
+      invalidateInFlightLoad();
+      setState((s) => {
+        if (!s.data) return s;
+        const { meals, summary } = applyMealDelta(s.data.meals, s.data.summary, s.date, added, removedIds);
+        if (meals === s.data.meals) return s;
+        const next = { ...s, data: { ...s.data, meals, summary } };
+        stateRef.current = next;
+        return next;
+      });
+    },
+    [invalidateInFlightLoad],
+  );
+
   const reload = useCallback(() => load(false, true), [load]);
   /** Retry after a partial failure without blanking what is already on screen. */
   const retry = useCallback(() => load(true, true), [load]);
@@ -335,7 +358,8 @@ export function useTodayData(onError: (err: unknown) => void) {
       addWater,
       setSteps,
       completeWorkout,
+      applyMeals,
     }),
-    [state, now, reload, retry, setWater, addWater, setSteps, completeWorkout],
+    [state, now, reload, retry, setWater, addWater, setSteps, completeWorkout, applyMeals],
   );
 }

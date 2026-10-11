@@ -9,6 +9,7 @@ import { resendConfirmation, signUp } from '@/services/auth';
 import { errorMessage } from '@/services/errors';
 import { AuthLayout } from './AuthLayout';
 import { PasswordToggle, useCooldown } from './PasswordToggle';
+import { rememberEmail } from '@/lib/lastEmail';
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -43,6 +44,7 @@ export default function RegisterPage() {
     setBusy(true);
     try {
       const data = await signUp(email, password, name);
+      rememberEmail(email);
       if (data?.session) navigate('/onboarding', { replace: true });
       else {
         setSent(true);

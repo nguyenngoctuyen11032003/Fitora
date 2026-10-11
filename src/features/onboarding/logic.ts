@@ -486,6 +486,71 @@ export function goalWarnings(d: GoalDraft): string[] {
   return out;
 }
 
+export interface TargetSuggestion {
+  kg: number;
+  /** Short Vietnamese reason shown next to the value. */
+  reason: string;
+}
+
+const roundHalf = (v: number) => Math.round(v * 2) / 2;
+
+/**
+ * One-tap target weight for "Giảm cân" / "Tăng cân" (Asian BMI cut-offs), so the
+ * user does not have to work out a sensible number:
+ * - lose, BMI ≥ 23: the top of the normal range (BMI 22,9), but no more than −10 %
+ *   at once (a realistic first milestone);
+ * - lose, normal BMI: −3 kg, never below BMI 18,5;
+ * - gain, BMI < 18,5: the bottom of the normal range, but no more than +10 % at once;
+ * - gain, otherwise: +3 kg, never above BMI 24,9.
+ * Rounded to 0,5 kg. Null when there is nothing sensible to suggest (e.g. losing
+ * while already underweight) or for other goals.
+ */
+export function suggestTargetWeight(d: GoalDraft): TargetSuggestion | null {
+  const w = d.weight_kg;
+  const h = d.height_cm;
+  if (!w || !h || !(w > 0) || !(h > 0)) return null;
+  const m2 = (h / 100) ** 2;
+  const bmi = w / m2;
+  const lowKg = 18.5 * m2;
+  const highKg = 22.9 * m2;
+  let kg: number;
+  let reason: string;
+  if (d.goal === 'lose') {
+    if (bmi >= 23) {
+      const tenPct = w * 0.9;
+      if (tenPct > highKg) {
+        kg = roundHalf(tenPct);
+        reason = 'mốc đầu tiên: giảm 10%';
+      } else {
+        kg = roundHalf(highKg);
+        reason = 'BMI 22,9 — vừa vào ngưỡng bình thường';
+      }
+    } else {
+      kg = roundHalf(Math.max(w - 3, Math.ceil(lowKg * 2) / 2));
+      reason = 'giảm nhẹ 3 kg, vẫn trong ngưỡng khỏe mạnh';
+    }
+    if (!(kg <= w - 0.5) || kg < LIMITS.weight.min) return null;
+  } else if (d.goal === 'gain') {
+    if (bmi < 18.5) {
+      const tenPct = w * 1.1;
+      if (tenPct < lowKg) {
+        kg = roundHalf(tenPct);
+        reason = 'mốc đầu tiên: tăng 10%';
+      } else {
+        kg = Math.ceil(lowKg * 2) / 2;
+        reason = 'BMI 18,5 — vừa vào ngưỡng bình thường';
+      }
+    } else {
+      kg = roundHalf(Math.min(w + 3, Math.floor(24.9 * m2 * 2) / 2));
+      reason = 'tăng 3 kg, chưa vượt ngưỡng thừa cân';
+    }
+    if (!(kg >= w + 0.5) || kg > LIMITS.weight.max) return null;
+  } else {
+    return null;
+  }
+  return { kg, reason };
+}
+
 /** True when a target weight points the wrong way for the goal. */
 function targetContradicts(goal: Goal | null, target: number | null, weight: number | null): boolean {
   if (target == null || weight == null) return false;

@@ -56,6 +56,10 @@ export function calcTDEE(bmr: number, activity: ActivityLevel): number {
 export const LOSE_DEFICIT: Record<GoalPace, number> = { slow: 250, medium: 500, fast: 750 };
 export const GAIN_SURPLUS = 300;
 export const MIN_KCAL: Record<Sex, number> = { female: 1200, male: 1500 };
+/** Lowest daily target ever proposed (the DB lower bound of fit_profiles.calorie_target). */
+export const ABS_MIN_KCAL = 800;
+/** Highest daily target ever proposed (the DB upper bound of fit_profiles.calorie_target). */
+export const ABS_MAX_KCAL = 6000;
 
 /**
  * Daily calorie target from TDEE.
@@ -64,12 +68,14 @@ export const MIN_KCAL: Record<Sex, number> = { female: 1200, male: 1500 };
  * A deficit goal (lose / recomp) never ends up ABOVE maintenance: when TDEE itself
  * is below the floor (small, older, sedentary bodies) the target stays at TDEE
  * instead of silently turning a "lose" plan into a surplus.
+ * Kept within {@link ABS_MIN_KCAL}–{@link ABS_MAX_KCAL} (800–6000, the DB bounds of
+ * calorie_target) so a suggested plan can always be saved, even for extreme bodies.
  */
 export function goalCalories(tdee: number, goal: Goal, pace: GoalPace | null | undefined, sex: Sex): number {
   const floor = MIN_KCAL[sex] ?? 1200;
   const planned = plannedCalories(tdee, goal, pace);
   const deficitGoal = goal === 'lose' || goal === 'recomp';
-  const kcal = Math.max(deficitGoal ? Math.min(floor, tdee) : floor, planned);
+  const kcal = Math.min(ABS_MAX_KCAL, Math.max(deficitGoal ? Math.min(floor, tdee) : floor, planned, ABS_MIN_KCAL));
   return Math.round(kcal / 10) * 10;
 }
 

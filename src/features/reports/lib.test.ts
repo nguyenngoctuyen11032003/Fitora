@@ -210,6 +210,29 @@ describe('buildReport', () => {
     expect(s.onTargetDays).toBe(2);
   });
 
+  it('budget adds only activity beyond the profile level (no double counting, same as Today)', () => {
+    // moderate: BMR 1749 (80 kg) → TDEE round(1749 × 1.55) = 2711; allowance ≈ 2711 − 2099 = 612 kcal.
+    const active = { ...profile, activity_level: 'moderate' as const };
+    const rows = [
+      row('2026-10-05', { kcal_in: 2000, workout_kcal: 300 }), // under the allowance → bonus 0
+      row('2026-10-06', { kcal_in: 2400, workout_kcal: 900 }), // 2099 + 900 − 2711 = 288
+    ];
+    const s = buildReport({ ...base, rows, profile: active });
+    expect(s.days[0].burned).toBe(300);
+    expect(s.days[0].bonus).toBe(0);
+    expect(s.days[0].budget).toBe(2000);
+    expect(s.days[0].onTarget).toBe(true);
+    expect(s.days[1].bonus).toBe(288);
+    expect(s.days[1].budget).toBe(2288);
+    expect(s.days[1].onTarget).toBe(true);
+    // Expenditure and budget agree: expenditure − maintenance === bonus.
+    expect(s.days[1].expenditure! - s.maintenance!).toBe(s.days[1].bonus);
+    // Without a BMR model (target fallback) the whole burn counts.
+    const fb = buildReport({ ...base, rows, profile: { ...active, birth_date: null } });
+    expect(fb.days[0].bonus).toBe(300);
+    expect(fb.days[0].budget).toBe(2300);
+  });
+
   it('water / steps / streak stats; future rows ignored', () => {
     const rows = [
       row('2026-10-05', { kcal_in: 100, water_ml: 2000, steps: 9000 }),
@@ -226,6 +249,15 @@ describe('buildReport', () => {
     expect(s.longestStreak).toBe(2);
     expect(s.loggedDays).toBe(3);
     expect(s.weightPoints).toHaveLength(0);
+  });
+
+  it('zero / missing water & step targets fall back to the same defaults as Today', () => {
+    const rows = [row('2026-10-06', { kcal_in: 1900, water_ml: 2100, steps: 8500 })];
+    const s = buildReport({ ...base, rows, profile: { ...profile, water_target_ml: 0, step_target: null as unknown as number } });
+    expect(s.waterTarget).toBe(2000);
+    expect(s.stepTarget).toBe(8000);
+    expect(s.waterHitDays).toBe(1);
+    expect(s.stepHitDays).toBe(1);
   });
 
   it('average activity ignores untracked days (unknown ≠ 0)', () => {

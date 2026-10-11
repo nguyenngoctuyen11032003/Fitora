@@ -14,6 +14,7 @@
   "theme_color": "#120906",
   "shortcuts": [
     { "name": "Quét món ăn bằng AI", "short_name": "Scan", "url": "./#/scan", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Món của tôi", "short_name": "Món của tôi", "url": "./#/food/search?tab=mine", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
     { "name": "Nhật ký ăn", "short_name": "Nhật ký", "url": "./#/diary", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
     { "name": "Tập luyện", "short_name": "Tập luyện", "url": "./#/workout", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
   ],

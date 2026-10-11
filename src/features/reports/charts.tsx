@@ -115,6 +115,11 @@ function CalorieTip({ active, payload }: TooltipProps<number, string>) {
       <TipRow color={C.gold} label="Nạp vào" value={d.logged ? formatKcal(d.kcalIn) : 'Chưa ghi'} />
       <TipRow color={C.burn} label="Vận động" value={formatKcal(d.burned)} />
       {d.budget != null && <TipRow color={C.text} label="Ngân sách" value={formatKcal(d.budget)} dashed />}
+      {d.budget != null && (d.burned ?? 0) > 0 && d.bonus < (d.burned ?? 0) && (
+        <p className="mt-0.5 text-[11.5px] text-muted">
+          {d.bonus > 0 ? `Cộng +${formatNumber(d.bonus)} kcal vượt mức vận động thường ngày` : 'Vận động nằm trong mức thường ngày của mục tiêu'}
+        </p>
+      )}
       {d.isToday && d.logged && <p className="mt-0.5 text-[11.5px] text-muted">Chưa hết ngày — chưa tính vào cân bằng</p>}
       {d.partial && <p className="mt-0.5 text-[11.5px] text-muted">Ghi chưa đủ — không tính vào cân bằng</p>}
     </GlassTip>

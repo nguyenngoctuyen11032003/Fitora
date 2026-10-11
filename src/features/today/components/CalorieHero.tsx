@@ -214,8 +214,9 @@ function EqItem({
   hint?: string;
 }) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col items-center rounded-2xl border border-white/[0.06] bg-white/[0.035] px-1.5 py-2.5 text-center">
-      <span className="flex items-center gap-1 text-[11px] font-semibold text-muted">
+    <div className="flex min-w-0 flex-1 flex-col items-center rounded-2xl border border-white/[0.06] bg-white/[0.035] px-1 py-2.5 text-center">
+      {/* One line at 360 px and in the desktop phone frame too ("Cộng thêm" used to wrap and misalign the three boxes). */}
+      <span className="flex max-w-full items-center gap-0.5 whitespace-nowrap text-[10.5px] font-semibold text-muted">
         <Icon className="h-3.5 w-3.5 shrink-0" style={{ color }} aria-hidden="true" />
         {label}
       </span>

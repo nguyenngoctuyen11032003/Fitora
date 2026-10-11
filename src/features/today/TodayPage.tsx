@@ -14,6 +14,7 @@ import { InsightStrip } from './components/InsightStrip';
 import { MacroCards } from './components/MacroCards';
 import { MealsSection } from './components/MealsSection';
 import { QuickActions } from './components/QuickActions';
+import { QuickRelogStrip } from './components/QuickRelogStrip';
 import { StepsCard } from './components/StepsCard';
 import { WaterCard } from './components/WaterCard';
 import { WorkoutsSection } from './components/WorkoutsSection';
@@ -27,6 +28,7 @@ import {
   greetingName,
   groupMeals,
   mealForHour,
+  overBudgetStreak,
   targetsFromProfile,
 } from './metrics';
 import { useTodayData, type TodayPart } from './useTodayData';
@@ -46,13 +48,13 @@ export default function TodayPage() {
   const toast = useToast();
   const { fit, displayName } = useProfile();
   const onError = useCallback((e: unknown) => toast.error(e), [toast]);
-  const { date, now, data, loading, error, failed, reload, retry, addWater, setSteps, completeWorkout } = useTodayData(onError);
+  const { date, now, data, loading, error, failed, reload, retry, addWater, setSteps, completeWorkout, applyMeals } = useTodayData(onError);
   const [stepsOpen, setStepsOpen] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const waterToast = useRef<number | null>(null);
 
   const hour = now.getHours();
-  const suggestedMeal = mealForHour(hour);
+  const suggestedMeal = mealForHour(hour, now.getMinutes());
   const targets = useMemo(() => targetsFromProfile(fit), [fit]);
   const weight = effectiveWeight(data?.latestWeightKg, fit?.start_weight_kg);
   const model = useMemo(() => activityModel(fit, weight, date), [fit, weight, date]);
@@ -99,8 +101,9 @@ export default function TodayPage() {
       uncreditedActivity: Math.max(0, energy.allowance - energy.burned),
       loggingStreak: streaks?.logging,
       waterStreak: streaks?.water,
+      overStreak: overBudgetStreak(data.history, { date, over: energy.remaining < 0 }, targets.kcal),
     });
-  }, [data, energy, targets, weight, hour, groups, streaks]);
+  }, [data, energy, targets, weight, hour, groups, streaks, date]);
 
   // Stable handlers so memoised cards don't re-render on unrelated updates.
   const onWaterAdd = useCallback((delta: number) => void addWater(delta), [addWater]);
@@ -195,6 +198,9 @@ export default function TodayPage() {
         <Reveal delay={80}>
           <QuickActions date={date} suggestedMeal={suggestedMeal} onAddWater={quickWater} onLogSteps={openSteps} />
         </Reveal>
+        <Reveal delay={110}>
+          <QuickRelogStrip date={date} meal={suggestedMeal} meals={data.meals} onApplied={applyMeals} />
+        </Reveal>
         <Reveal delay={140}>
           <InsightStrip insights={insights} />
         </Reveal>
@@ -249,6 +255,16 @@ function TodaySkeleton() {
         <Skeleton height={64} className="!rounded-2xl" />
         <Skeleton height={64} className="!rounded-2xl" />
         <Skeleton height={64} className="!rounded-2xl" />
+      </div>
+      {/* "Ăn lại nhanh" strip */}
+      <div>
+        <Skeleton width={130} height={18} />
+        <Skeleton width={220} height={12} className="mt-2" />
+        <div className="mt-3 flex gap-2.5 overflow-hidden">
+          <Skeleton width={152} height={112} className="shrink-0 !rounded-2xl" />
+          <Skeleton width={152} height={112} className="shrink-0 !rounded-2xl" />
+          <Skeleton width={152} height={112} className="shrink-0 !rounded-2xl" />
+        </div>
       </div>
       {/* insight */}
       <Skeleton height={68} rounded="card" />

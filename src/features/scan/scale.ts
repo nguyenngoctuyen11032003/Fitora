@@ -100,6 +100,12 @@ export interface ScanDish extends Nutrients {
   confidence: number | null;
   /** The untouched AI answer (stored in ai_meta.original). */
   original: AiDish | null;
+  /** "Ghi nhớ món này" — remember it in "Món của tôi" on save (undefined = on). */
+  remember?: boolean;
+  /** Saved food whose numbers this dish uses ("Dùng số liệu đã lưu" / picked from the list). */
+  savedFoodId?: string | null;
+  /** The dish as it was before the saved numbers were applied (undo). */
+  aiBackup?: ScanDish | null;
 }
 
 const num = (v: unknown) => {

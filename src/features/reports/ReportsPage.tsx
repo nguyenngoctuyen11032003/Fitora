@@ -8,10 +8,13 @@ import { todayISO } from '@/lib/date';
 import { onDataChanged } from '@/lib/events';
 import { useAsync, useReducedMotion } from '@/lib/hooks';
 import { latestWeight, listMeasurements } from '@/services/body';
+import { listCustomFoods, saveEntryAsFood } from '@/services/foods';
+import { listMealsRange } from '@/services/meals';
 import { getRangeSummary } from '@/services/summary';
 import { GOAL_LABELS } from '@/types/db';
+import { buildFoodReport, type FoodStat } from './foodStats';
 import { buildReport, canGoNext, isCurrentPeriod, periodCaption, periodLabel, periodRange, shiftPeriod, type Period } from './lib';
-import { CalorieSection, CompletionSection, Headline, InsightsSection, LinkCards, MacroSection, PeriodNav, WeightSection } from './sections';
+import { CalorieSection, CompletionSection, FoodSection, Headline, InsightsSection, LinkCards, MacroSection, PeriodNav, WeightSection } from './sections';
 
 const PERIOD_KEY = 'fitora.reports.period';
 
@@ -39,14 +42,17 @@ export default function ReportsPage() {
   // useAsync drops stale responses (token), and `fresh` below is keyed by range, so rapid
   // prev/next/period switching never shows data from a superseded request.
   const { data, error, loading, reload } = useAsync(async () => {
-    const [rows, prevRows, latest, measurements] = await Promise.all([
+    const [rows, prevRows, latest, measurements, entries, savedFoods] = await Promise.all([
       getRangeSummary(from, to),
       // Comparison is a nice-to-have: never fail the whole report because of it.
       getRangeSummary(prevRange.from, prevRange.to).catch(() => null),
       latestWeight().catch(() => null),
       listMeasurements(from, to).catch(() => []),
+      // Food insights are optional as well.
+      listMealsRange(from, to).catch(() => null),
+      listCustomFoods().catch(() => []),
     ]);
-    return { key: `${from}|${to}`, rows, prevRows, prev: prevRange, latest, measurements };
+    return { key: `${from}|${to}`, rows, prevRows, prev: prevRange, latest, measurements, entries, savedFoods };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
 
@@ -92,6 +98,27 @@ export default function ReportsPage() {
       refWeightKg: fresh.latest?.weight_kg ?? null,
     });
   }, [fresh, period, today, fit]);
+
+  const foodReport = useMemo(
+    () => (fresh?.entries ? buildFoodReport(fresh.entries, fresh.savedFoods, { from, to, today }) : null),
+    [fresh, from, to, today],
+  );
+
+  // "Lưu" on a frequent dish → it becomes a saved food, re-loggable with one tap next time.
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const saveFood = async (stat: FoodStat) => {
+    if (savingKey) return;
+    setSavingKey(stat.key);
+    try {
+      const food = await saveEntryAsFood(stat.latest);
+      toast.success(`Đã lưu “${food.name}” vào Món của tôi. Lần sau chỉ cần chọn.`);
+      await reload();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setSavingKey(null);
+    }
+  };
 
   const waistDelta = useMemo(() => {
     const ws = (fresh?.measurements ?? []).filter((m) => m.waist_cm != null);
@@ -182,6 +209,11 @@ export default function ReportsPage() {
             <div className="animate-fade-slide-up animate-delay-200">
               <MacroSection s={summary} fit={fit} />
             </div>
+            {foodReport && (
+              <div className="animate-fade-slide-up animate-delay-200">
+                <FoodSection report={foodReport} period={period} onSave={(f) => void saveFood(f)} savingKey={savingKey} />
+              </div>
+            )}
             <div className="animate-fade-slide-up animate-delay-300">
               <WeightSection
                 s={summary}

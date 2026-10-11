@@ -1,10 +1,11 @@
 import clsx from 'clsx';
-import { Trash2 } from 'lucide-react';
+import { BookmarkCheck, BookmarkPlus, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BottomSheet, Button, Chip, GlassButton, NumberField, Segmented, useToast } from '@/components/ui';
 import { FOOD_CATEGORY_LABELS } from '@/data/foods';
 import { notifyDataChanged } from '@/lib/events';
 import { formatGrams, formatNumber } from '@/lib/format';
+import { saveEntryAsFood } from '@/services/foods';
 import { addMealEntries, updateMeal } from '@/services/meals';
 import { MEAL_LABELS, MEAL_TYPES, type MealEntry, type MealType } from '@/types/db';
 import { computePortion, convertQuantity, MEAL_SHORT, scaleNutrients, toNewEntry, unitOptions, type FoodOption } from '../lib';
@@ -43,6 +44,7 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
   const [unit, setUnit] = useState('g');
   const [meal, setMeal] = useState<MealType>(defaultMeal);
   const [saving, setSaving] = useState(false);
+  const [remembering, setRemembering] = useState(false);
   // Synchronous guard: two taps (or Enter + tap) in the same frame both see saving === false.
   const busy = useRef(false);
 
@@ -79,7 +81,7 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
   const per100 = scaleNutrients(opt.per100g, 100);
   const desc = [
     opt.brand,
-    opt.origin === 'custom' ? 'Món của tôi' : opt.category ? FOOD_CATEGORY_LABELS[opt.category] : null,
+    opt.origin === 'custom' ? (opt.savedFrom === 'ai' ? 'Món của tôi · từ ảnh quét' : 'Món của tôi') : opt.category ? FOOD_CATEGORY_LABELS[opt.category] : null,
     opt.gramsKnown ? `100 g = ${formatNumber(per100.kcal)} kcal` : null,
   ]
     .filter(Boolean)
@@ -99,7 +101,8 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
     try {
       const row = toNewEntry(calcOpt, qty ?? 1, unit, meal, entry?.eaten_on ?? date);
       if (entry) {
-        const { eaten_on: _d, source: _s, custom_food_id: _c, name: _n, ...patch } = row;
+        // Identity (name, source, link, photo) stays as logged; only portion / meal / values change.
+        const { eaten_on: _d, source: _s, custom_food_id: _c, name: _n, photo_path: _p, ...patch } = row;
         const saved = await updateMeal(entry.id, patch);
         toast.success('Đã cập nhật món.');
         onSaved(saved, 'edit');
@@ -114,6 +117,21 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
       toast.error(e);
       busy.current = false;
       setSaving(false);
+    }
+  };
+
+  const remember = async () => {
+    if (!entry || remembering || busy.current) return;
+    setRemembering(true);
+    try {
+      const food = await saveEntryAsFood(entry);
+      toast.success(`Đã lưu “${food.name}” vào Món của tôi — lần sau chỉ cần chọn.`);
+      notifyDataChanged('foods');
+      onSaved({ ...entry, custom_food_id: food.id }, 'edit');
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setRemembering(false);
     }
   };
 
@@ -223,8 +241,38 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
             options={MEAL_TYPES.map((m) => ({ value: m, label: MEAL_SHORT[m] }))}
           />
         </section>
+        {entry && (
+          <RememberRow saved={!!entry.custom_food_id} busy={remembering} onSave={() => void remember()} />
+        )}
         <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
       </form>
     </BottomSheet>
+  );
+}
+
+/** Edit mode: "Lưu vào Món của tôi" for an entry that is not a saved food yet. */
+export function RememberRow({ saved, busy, onSave }: { saved: boolean; busy: boolean; onSave: () => void }) {
+  if (saved) {
+    return (
+      <p className="flex items-center gap-2 pl-1 text-[13px] text-muted">
+        <BookmarkCheck className="h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
+        Món này đã có trong Món của tôi.
+      </p>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onSave}
+      disabled={busy}
+      aria-busy={busy}
+      className="flex min-h-[48px] w-full items-center gap-3 rounded-2xl border border-dashed border-line px-4 text-left text-[14px] transition-colors hover:bg-white/[0.04] disabled:opacity-60"
+    >
+      <BookmarkPlus className="h-5 w-5 shrink-0 text-gold" aria-hidden="true" />
+      <span className="min-w-0 flex-1">
+        <span className="block font-semibold text-text">{busy ? 'Đang lưu…' : 'Lưu vào Món của tôi'}</span>
+        <span className="block text-[12px] text-muted">Lần sau chọn lại bằng một chạm, không cần scan hay nhập.</span>
+      </span>
+    </button>
   );
 }

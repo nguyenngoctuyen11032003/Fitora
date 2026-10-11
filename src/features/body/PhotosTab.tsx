@@ -25,14 +25,13 @@ export interface PhotosTabProps {
   onToggleCompare: () => void;
   onSelect: (p: ProgressPhoto) => void;
   onOpen: (p: ProgressPhoto) => void;
-  onCamera: () => void;
   onRetry: () => void;
   /** Signing the private image links failed (thumbnails stay blank). */
   urlError?: unknown;
   onRetryUrls?: () => void;
 }
 
-export function PhotosTab({ photos, urls, rows, loading, error, compare, selected, onToggleCompare, onSelect, onOpen, onCamera, onRetry, urlError, onRetryUrls }: PhotosTabProps) {
+export function PhotosTab({ photos, urls, rows, loading, error, compare, selected, onToggleCompare, onSelect, onOpen, onRetry, urlError, onRetryUrls }: PhotosTabProps) {
   const [groupBy, setGroupBy] = useState<GroupBy>('month');
   const groups = useMemo(
     () => (groupBy === 'week' ? groupByWeek(photos, (p) => p.taken_on, todayISO()) : groupByMonth(photos, (p) => p.taken_on)),
@@ -80,8 +79,7 @@ export function PhotosTab({ photos, urls, rows, loading, error, compare, selecte
           <EmptyState
             icon={Camera}
             title="Ảnh kể câu chuyện số cân không kể"
-            description="Chụp ảnh mỗi 1–2 tuần cùng tư thế, cùng ánh sáng. Sau vài tuần, chế độ so sánh sẽ cho bạn thấy khác biệt."
-            action={<Button onClick={onCamera} icon={<Camera className="h-5 w-5" />}>Chụp ảnh đầu tiên</Button>}
+            description="Chụp ảnh mỗi 1–2 tuần cùng tư thế, cùng ánh sáng. Sau vài tuần, chế độ so sánh sẽ cho bạn thấy khác biệt. Bấm Chụp ảnh hoặc chọn từ Thư viện bên dưới."
           />
         </div>
         {privacy}
@@ -118,7 +116,14 @@ export function PhotosTab({ photos, urls, rows, loading, error, compare, selecte
           className="!w-[150px]"
         />
         <span className="flex-1" />
-        <Chip onClick={onToggleCompare} selected={compare} icon={<Columns2 className="h-4 w-4" />} disabled={photos.length < 2} ariaLabel="Chế độ so sánh">
+        <Chip
+          onClick={onToggleCompare}
+          selected={compare}
+          icon={<Columns2 className="h-4 w-4" />}
+          disabled={photos.length < 2}
+          ariaLabel="Chế độ so sánh"
+          className={compare ? '!border-[rgba(237,180,11,0.6)] !bg-[rgba(237,180,11,0.15)]' : undefined}
+        >
           So sánh
         </Chip>
       </div>

@@ -8,9 +8,9 @@ export type CircKey = 'chest_cm' | 'waist_cm' | 'hip_cm' | 'thigh_cm' | 'arm_cm'
 
 /** The five circumferences, numbered to match the body diagram legend. */
 export const CIRCUMFERENCES: { key: CircKey; label: string; n: number; min: number; max: number }[] = [
-  { key: 'chest_cm', label: 'Ngực', n: 1, min: 40, max: 250 },
-  { key: 'waist_cm', label: 'Eo', n: 2, min: 35, max: 250 },
-  { key: 'hip_cm', label: 'Hông', n: 3, min: 40, max: 250 },
+  { key: 'chest_cm', label: 'Ngực', n: 1, min: 40, max: 200 },
+  { key: 'waist_cm', label: 'Eo', n: 2, min: 40, max: 200 },
+  { key: 'hip_cm', label: 'Hông', n: 3, min: 40, max: 200 },
   { key: 'thigh_cm', label: 'Đùi', n: 4, min: 20, max: 120 },
   { key: 'arm_cm', label: 'Bắp tay', n: 5, min: 10, max: 80 },
 ];
@@ -363,16 +363,62 @@ export function weightJump(
   return Math.abs(diff) > 2 + 0.15 * ref.gap ? { diff, date: ref.date, weight: ref.weight } : null;
 }
 
-/** Realistic input ranges per metric (validation in the measurement sheet). */
+/** Realistic input ranges per metric (validation in the measurement sheet AND the service). */
 export const METRIC_RANGES: Record<MetricKey, [number, number]> = {
-  weight_kg: [20, 400],
+  weight_kg: [25, 300],
   body_fat_pct: [2, 75],
   ...(Object.fromEntries(CIRCUMFERENCES.map((c) => [c.key, [c.min, c.max]])) as Record<CircKey, [number, number]>),
 };
 
-/** Range error message for a value (Vietnamese decimal comma), undefined when OK or empty. */
+/** Unit shown in range validation messages. */
+export const METRIC_UNITS: Record<MetricKey, string> = {
+  weight_kg: 'kg',
+  body_fat_pct: '%',
+  chest_cm: 'cm',
+  waist_cm: 'cm',
+  hip_cm: 'cm',
+  thigh_cm: 'cm',
+  arm_cm: 'cm',
+};
+
+/** Human name per metric (validation messages outside the form, e.g. the service). */
+export const METRIC_LABELS: Record<MetricKey, string> = {
+  weight_kg: 'Cân nặng',
+  body_fat_pct: 'Tỷ lệ mỡ',
+  chest_cm: 'Vòng ngực',
+  waist_cm: 'Vòng eo',
+  hip_cm: 'Vòng hông',
+  thigh_cm: 'Vòng đùi',
+  arm_cm: 'Vòng bắp tay',
+};
+
+/** Range error message for a value (Vietnamese decimal comma, with the unit), undefined when OK or empty. */
 export function rangeError(key: MetricKey, v: number | null | undefined): string | undefined {
   if (v === null || v === undefined) return undefined;
   const [lo, hi] = METRIC_RANGES[key];
-  return v < lo || v > hi ? `Từ ${String(lo).replace('.', ',')} đến ${String(hi).replace('.', ',')}` : undefined;
+  return v < lo || v > hi
+    ? `Từ ${String(lo).replace('.', ',')} đến ${String(hi).replace('.', ',')} ${METRIC_UNITS[key]}`
+    : undefined;
+}
+
+const POSE_ORDER: PhotoPose[] = ['front', 'side', 'back', 'other'];
+
+/**
+ * Smart default pose for a new progress photo on `date`:
+ * - nothing shot that day → the pose of the most recent photo (the user's habit), else 'front';
+ * - some poses already shot that day → the next pose of the user's usual set (poses they have
+ *   ever used, in front → side → back → other order) still missing that day — a front/side/back
+ *   routine moves on by itself;
+ * - the whole usual set done → 'other' when unused that day, else the habit pose.
+ */
+export function suggestPose(photos: ReadonlyArray<Pick<ProgressPhoto, 'pose' | 'taken_on' | 'created_at'>>, date: string): PhotoPose {
+  if (!photos.length) return 'front';
+  const latest = [...photos].sort((a, b) => (`${a.taken_on}|${a.created_at}` < `${b.taken_on}|${b.created_at}` ? 1 : -1))[0];
+  const habit = latest.pose;
+  const sameDay = new Set(photos.filter((p) => p.taken_on === date).map((p) => p.pose));
+  if (!sameDay.size) return habit;
+  const usual = POSE_ORDER.filter((p) => p !== 'other' && photos.some((x) => x.pose === p));
+  const next = usual.find((p) => !sameDay.has(p)) ?? POSE_ORDER.find((p) => p !== 'other' && !sameDay.has(p));
+  if (next) return next;
+  return sameDay.has('other') ? habit : 'other';
 }

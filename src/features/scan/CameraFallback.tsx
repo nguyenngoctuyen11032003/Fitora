@@ -37,7 +37,7 @@ export function CameraFallback({ status, onUpload, onNativeCapture, onRetry }: P
   const nativeCapture = status === 'unsupported' || status === 'notfound';
   return (
     <div className="glass-card animate-scale-in w-full max-w-[340px] p-6 text-center" role="alert">
-      <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-[20px] bg-gold/15 text-gold">
+      <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-[20px] bg-[rgba(237,180,11,0.15)] text-gold">
         <CameraOff className="h-7 w-7" aria-hidden="true" />
       </div>
       <h2 className="display text-[24px]">{copy.title}</h2>

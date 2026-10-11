@@ -1,5 +1,5 @@
 import { Camera, CloudOff, LogIn, PencilLine, RefreshCw, Search, TriangleAlert, Utensils, WifiOff, type LucideIcon } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { AI_ERROR_MESSAGES } from '@/services/ai';
@@ -24,6 +24,8 @@ interface Props {
   onManual: () => void;
   /** False when there is no photo to resend (e.g. a Live Scan session ended). */
   canRetry?: boolean;
+  /** Extra way out shown under the actions (e.g. the saved-foods strip). */
+  extra?: ReactNode;
 }
 
 function useOnline() {
@@ -42,7 +44,7 @@ function useOnline() {
 }
 
 /** Friendly full-screen error after a scan, with the next best action first. */
-export function ScanErrorPanel({ code, message, photoUrl, manualHref, onRetake, onRetry, onManual, canRetry = true }: Props) {
+export function ScanErrorPanel({ code, message, photoUrl, manualHref, onRetake, onRetry, onManual, canRetry = true, extra }: Props) {
   const online = useOnline();
   const rootRef = useRef<HTMLDivElement>(null);
   // Move focus into the dialog so screen readers announce it and keyboard users land on it.
@@ -51,13 +53,14 @@ export function ScanErrorPanel({ code, message, photoUrl, manualHref, onRetake, 
   const { icon: Icon, title } = offline ? { icon: WifiOff, title: 'Bạn đang ngoại tuyến' } : (META[code] ?? META.ai_unavailable);
   const canRetrySame = canRetry && (code === 'ai_unavailable' || code === 'network');
   return (
-    <div ref={rootRef} tabIndex={-1} className="absolute inset-0 z-20 flex flex-col bg-black outline-none" role="alertdialog" aria-modal="true" aria-labelledby="scan-err-title" aria-describedby="scan-err-msg">
+    <div ref={rootRef} tabIndex={-1} className="absolute inset-0 z-20 flex flex-col overflow-y-auto overscroll-contain bg-black outline-none" role="alertdialog" aria-modal="true" aria-labelledby="scan-err-title" aria-describedby="scan-err-msg">
       {photoUrl && <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-35 blur-[2px]" />}
       <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/50 to-black/90" aria-hidden="true" />
-      <div className="relative mt-auto px-5" style={{ paddingBottom: 'calc(var(--safe-bottom) + 24px)' }}>
+      <div className="relative mt-auto px-5 pt-[calc(var(--safe-top)+16px)]" style={{ paddingBottom: 'calc(var(--safe-bottom) + 24px)' }}>
+        {extra && <div className="mb-3 animate-fade-slide-up">{extra}</div>}
         <div className="glass-strong animate-fade-slide-up rounded-[28px] p-6">
           <div className="relative mb-4 inline-grid">
-            <span className="absolute inset-0 rounded-[20px] bg-ember/40 blur-xl" aria-hidden="true" />
+            <span className="absolute inset-0 rounded-[20px] bg-[rgba(225,80,10,0.4)] blur-xl" aria-hidden="true" />
             <span className="glass relative grid h-14 w-14 place-items-center rounded-[20px] text-gold">
               <Icon className="h-7 w-7" aria-hidden="true" />
             </span>

@@ -1,3 +1,4 @@
+import { METRIC_LABELS, METRIC_RANGES, METRIC_UNITS } from '@/features/body/lib';
 import { db } from '@/lib/supabase';
 import type { BodyMeasurement, MeasurementInput, ProgressPhoto, ProgressPhotoMeta } from '@/types/db';
 import { invalid, run, runRead, vDate } from './errors';
@@ -47,7 +48,8 @@ export async function upsertMeasurement(input: MeasurementInput): Promise<BodyMe
       else {
         const n = Number(v);
         if (!(n > 0) || !Number.isFinite(n)) invalid('Số đo phải là số dương.');
-        if (k === 'body_fat_pct' && n >= 100) invalid('Tỷ lệ mỡ phải nhỏ hơn 100%.');
+        const [lo, hi] = METRIC_RANGES[k];
+        if (n < lo || n > hi) invalid(`${METRIC_LABELS[k]} phải từ ${lo} đến ${hi} ${METRIC_UNITS[k]}.`);
         row[k] = Math.round(n * 10) / 10;
         any = true;
       }

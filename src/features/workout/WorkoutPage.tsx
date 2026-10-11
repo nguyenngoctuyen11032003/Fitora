@@ -16,7 +16,7 @@ import { latestWeight } from '@/services/body';
 import { getDailyLog, setSteps } from '@/services/daily';
 import { addWorkout, createTemplate, deleteTemplate, deleteWorkout, listTemplates, listWorkouts, updateWorkout } from '@/services/workouts';
 import type { Workout, WorkoutPatch, WorkoutTemplate } from '@/types/db';
-import { draftFields } from './draft';
+import { draftFields, draftNotes } from './draft';
 import {
   canMarkDone,
   dayBurn,
@@ -24,10 +24,14 @@ import {
   defaultStatus,
   hasTemplateNamed,
   once,
+  nowHHMM,
   planCopies,
+  rankTemplates,
   recentSessions,
+  repeatSession,
   resolveWeight,
   sessionsOn,
+  suggestSessions,
   toInsert,
   toPatch,
   weekDays,
@@ -36,9 +40,12 @@ import {
 import { RepeatSheet } from './RepeatSheet';
 import { SessionRow } from './SessionRow';
 import { StepsCard } from './StepsCard';
+import { SuggestionsCard } from './SuggestionsCard';
 import { TemplatesCard } from './TemplatesCard';
 import { WeekStrip } from './WeekStrip';
 import { WorkoutSheet, type SheetMode, type WorkoutDraft } from './WorkoutSheet';
+
+const HISTORY_DAYS = 56;
 
 const byDayTime = (a: Workout, b: Workout) =>
   a.workout_on.localeCompare(b.workout_on) || (a.start_time ?? '99').localeCompare(b.start_time ?? '99') || a.created_at.localeCompare(b.created_at);
@@ -54,7 +61,8 @@ export default function WorkoutPage() {
 
   // ---- data -------------------------------------------------------------
   const week = useAsync(async () => ({ from: weekStart, rows: await listWorkouts(weekStart, weekEnd) }), [weekStart, weekEnd]);
-  const recentQ = useAsync(() => listWorkouts(addDays(today, -45), today), [today]);
+  // 8 weeks of history: quick re-log, weekday habits and template ranking.
+  const recentQ = useAsync(() => listWorkouts(addDays(today, -HISTORY_DAYS), today), [today]);
   const tpl = useAsync(() => listTemplates(), []);
   const daily = useAsync(() => getDailyLog(selected), [selected]);
   const weightQ = useAsync(() => latestWeight(), []);
@@ -87,6 +95,19 @@ export default function WorkoutPage() {
   const steps = daily.data?.log_date === selected ? daily.data.steps : undefined;
   const burn = useMemo(() => dayBurn(workouts, selected, steps ?? 0, weight.kg), [workouts, selected, steps, weight.kg]);
   const recent = useMemo(() => recentSessions(recentQ.data ?? [], 8), [recentQ.data]);
+  // History up to the selected day: the loaded 8 weeks plus the visible week (it may lie before them).
+  const history = useMemo(() => {
+    const byId = new Map<string, Workout>();
+    for (const w of recentQ.data ?? []) byId.set(w.id, w);
+    for (const w of workouts) byId.set(w.id, w);
+    return [...byId.values()];
+  }, [recentQ.data, workouts]);
+  const suggestions = useMemo(
+    // Re-log help for the recent past (forgotten sessions) and the coming two weeks.
+    () => (fresh && recentQ.data && selected >= addDays(today, -2) && selected <= addDays(today, 13) ? suggestSessions(history, selected, sessions) : []),
+    [fresh, recentQ.data, history, selected, sessions, today],
+  );
+  const templates = useMemo(() => (tpl.data ? rankTemplates(tpl.data, history) : undefined), [tpl.data, history]);
   const { weekDoneCount, weekKcal } = useMemo(() => {
     const done = workouts.filter((w) => w.status === 'done');
     return { weekDoneCount: done.length, weekKcal: Math.round(done.reduce((s, w) => s + (Number(w.kcal) || 0), 0)) };
@@ -216,6 +237,18 @@ export default function WorkoutPage() {
     }
   };
 
+  /** Undo of a one-tap add (template / suggestion). */
+  const undoAdd = (row: Workout) => {
+    removeLocal(row.id);
+    setRecent((list) => list?.filter((x) => x.id !== row.id));
+    deleteWorkout(row.id)
+      .then(() => notifyDataChanged('workouts'))
+      .catch((err) => {
+        upsertLocal(row);
+        toast.error(err);
+      });
+  };
+
   // ---- templates ----------------------------------------------------------
   const [tplBusy, setTplBusy] = useState<string | null>(null);
   const tplLock = useRef(false);
@@ -229,19 +262,7 @@ export default function WorkoutPage() {
       notifyDataChanged('workouts');
       toast.show(`Đã thêm “${t.name}” vào ${formatDayVi(selected).toLowerCase()}.`, {
         kind: 'success',
-        action: {
-          label: 'Hoàn tác',
-          onClick: once(() => {
-            removeLocal(row.id);
-            setRecent((list) => list?.filter((x) => x.id !== row.id));
-            deleteWorkout(row.id)
-              .then(() => notifyDataChanged('workouts'))
-              .catch((err) => {
-                upsertLocal(row);
-                toast.error(err);
-              });
-          }),
-        },
+        action: { label: 'Hoàn tác', onClick: once(() => undoAdd(row)) },
       });
     } catch (e) {
       toast.error(e);
@@ -250,6 +271,38 @@ export default function WorkoutPage() {
       setTplBusy(null);
     }
   };
+  const applySuggestion = async (src: Workout) => {
+    if (tplLock.current) return;
+    tplLock.current = true;
+    setTplBusy(src.id);
+    try {
+      const status = defaultStatus(selected, today, src.start_time ?? undefined, nowHHMM());
+      const row = await addWorkout(repeatSession(src, selected, status, weight.kg));
+      upsertLocal(row);
+      notifyDataChanged('workouts');
+      toast.show(
+        status === 'planned' ? `Đã lên lịch “${row.title}” cho ${formatDayVi(selected).toLowerCase()}.` : `+${formatNumber(row.kcal)} kcal — đã ghi “${row.title}”.`,
+        { kind: 'success', action: { label: 'Hoàn tác', onClick: once(() => undoAdd(row)) } },
+      );
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      tplLock.current = false;
+      setTplBusy(null);
+    }
+  };
+  const customizeSuggestion = (w: Workout) =>
+    openNew({
+      activity: w.activity,
+      category: w.category,
+      title: w.title,
+      met: Number(w.met),
+      duration_min: w.duration_min,
+      start_time: (w.start_time ?? '').slice(0, 5),
+      status: defaultStatus(selected, today, w.start_time ?? undefined, nowHHMM()),
+      notes: w.notes ?? '',
+      template_id: w.template_id,
+    });
   const customizeTemplate = (t: WorkoutTemplate) =>
     openNew({
       activity: t.activity,
@@ -266,8 +319,8 @@ export default function WorkoutPage() {
       return;
     }
     try {
-      const t = await createTemplate({ name: d.title, category: d.category, activity: d.activity, met: d.met!, duration_min: d.duration_min!, notes: d.notes.trim() || null });
-      tpl.setData((list) => [...(list ?? []), t].sort((a, b) => a.name.localeCompare(b.name, 'vi')));
+      const t = await createTemplate({ name: d.title, category: d.category, activity: d.activity, met: d.met!, duration_min: d.duration_min!, notes: draftNotes(d) });
+      tpl.setData((list) => [...(list ?? []), t]);
       toast.success(`Đã lưu mẫu “${t.name}”.`);
     } catch (e) {
       toast.error(e);
@@ -333,6 +386,7 @@ export default function WorkoutPage() {
     }
   };
 
+  const sessionEstimate = useCallback((w: Workout) => metKcal(Number(w.met), weight.kg, w.duration_min), [weight.kg]);
   const tplEstimate = useCallback((t: WorkoutTemplate) => metKcal(Number(t.met), weight.kg, t.duration_min), [weight.kg]);
 
   const firstLoad = week.loading && !fresh;
@@ -355,7 +409,8 @@ export default function WorkoutPage() {
           <BigNumber key={selected} value={isFuture ? burn.plannedKcal : burn.total} unit="kcal" tone="ember" size="lg" className="relative mt-3" />
         )}
         <div className="relative mt-5 grid grid-cols-3 gap-2">
-          <Stat icon={<Dumbbell className="h-3.5 w-3.5" />} label="Tập luyện" value={`${formatNumber(burn.workoutKcal)}`} sub={burn.doneCount ? `${burn.doneCount} buổi · ${formatMinutes(burn.doneMinutes)}` : 'Chưa có'} />
+          <Stat icon={<Dumbbell className="h-3.5 w-3.5" />} label="Tập luyện" value={`${formatNumber(burn.workoutKcal)}`} sub={burn.doneCount ? `${burn.doneCount} buổi · ${burn.doneMinutes}′` : 'Chưa có'}
+            title={burn.doneCount ? `${burn.doneCount} buổi · ${formatMinutes(burn.doneMinutes)}` : undefined} />
           <Stat icon={<Footprints className="h-3.5 w-3.5" />} label="Bước chân" value={`${formatNumber(burn.stepsKcal)}`} sub={`${formatNumber(steps ?? 0)} bước`} />
           <Stat
             icon={<CalendarPlus className="h-3.5 w-3.5" />}
@@ -428,7 +483,7 @@ export default function WorkoutPage() {
               </Button>
             }
           />
-        ) : sessions.length === 0 ? (
+        ) : sessions.length === 0 && suggestions.length > 0 ? null : sessions.length === 0 ? (
           <div className="glass-card">
             <EmptyState
               compact
@@ -448,6 +503,18 @@ export default function WorkoutPage() {
               <SessionRow key={w.id} workout={w} index={i} pending={pending.has(w.id)} onToggle={() => void toggle(w)} onOpen={() => openEdit(w)} />
             ))}
           </ul>
+        )}
+
+        {!firstLoad && (
+          <SuggestionsCard
+            date={selected}
+            suggestions={suggestions}
+            estimate={sessionEstimate}
+            busyId={tplBusy}
+            emptyDay={sessions.length === 0}
+            onApply={(w) => void applySuggestion(w)}
+            onCustomize={customizeSuggestion}
+          />
         )}
       </section>
 
@@ -479,7 +546,7 @@ export default function WorkoutPage() {
       {/* Templates -------------------------------------------------------- */}
       <div className="mt-7">
         <TemplatesCard
-          templates={tpl.data}
+          templates={templates}
           loading={tpl.loading}
           date={selected}
           estimate={tplEstimate}
@@ -518,10 +585,10 @@ export default function WorkoutPage() {
   );
 }
 
-function Stat({ icon, label, value, sub, dim }: { icon: ReactNode; label: string; value: string; sub: string; dim?: boolean }) {
+function Stat({ icon, label, value, sub, dim, title }: { icon: ReactNode; label: string; value: string; sub: string; dim?: boolean; title?: string }) {
   return (
-    <div className="glass-card min-w-0 !rounded-[18px] px-3 py-3">
-      <p className="flex items-center gap-1 text-[12px] font-semibold leading-tight text-muted">
+    <div className="glass-card min-w-0 !rounded-[18px] px-2.5 py-3 min-[400px]:px-3" title={title}>
+      <p className="flex items-center gap-1 whitespace-nowrap text-[11.5px] font-semibold leading-tight text-muted min-[400px]:text-[12px]">
         <span className="shrink-0 text-gold" aria-hidden="true">
           {icon}
         </span>

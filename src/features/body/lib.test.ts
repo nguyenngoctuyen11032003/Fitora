@@ -322,11 +322,21 @@ describe('weightJump', () => {
 });
 
 describe('rangeError', () => {
-  it('validates against realistic ranges with a decimal comma message', () => {
+  it('validates against realistic ranges with a decimal comma message and unit', () => {
     expect(rangeError('weight_kg', 68.5)).toBeUndefined();
     expect(rangeError('weight_kg', null)).toBeUndefined();
-    expect(rangeError('weight_kg', 685)).toBe('Từ 20 đến 400');
-    expect(rangeError('arm_cm', 120)).toBe(`Từ ${METRIC_RANGES.arm_cm[0]} đến ${METRIC_RANGES.arm_cm[1]}`);
+    expect(rangeError('weight_kg', 685)).toBe('Từ 25 đến 300 kg');
+    expect(rangeError('arm_cm', 120)).toBe(`Từ ${METRIC_RANGES.arm_cm[0]} đến ${METRIC_RANGES.arm_cm[1]} cm`);
     expect(rangeError('body_fat_pct', 1)).toBeDefined();
+  });
+  it('uses realistic bounds (weight 25–300 kg, waist 40–200 cm)', () => {
+    expect(METRIC_RANGES.weight_kg).toEqual([25, 300]);
+    expect(METRIC_RANGES.waist_cm).toEqual([40, 200]);
+    // 24 kg or 310 kg is a typo, not a weigh-in
+    expect(rangeError('weight_kg', 24)).toBe('Từ 25 đến 300 kg');
+    expect(rangeError('weight_kg', 310)).toBe('Từ 25 đến 300 kg');
+    expect(rangeError('waist_cm', 39)).toBe('Từ 40 đến 200 cm');
+    expect(rangeError('waist_cm', 201)).toBe('Từ 40 đến 200 cm');
+    expect(rangeError('waist_cm', 72)).toBeUndefined();
   });
 });

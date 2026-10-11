@@ -24,6 +24,50 @@ describe('normalizeDish', () => {
   });
 });
 
+describe('normalizeDish plausibility', () => {
+  it('a consistent dish keeps its numbers and confidence', () => {
+    const d = normalizeDish({ name: 'Phở bò', grams: 500, kcal: 450, protein_g: 25, carbs_g: 55, fat_g: 12, confidence: 0.82 });
+    expect(d).toMatchObject({ kcal: 450, protein_g: 25, carbs_g: 55, fat_g: 12, confidence: 0.82 });
+  });
+
+  it('scales macros down when they outweigh the dish and flags low confidence', () => {
+    const d = normalizeDish({ name: 'Xôi', grams: 100, kcal: 400, protein_g: 80, carbs_g: 80, fat_g: 40, confidence: 0.9 });
+    expect(d.protein_g + d.carbs_g + d.fat_g).toBeLessThanOrEqual(100.1);
+    expect(d.protein_g).toBeCloseTo(40);
+    expect(d.fat_g).toBeCloseTo(20);
+    expect(d.confidence).toBeLessThanOrEqual(0.4);
+  });
+
+  it('recomputes kcal when the macros guarantee more energy (4/4/9)', () => {
+    const d = normalizeDish({ name: 'Cơm gà', grams: 300, kcal: 90, protein_g: 10, carbs_g: 60, fat_g: 10, confidence: 0.8 });
+    expect(d.kcal).toBe(370); // 10·4 + 60·4 + 10·9
+    expect(d.confidence).toBeLessThanOrEqual(0.4);
+  });
+
+  it('keeps kcal but lowers confidence when kcal dwarfs the macros', () => {
+    const d = normalizeDish({ name: 'Bánh', kcal: 500, protein_g: 2, carbs_g: 10, fat_g: 1, confidence: 0.9 });
+    expect(d.kcal).toBe(500);
+    expect(d.confidence).toBeLessThanOrEqual(0.4);
+  });
+
+  it('tolerates a small kcal/macro mismatch without touching confidence', () => {
+    const d = normalizeDish({ name: 'Bún', grams: 400, kcal: 480, protein_g: 20, carbs_g: 70, fat_g: 12, confidence: 0.85 });
+    expect(d.kcal).toBe(480); // macros ≈ 468 — within tolerance
+    expect(d.confidence).toBe(0.85);
+  });
+
+  it('caps impossible energy density (over 9 kcal/g) when there are no macros', () => {
+    const d = normalizeDish({ name: 'Kẹo', grams: 20, kcal: 900, confidence: 0.9 });
+    expect(d.kcal).toBe(180);
+    expect(d.confidence).toBeLessThanOrEqual(0.4);
+  });
+
+  it('clamps fiber to the dish weight', () => {
+    const d = normalizeDish({ name: 'Rau luộc', grams: 50, kcal: 20, fiber_g: 80 });
+    expect(d.fiber_g).toBe(50);
+  });
+});
+
 describe('scanFood cancel / timeout', () => {
   it('a caller abort surfaces as AbortError (not a network error)', async () => {
     const ctrl = new AbortController();

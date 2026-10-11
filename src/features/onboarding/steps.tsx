@@ -12,6 +12,7 @@ import {
   RotateCcw,
   Scale,
   SlidersHorizontal,
+  Sparkles,
   Target,
   TrendingDown,
   TrendingUp,
@@ -39,6 +40,7 @@ import {
   macroPercents,
   scaleMacrosToKcal,
   setMacro,
+  suggestTargetWeight,
   targetDateLabel,
   type GoalDraft,
   type Plan,
@@ -363,6 +365,7 @@ export function GoalStep({ draft, onChange, errors = {}, compact, plan }: StepPr
   const showTarget = draft.goal && draft.goal !== 'maintain';
   const diff = draft.target_weight_kg != null && draft.weight_kg != null ? draft.target_weight_kg - draft.weight_kg : null;
   const warnings = goalWarnings(draft);
+  const suggestion = draft.target_weight_kg == null ? suggestTargetWeight(draft) : null;
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -423,6 +426,23 @@ export function GoalStep({ draft, onChange, errors = {}, compact, plan }: StepPr
                   : 'Không bắt buộc — để trống nếu chưa có con số cụ thể.'
             }
           />
+          {draft.target_weight_kg == null && suggestion && (
+            <button
+              type="button"
+              onClick={() => onChange({ target_weight_kg: suggestion.kg })}
+              aria-label={`Dùng cân nặng mục tiêu gợi ý ${formatNumber(suggestion.kg, 1)} kg`}
+              className="mt-2 flex min-h-[44px] w-full items-center gap-2.5 rounded-2xl border border-[rgba(237,180,11,0.35)] bg-[rgba(237,180,11,0.08)] px-3.5 py-2 text-left transition-colors hover:bg-[rgba(237,180,11,0.14)] active:scale-[0.99]"
+            >
+              <Sparkles className="h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="text-[14px] font-bold text-text">
+                  Gợi ý: <span className="tabular">{formatNumber(suggestion.kg, 1)} kg</span>
+                </span>
+                <span className="text-[12px] leading-snug text-muted">{suggestion.reason}</span>
+              </span>
+              <span className="shrink-0 text-[13px] font-bold text-gold">Dùng</span>
+            </button>
+          )}
           {draft.target_weight_kg != null && (
             <button
               type="button"

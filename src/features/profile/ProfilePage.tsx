@@ -1,16 +1,21 @@
 import clsx from 'clsx';
 import {
   BarChart3,
+  BookmarkCheck,
+  Camera,
   Check,
   ChevronRight,
   Droplets,
   Footprints,
   Info,
   Link2,
+  ListChecks,
   LogOut,
   Mail,
   Pencil,
+  RefreshCw,
   Scale,
+  Sparkles,
   Target,
   X,
   type LucideIcon,
@@ -31,13 +36,16 @@ import { useAuth } from '@/context/AuthContext';
 import { useProfile } from '@/context/ProfileContext';
 import { formatDayVi } from '@/lib/date';
 import { bmiCategory, calcAge, calcBMI } from '@/lib/energy';
-import { notifyDataChanged } from '@/lib/events';
+import { notifyDataChanged, onDataChanged } from '@/lib/events';
 import { formatKg, formatMl, formatNumber } from '@/lib/format';
 import { useAsync } from '@/lib/hooks';
 import { latestWeight } from '@/services/body';
+import { listCustomFoods } from '@/services/foods';
+import { listMealTemplates } from '@/services/mealTemplates';
 import { upsertFitProfile } from '@/services/profile';
 import { ACTIVITY_LABELS, GOAL_LABELS, type FitProfile } from '@/types/db';
 import { targetStatus } from '@/features/body/lib';
+import { memorySummary, namesHint } from './lib';
 import { version } from '../../../package.json';
 
 const PACE_LABELS: Record<string, string> = { slow: 'chậm', medium: 'vừa', fast: 'nhanh' };
@@ -151,7 +159,7 @@ export default function ProfilePage() {
                     : undefined
                 }
               />
-              <Stat label="BMI" value={bmi ? formatNumber(bmi, 1) : '—'} sub={bmi ? `${bmiCategory(bmi).label} (châu Á)` : undefined} />
+              <Stat label="BMI · châu Á" value={bmi ? formatNumber(bmi, 1) : '—'} sub={bmi ? bmiCategory(bmi).label : undefined} />
             </dl>
             {(h || age || fit.activity_level) && (
               <p className="mt-3 text-center text-[12px] text-muted">
@@ -203,6 +211,10 @@ export default function ProfilePage() {
           onSave={(v) => saveTarget({ step_target: v })}
         />
       </GlassCard>
+
+      {/* Remembered data: saved foods + meal templates (re-logged with one tap, no re-scan) */}
+      <SectionTitle>Dữ liệu đã ghi nhớ</SectionTitle>
+      <MemoryCard />
 
       {/* Links */}
       <SectionTitle>Theo dõi</SectionTitle>
@@ -257,7 +269,127 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-function NavRow({ to, icon: Icon, label, hint }: { to: string; icon: LucideIcon; label: string; hint: string }) {
+/**
+ * Saved foods ("Món đã lưu", incl. dishes confirmed after an AI scan) and meal templates
+ * ("Bữa mẫu"): counts + the ones used most, linking to where they are re-logged / managed.
+ * Refetches when another view saves / logs food.
+ */
+function MemoryCard() {
+  const foods = useAsync(() => listCustomFoods(), []);
+  const templates = useAsync(() => listMealTemplates(), []);
+  const { reload: reloadFoods } = foods;
+  const { reload: reloadTemplates } = templates;
+
+  useEffect(
+    () =>
+      onDataChanged((kind) => {
+        if (kind === 'foods' || kind === 'meals' || kind === 'any') {
+          void reloadFoods();
+          void reloadTemplates();
+        }
+      }),
+    [reloadFoods, reloadTemplates],
+  );
+
+  const s = memorySummary(foods.data, templates.data);
+  const firstLoad = (foods.loading && !foods.data) || (templates.loading && !templates.data);
+  const failed = (foods.error && !foods.data) || (templates.error && !templates.data);
+  const retry = () => {
+    if (foods.error) void reloadFoods();
+    if (templates.error) void reloadTemplates();
+  };
+
+  if (firstLoad) {
+    return (
+      <GlassCard className="flex flex-col gap-3" aria-busy="true">
+        <Skeleton height={44} rounded="md" />
+        <Skeleton height={56} rounded="md" />
+        <Skeleton height={56} rounded="md" />
+      </GlassCard>
+    );
+  }
+
+  if (failed && !foods.data && !templates.data) {
+    return (
+      <GlassCard className="flex items-center gap-3">
+        <p className="min-w-0 flex-1 text-[13px] text-muted">Không tải được món đã lưu và bữa mẫu.</p>
+        <Button variant="secondary" size="sm" onClick={retry} icon={<RefreshCw className="h-4 w-4" />}>
+          Thử lại
+        </Button>
+      </GlassCard>
+    );
+  }
+
+  const empty = s.foodCount === 0 && s.templateCount === 0;
+
+  return (
+    <GlassCard padding="none" className="divide-y divide-white/[0.08] animate-fade-slide-up animate-delay-300">
+      {empty ? (
+        <p className="px-4 py-3.5 text-[13px] leading-relaxed text-muted">
+          Fitora nhớ những món bạn đã quét hoặc đã lưu — lần sau chỉ cần <b className="font-semibold text-text/90">chọn lại 1 chạm</b>, không phải
+          quét hay nhập lại.
+        </p>
+      ) : (
+        <p className="flex items-start gap-2.5 px-4 py-3.5 text-[13px] leading-relaxed text-muted">
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
+          <span>
+            {s.reuses > 0 ? (
+              <>
+                Đã ghi lại <b className="tabular font-bold text-text">{formatNumber(s.reuses)} lần</b> mà không cần quét hay nhập lại
+              </>
+            ) : (
+              <>Chọn món đã lưu để ghi lại 1 chạm, không cần quét hay nhập lại</>
+            )}
+            {s.aiCount > 0 && (
+              <>
+                {' · '}
+                <b className="tabular font-bold text-text">{formatNumber(s.aiCount)} món</b> từ ảnh quét
+              </>
+            )}
+            .
+          </span>
+        </p>
+      )}
+      {foods.error && !foods.data ? (
+        <RetryRow label="Không tải được món đã lưu" onRetry={() => void reloadFoods()} />
+      ) : s.foodCount > 0 ? (
+        <NavRow
+          to="/food/search?tab=mine"
+          icon={BookmarkCheck}
+          label="Món đã lưu"
+          hint={namesHint(s.topFoods, s.foodCount)}
+          count={s.foodCount}
+        />
+      ) : (
+        <NavRow to="/scan" icon={Camera} label="Quét món đầu tiên" hint="Lưu lại để lần sau chọn ngay" />
+      )}
+      {templates.error && !templates.data ? (
+        <RetryRow label="Không tải được bữa mẫu" onRetry={() => void reloadTemplates()} />
+      ) : (
+        <NavRow
+          to="/diary"
+          icon={ListChecks}
+          label="Bữa mẫu"
+          hint={s.templateCount > 0 ? namesHint(s.topTemplates, s.templateCount) : 'Lưu cả bữa trong Nhật ký'}
+          count={s.templateCount || undefined}
+        />
+      )}
+    </GlassCard>
+  );
+}
+
+function RetryRow({ label, onRetry }: { label: string; onRetry: () => void }) {
+  return (
+    <div className="flex min-h-[64px] items-center gap-3 px-4 py-3">
+      <p className="min-w-0 flex-1 text-[13px] text-muted">{label}</p>
+      <Button variant="secondary" size="sm" onClick={onRetry} icon={<RefreshCw className="h-4 w-4" />}>
+        Thử lại
+      </Button>
+    </div>
+  );
+}
+
+function NavRow({ to, icon: Icon, label, hint, count }: { to: string; icon: LucideIcon; label: string; hint: string; count?: number }) {
   return (
     <Link to={to} className="flex min-h-[64px] items-center gap-3.5 px-4 py-3 transition-colors hover:bg-white/[0.04] active:bg-white/[0.06]">
       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-white/[0.06] text-gold">
@@ -265,8 +397,13 @@ function NavRow({ to, icon: Icon, label, hint }: { to: string; icon: LucideIcon;
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-[15px] font-bold text-text">{label}</span>
-        <span className="block truncate text-[12px] text-muted">{hint}</span>
+        <span className="line-clamp-2 break-words text-[12px] leading-snug text-muted">{hint}</span>
       </span>
+      {count !== undefined && (
+        <span className="tabular shrink-0 rounded-full border border-line bg-white/[0.05] px-2.5 py-0.5 text-[13px] font-bold text-text/90">
+          {formatNumber(count)}
+        </span>
+      )}
       <ChevronRight className="h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
     </Link>
   );

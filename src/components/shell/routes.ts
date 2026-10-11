@@ -84,3 +84,19 @@ export function prefetchHandlers(to: string) {
   const go = () => prefetchRoute(to);
   return { onPointerEnter: go, onFocus: go, onTouchStart: go };
 }
+
+/**
+ * Whether a menu link points at the current location. Like NavLink (prefix match, '/' exact),
+ * but a link carrying a query (e.g. '/food/search?tab=mine') is only active when every one of
+ * its params matches too — so "Món của tôi" is not highlighted on the plain food-search screen.
+ */
+export function isLinkActive(to: string, pathname: string, search = ''): boolean {
+  const [path, query = ''] = to.split('?');
+  const target = path || '/';
+  const pathOk = target === '/' ? pathname === '/' : pathname === target || pathname.startsWith(`${target}/`);
+  if (!pathOk) return false;
+  const want = new URLSearchParams(query);
+  const have = new URLSearchParams(search);
+  for (const [k, v] of want) if (have.get(k) !== v) return false;
+  return true;
+}

@@ -37,11 +37,11 @@ export function Analysing({ photoUrl, onCancel }: { photoUrl: string | null; onC
       <div className="relative px-5" style={{ paddingBottom: 'calc(var(--safe-bottom) + 24px)' }}>
         <div className="glass-strong animate-fade-slide-up rounded-[28px] p-5">
           <div className="flex items-center gap-3">
-            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-gold/15 text-gold">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[rgba(237,180,11,0.15)] text-gold">
               <Sparkles className="h-5 w-5" aria-hidden="true" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="eyebrow !text-gold/90">AI đang phân tích</p>
+              <p className="eyebrow !text-[rgba(237,180,11,0.9)]">AI đang phân tích</p>
               <p key={step} className="mt-1 animate-fade-slide-up truncate text-[17px] font-bold text-text">
                 {STEPS[step]}
                 <span className="scan-dots ml-0.5" aria-hidden="true">

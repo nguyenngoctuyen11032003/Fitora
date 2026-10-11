@@ -131,6 +131,15 @@ describe('buildReport extras', () => {
     expect(s.bestDay?.day).toBe('2026-10-16');
     expect(s.loggingRate).toBeCloseTo(4 / 7);
   });
+  it('a past period has no "current" streak (only the longest one)', () => {
+    const rows = ['2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18'].map((d) => row(d, { kcal_in: 1900 }));
+    const s = week(rows, '2026-10-25');
+    expect(s.currentStreak).toBe(0);
+    expect(s.longestStreak).toBe(5);
+    const text = buildInsights(s, { period: 'week', goal: 'lose', proteinTarget: null })[0].text;
+    expect(text).not.toMatch(/hiện tại/);
+    expect(text).not.toMatch(/tuần này/);
+  });
 });
 
 describe('comparePeriods / buildInsights', () => {
@@ -164,6 +173,21 @@ describe('comparePeriods / buildInsights', () => {
     expect(ins[2].tone).toBe('good');
     expect(ins[3].text).toContain('giảm');
     expect(ins.every((i) => (i.tone as string) !== 'bad')).toBe(true);
+  });
+  it('does not repeat the streak when it equals the logged-day count', () => {
+    // 7/7 days logged → the trailing streak is the same number; saying it twice adds nothing.
+    const perfect = buildInsights(week(full(1990, 150), '2026-10-19'), { period: 'week', goal: 'lose', proteinTarget: 160 });
+    expect(perfect[0].kind).toBe('consistency');
+    expect(perfect[0].text).not.toContain('Chuỗi');
+    // 12..15 + 17..18 logged, 16 skipped (today 18 in progress): trailing streak 2 < 6 logged → shown.
+    const gappy = buildInsights(
+      week(
+        ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-17', '2026-10-18'].map((d) => row(d, { kcal_in: 1990 })),
+        '2026-10-18',
+      ),
+      { period: 'week', goal: 'lose', proteinTarget: null },
+    );
+    expect(gappy[0].text).toContain('Chuỗi hiện tại 2 ngày');
   });
   it('dayName', () => {
     expect(dayName('2026-10-13')).toBe('Thứ Ba 13/10');

@@ -1,17 +1,21 @@
 import clsx from 'clsx';
 import { ArrowUpRight, LogOut, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Portal } from '@/components/ui/Portal';
 import { useFocusTrap } from '@/components/ui/useFocusTrap';
 import { useAuth } from '@/context/AuthContext';
 import { useProfile } from '@/context/ProfileContext';
-import { prefetchHandlers } from './routes';
+import { isLinkActive, prefetchHandlers } from './routes';
+
+/** Food search opened on the "Món của tôi" tab (saved / scanned dishes). */
+export const SAVED_FOODS_PATH = '/food/search?tab=mine';
 
 export const MENU_LINKS: { to: string; label: string; hint: string }[] = [
   { to: '/', label: 'Hôm nay', hint: 'Calo, macro, nước, bước' },
   { to: '/diary', label: 'Nhật ký ăn', hint: 'Bữa sáng · trưa · tối · vặt' },
   { to: '/scan', label: 'Quét món AI', hint: 'Chụp ảnh, AI đếm calo' },
+  { to: SAVED_FOODS_PATH, label: 'Món của tôi', hint: 'Món đã lưu · ghi lại chỉ 1 chạm' },
   { to: '/workout', label: 'Tập luyện', hint: 'Lịch tuần, buổi tập, bước chân' },
   { to: '/progress', label: 'Tiến trình', hint: 'Báo cáo tuần / tháng' },
   { to: '/body', label: 'Cơ thể', hint: 'Cân nặng, số đo, ảnh' },
@@ -28,6 +32,7 @@ export interface MenuOverlayProps {
 export function MenuOverlay({ open, onClose }: MenuOverlayProps) {
   const { signOut } = useAuth();
   const { displayName } = useProfile();
+  const { pathname, search } = useLocation();
   const [mounted, setMounted] = useState(open);
   const [leaving, setLeaving] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -78,35 +83,36 @@ export function MenuOverlay({ open, onClose }: MenuOverlayProps) {
 
         <nav className="no-scrollbar relative mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-6 [mask-image:linear-gradient(to_bottom,black_calc(100%-28px),transparent)]" aria-label="Điều hướng chính">
           <ul className="flex flex-col">
-            {MENU_LINKS.map((l, i) => (
-              <li key={l.to} className="animate-fade-slide-left" style={{ animationDelay: `${80 + i * 55}ms` }}>
-                <NavLink
-                  to={l.to}
-                  end={l.to === '/'}
-                  onClick={onClose}
-                  {...prefetchHandlers(l.to)}
-                  className={({ isActive }) =>
-                    clsx(
+            {MENU_LINKS.map((l, i) => {
+              const isActive = isLinkActive(l.to, pathname, search);
+              return (
+                <li key={l.to} className="animate-fade-slide-left" style={{ animationDelay: `${80 + i * 55}ms` }}>
+                  <Link
+                    to={l.to}
+                    aria-current={isActive ? 'page' : undefined}
+                    // Already there: just close the menu instead of stacking a duplicate history entry.
+                    onClick={(e) => {
+                      if (pathname + search === l.to) e.preventDefault();
+                      onClose();
+                    }}
+                    {...prefetchHandlers(l.to)}
+                    className={clsx(
                       'group flex min-h-[56px] items-center justify-between gap-3 rounded-2xl px-3 py-2 transition-colors hover:bg-black/10',
                       isActive ? 'text-gold' : 'text-white hover:text-gold',
-                    )
-                  }
-                >
-                  {({ isActive }) => (
-                    <>
-                      <span className="flex min-w-0 flex-col">
-                        <span className="display text-[30px] leading-[1]">{l.label}</span>
-                        <span className={clsx('mt-1 truncate text-[12px] font-medium', isActive ? 'text-gold/80' : 'text-white/55')}>{l.hint}</span>
-                      </span>
-                      <ArrowUpRight
-                        className="h-5 w-5 shrink-0 opacity-50 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:opacity-100"
-                        aria-hidden="true"
-                      />
-                    </>
-                  )}
-                </NavLink>
-              </li>
-            ))}
+                    )}
+                  >
+                    <span className="flex min-w-0 flex-col">
+                      <span className="display text-[30px] leading-[1]">{l.label}</span>
+                      <span className={clsx('mt-1 truncate text-[12px] font-medium', isActive ? 'text-gold/80' : 'text-white/55')}>{l.hint}</span>
+                    </span>
+                    <ArrowUpRight
+                      className="h-5 w-5 shrink-0 opacity-50 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:opacity-100"
+                      aria-hidden="true"
+                    />
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         </nav>
 

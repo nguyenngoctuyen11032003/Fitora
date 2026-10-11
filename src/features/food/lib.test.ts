@@ -74,6 +74,11 @@ const custom: CustomFood = {
   carbs_100g: 10,
   fat_100g: 2.5,
   fiber_100g: 0,
+  source: 'manual',
+  photo_path: null,
+  use_count: 0,
+  last_used_at: null,
+  default_meal: null,
   created_at: '',
   updated_at: '',
 };

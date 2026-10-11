@@ -1,21 +1,32 @@
+import { Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { BottomSheet, Button, Input, NumberField, useToast } from '@/components/ui';
+import { BottomSheet, Button, GlassButton, Input, NumberField, useToast } from '@/components/ui';
 import { notifyDataChanged } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
-import { createCustomFood } from '@/services/foods';
-import type { CustomFood } from '@/types/db';
-import { kcalFromMacros, kcalMismatch, per100FromServing, servingProblem } from '../lib';
+import { createCustomFood, updateCustomFood } from '@/services/foods';
+import { CUSTOM_FOOD_SOURCE_LABELS, type CustomFood } from '@/types/db';
+import { kcalFromMacros, kcalMismatch, per100FromServing, perServingFromPer100, servingProblem, usageLabel } from '../lib';
 
 export interface CustomFoodSheetProps {
   open: boolean;
   onClose: () => void;
   /** Pre-filled name (e.g. the search query). */
   initialName?: string;
-  onCreated: (food: CustomFood) => void;
+  /** Edit mode: the saved food being changed. */
+  food?: CustomFood | null;
+  onSaved: (food: CustomFood, mode: 'add' | 'edit') => void;
+  /** Edit mode delete (parent hides it and offers undo). */
+  onDelete?: (food: CustomFood) => void;
 }
 
+/** One decimal, null for 0 so empty macro fields stay empty. */
+const v1 = (n: number, keepZero = false) => {
+  const r = Math.round((Number(n) || 0) * 10) / 10;
+  return r || keepZero ? r : null;
+};
+
 /** "Món của tôi": values are typed per serving (as on a label) and stored per 100 g. */
-export function CustomFoodSheet({ open, onClose, initialName, onCreated }: CustomFoodSheetProps) {
+export function CustomFoodSheet({ open, onClose, initialName, food: editing, onSaved, onDelete }: CustomFoodSheetProps) {
   const toast = useToast();
   const [name, setName] = useState('');
   const [brand, setBrand] = useState('');
@@ -33,19 +44,37 @@ export function CustomFoodSheet({ open, onClose, initialName, onCreated }: Custo
 
   useEffect(() => {
     if (!open) return;
-    setName(initialName ?? '');
-    setBrand('');
-    setLabel('1 phần');
-    setGrams(100);
-    setKcal(null);
-    setP(null);
-    setC(null);
-    setF(null);
-    setFiber(null);
+    if (editing) {
+      // Shown per serving, as it was typed (stored per 100 g).
+      const per = perServingFromPer100(
+        { kcal: editing.kcal_100g, protein: editing.protein_100g, carbs: editing.carbs_100g, fat: editing.fat_100g, fiber: editing.fiber_100g },
+        editing.serving_grams,
+      );
+      setName(editing.name);
+      setBrand(editing.brand ?? '');
+      setLabel(editing.serving_label || '1 phần');
+      setGrams(editing.serving_grams);
+      setKcal(Math.round(per.kcal));
+      setP(v1(per.protein));
+      setC(v1(per.carbs));
+      setF(v1(per.fat));
+      setFiber(v1(per.fiber));
+    } else {
+      setName(initialName ?? '');
+      setBrand('');
+      setLabel('1 phần');
+      setGrams(100);
+      setKcal(null);
+      setP(null);
+      setC(null);
+      setF(null);
+      setFiber(null);
+    }
     setTried(false);
     setSaving(false);
     busy.current = false;
-  }, [open, initialName]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialName, editing?.id]);
 
   const fromMacros = kcalFromMacros(p ?? 0, c ?? 0, f ?? 0);
   const finalKcal = kcal ?? (fromMacros > 0 ? fromMacros : null);
@@ -62,7 +91,7 @@ export function CustomFoodSheet({ open, onClose, initialName, onCreated }: Custo
     setSaving(true);
     const per100 = per100FromServing({ kcal: finalKcal, protein: p ?? 0, carbs: c ?? 0, fat: f ?? 0, fiber: fiber ?? 0 }, grams!);
     try {
-      const food = await createCustomFood({
+      const values = {
         name: name.trim(),
         brand: brand.trim() || null,
         serving_label: label.trim() || '1 phần',
@@ -72,10 +101,11 @@ export function CustomFoodSheet({ open, onClose, initialName, onCreated }: Custo
         carbs_100g: per100.carbs,
         fat_100g: per100.fat,
         fiber_100g: per100.fiber,
-      });
-      toast.success(`Đã lưu “${food.name}” vào Món của tôi.`);
+      };
+      const food = editing ? await updateCustomFood(editing.id, values) : await createCustomFood(values);
+      toast.success(editing ? `Đã cập nhật “${food.name}”.` : `Đã lưu “${food.name}” vào Món của tôi.`);
       notifyDataChanged('foods');
-      onCreated(food);
+      onSaved(food, editing ? 'edit' : 'add');
       onClose();
     } catch (e) {
       toast.error(e);
@@ -88,12 +118,23 @@ export function CustomFoodSheet({ open, onClose, initialName, onCreated }: Custo
     <BottomSheet
       open={open}
       onClose={onClose}
-      title="Tạo món riêng"
-      description="Nhập theo một phần ăn (như trên nhãn) — lần sau chỉ cần tìm là có."
+      title={editing ? 'Sửa món đã lưu' : 'Tạo món riêng'}
+      description={
+        editing
+          ? `${CUSTOM_FOOD_SOURCE_LABELS[editing.source] ?? 'Món của tôi'} · ${usageLabel(editing.use_count, editing.last_used_at)}. Món đã ghi trong nhật ký giữ nguyên số liệu cũ.`
+          : 'Nhập theo một phần ăn (như trên nhãn) — lần sau chỉ cần tìm là có.'
+      }
       footer={
-        <Button block size="lg" loading={saving} onClick={save}>
-          Lưu món
-        </Button>
+        <div className="flex items-center gap-3">
+          {editing && onDelete && (
+            <GlassButton label="Xóa món đã lưu" onClick={() => onDelete(editing)} className="shrink-0 text-[var(--danger-text)]">
+              <Trash2 className="h-5 w-5" />
+            </GlassButton>
+          )}
+          <Button block size="lg" loading={saving} onClick={save}>
+            {editing ? 'Lưu thay đổi' : 'Lưu món'}
+          </Button>
+        </div>
       }
     >
       <form

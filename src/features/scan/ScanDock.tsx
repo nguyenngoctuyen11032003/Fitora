@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import { Camera, ChevronRight, ImagePlus, Pause, Play, ScanLine, SwitchCamera, Upload } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/Button';
 import { GlassButton } from '@/components/ui/GlassButton';
 import { Segmented } from '@/components/ui/Segmented';
@@ -30,6 +31,8 @@ interface Props {
   /* A closed, unsaved review */
   pending: { photoUrl: string; kcal: number } | null;
   onOpenPending: () => void;
+  /** "Ăn lại món đã lưu" strip (capture phase only). */
+  savedStrip?: ReactNode;
 }
 
 /** Bottom controls: live/pending result cards, mode switch and the shutter row. */
@@ -51,6 +54,7 @@ export function ScanDock({
   onOpenLiveResult,
   pending,
   onOpenPending,
+  savedStrip,
 }: Props) {
   const usesCamera = mode !== 'upload';
   return (
@@ -82,6 +86,8 @@ export function ScanDock({
           <ChevronRight className="h-5 w-5 text-muted" aria-hidden="true" />
         </button>
       )}
+
+      {savedStrip}
 
       <Segmented<ScanMode>
         ariaLabel="Chế độ quét"

@@ -3,13 +3,13 @@ import { useEffect, useState } from 'react';
 import { BottomSheet } from '@/components/ui/BottomSheet';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Segmented } from '@/components/ui/Segmented';
+import { Chip } from '@/components/ui/Chip';
 import { useToast } from '@/components/ui/Toast';
 import { formatDayVi, isISODate, todayISO } from '@/lib/date';
 import { formatKg } from '@/lib/format';
 import { uploadProgressPhoto } from '@/services/body';
 import type { BodyMeasurement, PhotoPose, ProgressPhoto } from '@/types/db';
-import { POSE_LABELS, weightOn } from './lib';
+import { POSE_LABELS, suggestPose, weightOn } from './lib';
 import { primePhotoUrl } from './usePhotoUrls';
 
 export interface PendingPhoto {
@@ -24,35 +24,45 @@ const POSES: PhotoPose[] = ['front', 'side', 'back', 'other'];
 export function PhotoUploadSheet({
   pending,
   rows,
-  defaultPose,
+  photos,
   onClose,
   onUploaded,
 }: {
   pending: PendingPhoto | null;
   rows: BodyMeasurement[];
-  defaultPose: PhotoPose;
+  /** Existing photos — the pose defaults to the next one of the user's routine for that day. */
+  photos: ProgressPhoto[];
   onClose: () => void;
   onUploaded: (p: ProgressPhoto) => void;
 }) {
   const toast = useToast();
   const [date, setDate] = useState(todayISO());
-  const [pose, setPose] = useState<PhotoPose>(defaultPose);
+  const [pose, setPose] = useState<PhotoPose>('front');
+  /** The user picked a pose themselves → stop auto-suggesting when the date changes. */
+  const [poseTouched, setPoseTouched] = useState(false);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!pending) return;
-    setDate(todayISO());
-    setPose(defaultPose);
+    const d = todayISO();
+    setDate(d);
+    setPose(suggestPose(photos, d));
+    setPoseTouched(false);
     setNote('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending]);
+
+  const changeDate = (d: string) => {
+    setDate(d);
+    if (!poseTouched && isISODate(d)) setPose(suggestPose(photos, d));
+  };
 
   const dateOk = isISODate(date) && date <= todayISO();
   const w = dateOk ? weightOn(rows, date, 0) : null;
 
   const save = async () => {
-    if (!pending || !dateOk) return;
+    if (!pending || !dateOk || busy) return;
     setBusy(true);
     try {
       const row = await uploadProgressPhoto(pending.blob, { taken_on: date, pose, note: note.trim() || null });
@@ -103,13 +113,25 @@ export function PhotoUploadSheet({
             icon={<CalendarDays />}
             value={date}
             max={todayISO()}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={(e) => changeDate(e.target.value)}
             error={!dateOk ? 'Chọn một ngày hợp lệ, không ở tương lai.' : undefined}
             hint={dateOk ? `${formatDayVi(date, 'long')}${w ? ` · cân ${formatKg(w.weight)}` : ''}` : undefined}
           />
           <div className="flex flex-col gap-1.5">
             <span className="pl-1 text-[13px] font-semibold text-muted">Tư thế</span>
-            <Segmented options={POSES.map((p) => ({ value: p, label: POSE_LABELS[p] }))} value={pose} onChange={setPose} size="sm" ariaLabel="Tư thế chụp" />
+            <div role="group" aria-label="Tư thế chụp" className="flex flex-wrap gap-2">
+              {POSES.map((p) => (
+                <Chip
+                  key={p}
+                  selected={pose === p}
+                  onClick={() => (setPose(p), setPoseTouched(true))}
+                  // Chip's border-gold/60 can't take an opacity on a var() colour → explicit rgba.
+                  className={pose === p ? '!border-[rgba(237,180,11,0.6)] !bg-[rgba(237,180,11,0.15)]' : undefined}
+                >
+                  {POSE_LABELS[p]}
+                </Chip>
+              ))}
+            </div>
             <p className="pl-1 text-[12px] text-muted">Mẹo: cùng tư thế, ánh sáng và khoảng cách mỗi lần để so sánh chính xác.</p>
           </div>
           <Input label="Ghi chú" placeholder="Không bắt buộc" value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} />

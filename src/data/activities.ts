@@ -1,5 +1,6 @@
 // Activity catalogue for the workout logger (owner: Workout agent).
-// MET values: 2011 Compendium of Physical Activities (Ainsworth et al.), code in comments.
+// MET values: Compendium of Physical Activities (Ainsworth et al., 2011; cross-checked against the
+// 2024 update — values that changed, e.g. leisure cycling, use the 2024 number). Code in comments.
 // `fit_workouts.activity` stores the activity `key`; the chosen variant's MET is stored in `met`.
 import type { WorkoutCategory } from '@/types/db';
 
@@ -142,14 +143,14 @@ const RAW: Record<WorkoutCategory, Raw[]> = {
     ['treading_water', 'Đạp nước', 'waves', [['moderate', 'Vừa', 3.5]], 0, ['treading']],
   ],
   cycling: [
-    // 01010 < 10 mph leisure 4.0 · 01020 10–11.9 mph 6.8 · 01030 12–13.9 mph 8.0 · 01040 14–15.9 mph 10.0 · 01050 16–19 mph 12.0
-    // bicycling: leisure <16 km/h 4.0 · 16-19 km/h 6.8 · 19-22 km/h 8.0 · 22-25 km/h 10.0 · 25-30 km/h 12.0
+    // 01010 < 10 mph leisure 5.8 (2024 Compendium; was 4.0 in 2011) · 01020 10–11.9 mph 6.8 · 01030 12–13.9 mph 8.0 · 01040 14–15.9 mph 10.0 · 01050 16–19 mph 12.0
+    // bicycling: leisure <16 km/h 5.8 · 16-19 km/h 6.8 · 19-22 km/h 8.0 · 22-25 km/h 10.0 · 25-30 km/h 12.0
     [
       'cycling_road',
       'Đạp xe',
       'bike',
       [
-        ['leisure', '< 16 km/h', 4.0, 13],
+        ['leisure', '< 16 km/h', 5.8, 13],
         ['16_19', '16–19 km/h', 6.8, 17.5],
         ['19_22', '19–22 km/h', 8.0, 20.5],
         ['22_25', '22–25 km/h', 10.0, 23.5],

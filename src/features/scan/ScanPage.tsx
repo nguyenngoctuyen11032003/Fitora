@@ -11,14 +11,18 @@ import { notifyDataChanged } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { captureVideoFrame, compressImage } from '@/lib/image';
 import { AiScanError, scanFood } from '@/services/ai';
-import { addMealEntries, uploadMealPhoto } from '@/services/meals';
+import { markCustomFoodUsed, saveScannedDishes } from '@/services/foods';
+import { addMealEntries, photoInUse, uploadMealPhoto } from '@/services/meals';
 import { removeImages } from '@/services/storage';
-import { MEAL_LABELS, type AiErrorCode, type MealType } from '@/types/db';
+import { MEAL_LABELS, type AiErrorCode, type CustomFood, type MealEntry, type MealType } from '@/types/db';
 import { Analysing } from './Analysing';
 import { CameraFallback, isCameraUnavailable } from './CameraFallback';
 import { buildMealEntries } from './entries';
 import { parseDateParam, parseMealParam } from './meal';
+import { QuickLogSheet } from './QuickLogSheet';
 import { ReviewSheet } from './ReviewSheet';
+import { dishTotals, rankSavedFoods, rememberSignature, remembers } from './saved';
+import { SavedStrip } from './SavedStrip';
 import { fromAiDish, totals, type ScanDish } from './scale';
 import { ScanDock, type ScanMode } from './ScanDock';
 import { ScanErrorPanel } from './ScanErrorPanel';
@@ -26,12 +30,22 @@ import { useShots, vibrate, type Shot } from './shot';
 import { UploadDropzone } from './UploadDropzone';
 import { cameraSupported, useCamera } from './useCamera';
 import { useLiveScan } from './useLiveScan';
+import { useFoodPhotoUrls, useSavedFoods } from './useSavedFoods';
 import { Viewfinder } from './Viewfinder';
 import './scan.css';
 
 type Phase = 'capture' | 'analysing' | 'error' | 'review';
 
+/** Height the "Ăn lại món đã lưu" strip adds to the bottom dock (heading + one row of cards + gap). */
+const STRIP_H = 118;
+
 const isAbort = (e: unknown) => (e as Error)?.name === 'AbortError';
+
+/** Delete an uploaded scan photo unless a diary entry or a saved food points at it. */
+const dropPhoto = (path: string) =>
+  void photoInUse(path)
+    .then((used) => (used ? undefined : removeImages([path])))
+    .catch(() => {});
 
 export default function ScanPage() {
   const [params] = useSearchParams();
@@ -59,18 +73,37 @@ export default function ScanPage() {
   const abortRef = useRef<AbortController | null>(null);
   const uploadedPath = useRef<{ blob: Blob; path: string } | null>(null);
   const saved = useRef(false);
+  // dish key → what was remembered in "Món của tôi" (a retried save does not count twice).
+  const remembered = useRef(new Map<string, { sig: string; id: string }>());
   // Synchronous guards: state updates land a render later, a fast double tap would slip through.
   const savingRef = useRef(false);
   const capturingRef = useRef(false);
 
   const manualHref = `/food/search?meal=${meal}&date=${date}`;
 
+  /* ---------- saved foods ("Món của tôi") ---------- */
+  const savedFoods = useSavedFoods();
+  const ranked = useMemo(() => rankSavedFoods(savedFoods.foods, meal), [savedFoods.foods, meal]);
+  const foodPhotos = useFoodPhotoUrls(ranked);
+  const [quickFood, setQuickFood] = useState<CustomFood | null>(null);
+
+  const onQuickLogged = (entry: MealEntry, food: CustomFood, m: MealType, servings: number) => {
+    setQuickFood(null);
+    vibrate(20);
+    notifyDataChanged('meals');
+    const portion = servings === 1 ? '' : ` ×${formatNumber(servings, 2)}`;
+    toast.success(`Đã thêm ${food.name}${portion} · ${formatNumber(entry.kcal)} kcal vào ${MEAL_LABELS[m].toLowerCase()}`, {
+      duration: 5000,
+      action: { label: 'Xem nhật ký', onClick: () => navigate(`/diary?date=${entry.eaten_on}`) },
+    });
+  };
+
   /* ---------- lifecycle ---------- */
   useEffect(
     () => () => {
       abortRef.current?.abort();
       // Photo uploaded for a save that never completed → don't leave it orphaned.
-      if (uploadedPath.current && !saved.current) void removeImages([uploadedPath.current.path]).catch(() => {});
+      if (uploadedPath.current && !saved.current) dropPhoto(uploadedPath.current.path);
     },
     [],
   );
@@ -137,7 +170,13 @@ export default function ScanPage() {
   // Offline failure → retry by itself as soon as the connection comes back.
   useEffect(() => {
     if (phase !== 'error' || error?.code !== 'network' || !shot) return;
-    const again = () => void analyse(shot);
+    // Several "online" events can arrive together: resend once (each send costs an AI scan).
+    let fired = false;
+    const again = () => {
+      if (fired) return;
+      fired = true;
+      void analyse(shot);
+    };
     window.addEventListener('online', again);
     return () => window.removeEventListener('online', again);
   }, [phase, error, shot, analyse]);
@@ -233,19 +272,53 @@ export default function ScanPage() {
           photoPath = await uploadMealPhoto(shot.blob);
           uploadedPath.current = { blob: shot.blob, path: photoPath };
           // An earlier failed save uploaded a different photo → it would be orphaned.
-          if (prev) void removeImages([prev.path]).catch(() => {});
+          if (prev) dropPhoto(prev.path);
         } catch {
           photoFailed = true;
         }
       }
     }
+
+    // Remember the confirmed dishes in "Món của tôi" first, so the diary rows can link to them.
+    // Best-effort: a failure here must never block logging the meal.
+    const foodIds: Record<string, string> = {};
+    let rememberedNow = 0;
+    let rememberFailed = false;
+    const toRemember = dishes.filter((d) => remembers(d) && d.name.trim());
+    const fresh = toRemember.filter((d) => {
+      const prev = remembered.current.get(d.key);
+      if (prev && prev.sig === rememberSignature(d)) {
+        foodIds[d.key] = prev.id;
+        return false;
+      }
+      return true;
+    });
+    if (fresh.length) {
+      try {
+        const rows = await saveScannedDishes(fresh.map(dishTotals), { photoPath, meal });
+        rows.forEach((row, i) => {
+          foodIds[fresh[i].key] = row.id;
+          remembered.current.set(fresh[i].key, { sig: rememberSignature(fresh[i]), id: row.id });
+        });
+        rememberedNow = fresh.length;
+      } catch {
+        rememberFailed = true;
+      }
+    }
+
     try {
-      await addMealEntries(buildMealEntries(dishes, { date, meal, photoPath }));
+      await addMealEntries(buildMealEntries(dishes, { date, meal, photoPath, foodIds }));
       saved.current = true;
+      // Dishes that use a saved food's numbers without being re-remembered still count as a use.
+      const linkedOnly = dishes.filter((d) => !foodIds[d.key] && d.savedFoodId).map((d) => d.savedFoodId as string);
+      if (linkedOnly.length) void markCustomFoodUsed(linkedOnly, meal);
       notifyDataChanged('meals');
+      if (rememberedNow) notifyDataChanged('foods');
       const kcal = formatNumber(totals(dishes).kcal);
-      toast.success(`Đã thêm ${dishes.length} món · ${kcal} kcal vào ${MEAL_LABELS[meal].toLowerCase()}`);
+      const memo = rememberedNow ? ` · đã ghi nhớ ${rememberedNow} món` : '';
+      toast.success(`Đã thêm ${dishes.length} món · ${kcal} kcal vào ${MEAL_LABELS[meal].toLowerCase()}${memo}`);
       if (photoFailed) toast.info('Không tải được ảnh — món đã được lưu không kèm ảnh.');
+      if (rememberFailed) toast.info('Chưa ghi nhớ được món vào Món của tôi — bữa ăn vẫn đã được lưu.');
       navigate(`/diary?date=${date}`, { replace: true });
     } catch (e) {
       toast.error(e);
@@ -266,6 +339,8 @@ export default function ScanPage() {
   const showLiveCard = mode === 'live' && !!live.result && phase === 'capture';
   const liveTotal = useMemo(() => (live.result ? totals(live.result.dishes).kcal : 0), [live.result]);
   const pendingKcal = useMemo(() => totals(dishes).kcal, [dishes]);
+  const showStrip = phase === 'capture' && mode !== 'live' && !hasPending && ranked.length > 0;
+  const strip = (title?: string) => <SavedStrip foods={ranked} urls={foodPhotos} onPick={setQuickFood} allHref={manualHref} title={title} />;
   const subtitle = `${MEAL_LABELS[meal]} · ${date === todayISO() ? 'Hôm nay' : formatDayVi(date, 'short')}`;
 
   return (
@@ -299,7 +374,7 @@ export default function ScanPage() {
         {/* Warm ambient when there is no feed */}
         {(!usesCamera || cam.status !== 'ready') && (
           <div className="app-bg absolute inset-0" aria-hidden="true">
-            <div className="absolute inset-x-0 top-1/3 mx-auto h-64 w-64 rounded-full bg-ember/20 blur-[80px]" />
+            <div className="absolute inset-x-0 top-1/3 mx-auto h-64 w-64 rounded-full bg-[rgba(225,80,10,0.2)] blur-[80px]" />
           </div>
         )}
         {/* Legibility scrims */}
@@ -327,7 +402,7 @@ export default function ScanPage() {
         {/* ---- Stage ---- */}
         <div
           className="absolute inset-x-0 flex flex-col items-center justify-center px-6"
-          style={{ top: 'calc(var(--safe-top) + 64px)', bottom: `calc(var(--safe-bottom) + ${showLiveCard || hasPending ? 280 : 196}px)` }}
+          style={{ top: 'calc(var(--safe-top) + 64px)', bottom: `calc(var(--safe-bottom) + ${(showLiveCard || hasPending ? 280 : 196) + (showStrip ? STRIP_H : 0)}px)` }}
         >
           {usesCamera && cam.status === 'ready' && (
             <>
@@ -383,6 +458,7 @@ export default function ScanPage() {
           onOpenLiveResult={openLiveResult}
           pending={hasPending && shot ? { photoUrl: shot.url, kcal: pendingKcal } : null}
           onOpenPending={() => setPhase('review')}
+          savedStrip={showStrip ? strip() : null}
         />
 
         <input ref={galleryInput} type="file" accept="image/*" className="sr-only" tabIndex={-1} aria-hidden="true" onChange={onPick} />
@@ -400,6 +476,7 @@ export default function ScanPage() {
             onRetry={() => shot && void analyse(shot)}
             onManual={manualFromPhoto}
             canRetry={!!shot}
+            extra={error.code === 'quota_exceeded' || error.code === 'network' || error.code === 'ai_unavailable' ? strip('Không cần AI — ăn lại món đã lưu') : null}
           />
         )}
       </div>
@@ -418,6 +495,17 @@ export default function ScanPage() {
         saving={saving}
         onSave={() => void save()}
         manualHref={manualHref}
+        foods={savedFoods.foods}
+        rankedFoods={ranked}
+      />
+
+      <QuickLogSheet
+        food={quickFood}
+        photoUrl={quickFood?.photo_path ? foodPhotos[quickFood.photo_path] : undefined}
+        onClose={() => setQuickFood(null)}
+        meal={meal}
+        date={date}
+        onLogged={onQuickLogged}
       />
     </Page>
   );

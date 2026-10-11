@@ -166,7 +166,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                       t.action?.onClick();
                       dismiss(t.id);
                     }}
-                    className="min-h-[40px] shrink-0 rounded-full px-3 text-sm font-bold text-gold hover:bg-white/5"
+                    className="min-h-[44px] shrink-0 rounded-full px-3 text-sm font-bold text-gold hover:bg-white/5"
                   >
                     {t.action.label}
                   </button>
@@ -175,7 +175,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   type="button"
                   onClick={() => dismiss(t.id)}
                   aria-label="Đóng thông báo"
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted hover:bg-white/5 hover:text-text"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted hover:bg-white/5 hover:text-text"
                 >
                   <X className="h-4 w-4" />
                 </button>

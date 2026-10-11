@@ -12,11 +12,11 @@ export function UploadDropzone({ busy, dragOver, onPick }: { busy: boolean; drag
       aria-busy={busy || undefined}
       className={clsx(
         'group flex aspect-[4/5] max-h-full w-full max-w-[300px] flex-col items-center justify-center gap-4 rounded-[32px] border-2 border-dashed p-6 text-center transition-colors',
-        dragOver ? 'border-gold bg-gold/10' : 'border-white/20 bg-white/[0.03] hover:border-gold/60',
+        dragOver ? 'border-gold bg-[rgba(237,180,11,0.1)]' : 'border-white/20 bg-white/[0.03] hover:border-[rgba(237,180,11,0.6)]',
       )}
     >
       <span className="relative">
-        <span className="absolute inset-0 rounded-[24px] bg-ember/40 blur-xl" aria-hidden="true" />
+        <span className="absolute inset-0 rounded-[24px] bg-[rgba(225,80,10,0.4)] blur-xl" aria-hidden="true" />
         <span className="glass relative grid h-[72px] w-[72px] place-items-center rounded-[24px] text-gold">
           {busy ? <Spinner size={28} /> : <ImagePlus className="h-8 w-8" aria-hidden="true" />}
         </span>

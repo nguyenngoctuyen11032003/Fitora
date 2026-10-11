@@ -1,6 +1,8 @@
 import clsx from 'clsx';
 import {
   AlertTriangle,
+  Bookmark,
+  BookmarkCheck,
   CalendarCheck,
   CheckCircle2,
   ChevronLeft,
@@ -17,15 +19,17 @@ import {
   TrendingUp,
   Trophy,
   XCircle,
+  Zap,
   type LucideIcon,
 } from 'lucide-react';
 import { lazy, Suspense, useMemo, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { CountUp, GlassButton, GlassCard, MacroBar, ProgressBar, Segmented, Skeleton } from '@/components/ui';
+import { Button, CountUp, GlassButton, GlassCard, MacroBar, ProgressBar, Segmented, Skeleton } from '@/components/ui';
 import { bmiCategory } from '@/lib/energy';
 import { formatKcal, formatKg, formatMl, formatNumber, formatSigned } from '@/lib/format';
 import { formatDayVi } from '@/lib/date';
 import type { FitProfile, Goal } from '@/types/db';
+import { MIN_ENTRIES_FOR_FOODS, type FoodReport, type FoodStat } from './foodStats';
 import { buildInsights, comparePeriods, type Insight, type InsightKind } from './insights';
 import { ddmm, type DayPoint, type Period, type ReportSummary, type VerdictTone } from './lib';
 
@@ -472,17 +476,19 @@ export function WeightSection({
         <Stat label="BMI" value={bmi ? formatNumber(bmi, 1) : '—'} sub={cat?.label} />
       </div>
       {s.weightTrend && (
-        <p className="mt-3 flex items-center gap-2 text-[13px] text-muted">
+        <p className="mt-3 flex items-start gap-2 text-[13px] leading-snug text-muted">
           {s.weightTrend.slopeKgPerWeek < 0 ? (
-            <TrendingDown className="h-4 w-4 text-gold" aria-hidden="true" />
+            <TrendingDown className="mt-0.5 h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
           ) : (
-            <TrendingUp className="h-4 w-4 text-gold" aria-hidden="true" />
+            <TrendingUp className="mt-0.5 h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
           )}
-          Xu hướng:{' '}
-          <span className={clsx('tabular font-bold text-text', toward(s.weightTrend.slopeKgPerWeek))}>
-            {Math.abs(s.weightTrend.slopeKgPerWeek) < 0.05 ? '±0' : formatSigned(s.weightTrend.slopeKgPerWeek, 1)} kg/tuần
+          <span className="min-w-0">
+            Xu hướng{' '}
+            <span className={clsx('tabular whitespace-nowrap font-bold text-text', toward(s.weightTrend.slopeKgPerWeek))}>
+              {Math.abs(s.weightTrend.slopeKgPerWeek) < 0.05 ? '±0' : formatSigned(s.weightTrend.slopeKgPerWeek, 1)} kg/tuần
+            </span>{' '}
+            <span className="text-[11.5px]">· tính trên {n} lần cân, ít bị nhiễu hơn so sánh đầu–cuối</span>
           </span>
-          <span className="text-[11.5px]">(hồi quy tuyến tính)</span>
         </p>
       )}
       {waistDelta != null && (
@@ -651,6 +657,118 @@ export function InsightsSection({
             <Delta label="Cân nặng" value={cmp.weight} unit="kg" digits={1} />
           </div>
         </div>
+      )}
+    </GlassCard>
+  );
+}
+
+// ───────────────────────── Foods of the period ─────────────────────────
+
+/**
+ * Most-logged dishes and main protein sources of the period. Frequent dishes that are not in
+ * "Món của tôi" yet get a one-tap "Lưu" so next time they are picked, not scanned or typed again.
+ */
+export function FoodSection({
+  report,
+  onSave,
+  savingKey,
+}: {
+  report: FoodReport;
+  /** Kept for callers; copy is period-neutral. */
+  period?: Period;
+  onSave: (stat: FoodStat) => void;
+  savingKey: string | null;
+}) {
+  if (report.entryCount < MIN_ENTRIES_FOR_FOODS || (!report.frequent.length && !report.proteinTop.length)) return null;
+  return (
+    <GlassCard padding="md" as="section" aria-labelledby="rp-foods">
+      <SectionTitle
+        eyebrow="Thói quen ăn"
+        title={<span id="rp-foods">Món hay ăn</span>}
+        right={
+          <Link to="/food/search?tab=mine" className="glass pill min-h-[44px] shrink-0 text-[13px] font-semibold">
+            <Bookmark className="h-4 w-4" aria-hidden="true" /> Món của tôi
+          </Link>
+        }
+      />
+
+      {report.frequent.length > 0 && (
+        <>
+          <p className="tabular mb-2 text-[12px] font-semibold text-muted">
+            Ăn nhiều nhất · {report.dishCount} món, {report.entryCount} lần ghi
+          </p>
+          <ul className="flex flex-col gap-2">
+            {report.frequent.map((f, i) => (
+              <li key={f.key} className="flex min-h-[52px] items-center gap-3 rounded-2xl border border-line bg-white/[0.03] px-3 py-2">
+                <span className="tabular grid h-7 w-7 shrink-0 place-items-center rounded-xl bg-white/[0.06] text-[13px] font-extrabold text-gold" aria-hidden="true">
+                  {i + 1}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[14.5px] font-bold text-text" title={f.name}>
+                    {f.name}
+                  </span>
+                  <span className="tabular block text-[12px] text-muted">
+                    {f.count} lần{f.days !== f.count ? ` · ${f.days} ngày` : ''} · ~{formatNumber(Math.round(f.kcal / f.count))} kcal/lần
+                  </span>
+                </span>
+                {f.savedFood ? (
+                  <span className="inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold text-ok" title="Đã có trong Món của tôi">
+                    <BookmarkCheck className="h-4 w-4" aria-hidden="true" />
+                    Đã lưu
+                  </span>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="min-h-[44px] shrink-0"
+                    loading={savingKey === f.key}
+                    disabled={savingKey != null && savingKey !== f.key}
+                    icon={<Bookmark className="h-4 w-4" />}
+                    onClick={() => onSave(f)}
+                    aria-label={`Lưu ${f.name} vào Món của tôi`}
+                  >
+                    Lưu
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+          {report.saveSuggestions.length > 0 && (
+            <p className="mt-2 text-[12px] leading-snug text-muted">
+              Lưu món hay ăn để lần sau chỉ cần chọn, không phải quét hay nhập lại.
+            </p>
+          )}
+        </>
+      )}
+
+      {report.proteinTop.length > 0 && (
+        <div className={clsx(report.frequent.length > 0 && 'mt-4 border-t border-line pt-4')}>
+          <p className="mb-2 text-[12px] font-semibold text-muted">
+            Nguồn đạm chính · tổng {formatNumber(report.totalProtein)} g
+          </p>
+          <ul className="flex flex-col gap-2.5">
+            {report.proteinTop.map(({ stat, share }) => (
+              <li key={stat.key} className="min-w-0">
+                <div className="flex items-baseline justify-between gap-3 text-[13.5px]">
+                  <span className="min-w-0 truncate font-semibold text-text" title={stat.name}>
+                    {stat.name}
+                  </span>
+                  <span className="tabular shrink-0 text-muted">
+                    <span className="font-bold text-text">{formatNumber(stat.protein_g)} g</span> · {share}%
+                  </span>
+                </div>
+                <ProgressBar value={share} max={100} color="var(--protein)" height={5} showOver={false} className="mt-1.5" label={`${stat.name}: ${share}% lượng đạm`} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {report.reusedEntries > 0 && (
+        <p className="mt-4 flex items-center gap-2 border-t border-line pt-3 text-[12px] text-muted">
+          <Zap className="h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
+          {report.reusedEntries} lần ghi nhanh từ Món của tôi, không cần quét hay nhập lại.
+        </p>
       )}
     </GlassCard>
   );

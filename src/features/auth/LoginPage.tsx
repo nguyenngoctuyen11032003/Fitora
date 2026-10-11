@@ -9,12 +9,14 @@ import { resendConfirmation, signIn } from '@/services/auth';
 import { AuthLayout } from './AuthLayout';
 import { PasswordToggle, useCooldown } from './PasswordToggle';
 import { returnPath } from './redirect';
+import { readLastEmail, rememberEmail } from '@/lib/lastEmail';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
-  const [email, setEmail] = useState('');
+  // Prefilled with the last address used on this device (only the e-mail is remembered).
+  const [email, setEmail] = useState(readLastEmail);
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -34,6 +36,7 @@ export default function LoginPage() {
     setUnconfirmed(false);
     try {
       await signIn(email, password);
+      rememberEmail(email);
       // Back to the page that required sign-in (e.g. a shared #/diary?date=… link).
       navigate(returnPath(location.state), { replace: true });
     } catch (err) {
@@ -101,7 +104,7 @@ export default function LoginPage() {
           trailing={<PasswordToggle shown={show} onToggle={() => setShow((s) => !s)} />}
         />
         <div className="-mt-1 flex justify-end">
-          <Link to="/forgot" className="inline-flex min-h-[44px] items-center text-sm font-semibold text-muted hover:text-gold">
+          <Link to="/forgot" state={{ email }} className="inline-flex min-h-[44px] items-center text-sm font-semibold text-muted hover:text-gold">
             Quên mật khẩu?
           </Link>
         </div>
@@ -113,7 +116,7 @@ export default function LoginPage() {
                 type="button"
                 onClick={resend}
                 disabled={resending || cooldown > 0}
-                className="mt-1 block min-h-[36px] font-bold text-gold underline-offset-2 hover:underline disabled:opacity-60 disabled:no-underline"
+                className="mt-1 block min-h-[44px] font-bold text-gold underline-offset-2 hover:underline disabled:opacity-60 disabled:no-underline"
               >
                 {resending ? 'Đang gửi…' : cooldown > 0 ? `Gửi lại email xác nhận (${cooldown}s)` : 'Gửi lại email xác nhận'}
               </button>

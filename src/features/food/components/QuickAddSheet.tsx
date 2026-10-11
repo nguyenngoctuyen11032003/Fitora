@@ -1,11 +1,14 @@
-import { Trash2 } from 'lucide-react';
+import clsx from 'clsx';
+import { BookmarkPlus, Check, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { BottomSheet, Button, GlassButton, Input, NumberField, Segmented, useToast } from '@/components/ui';
 import { notifyDataChanged } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
+import { saveEntryAsFood } from '@/services/foods';
 import { addMealEntries, updateMeal } from '@/services/meals';
 import { MEAL_LABELS, MEAL_TYPES, type MealEntry, type MealType } from '@/types/db';
 import { kcalFromMacros, kcalMismatch, MEAL_SHORT } from '../lib';
+import { RememberRow } from './FoodSheet';
 
 export interface QuickAddSheetProps {
   open: boolean;
@@ -33,6 +36,9 @@ export function QuickAddSheet({ open, onClose, date, meal: defaultMeal, entry, i
   // Synchronous guard: two taps in the same frame both see saving === false.
   const busy = useRef(false);
   const [tried, setTried] = useState(false);
+  /** Add mode: also keep it in "Món của tôi" so next time it is one tap. */
+  const [keep, setKeep] = useState(false);
+  const [remembering, setRemembering] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -45,6 +51,8 @@ export function QuickAddSheet({ open, onClose, date, meal: defaultMeal, entry, i
     setSaving(false);
     busy.current = false;
     setTried(false);
+    setKeep(false);
+    setRemembering(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, entry?.id]);
 
@@ -77,8 +85,19 @@ export function QuickAddSheet({ open, onClose, date, meal: defaultMeal, entry, i
         onSaved(saved, 'edit');
       } else {
         const [saved] = await addMealEntries([{ ...values, eaten_on: date, source: 'manual', fiber_g: 0 }]);
-        toast.success(`Đã thêm ${formatNumber(finalKcal)} kcal vào ${MEAL_LABELS[meal].toLowerCase()}.`);
-        onSaved(saved, 'add');
+        let row = saved;
+        if (keep) {
+          // Best effort: the entry is logged either way.
+          const food = await saveEntryAsFood(saved).catch(() => null);
+          if (food) {
+            row = { ...saved, custom_food_id: food.id };
+            notifyDataChanged('foods');
+          }
+        }
+        toast.success(
+          `Đã thêm ${formatNumber(finalKcal)} kcal vào ${MEAL_LABELS[meal].toLowerCase()}${keep && row.custom_food_id ? ' và lưu vào Món của tôi' : ''}.`,
+        );
+        onSaved(row, 'add');
       }
       notifyDataChanged('meals');
       onClose();
@@ -86,6 +105,21 @@ export function QuickAddSheet({ open, onClose, date, meal: defaultMeal, entry, i
       toast.error(e);
       busy.current = false;
       setSaving(false);
+    }
+  };
+
+  const remember = async () => {
+    if (!entry || remembering || busy.current) return;
+    setRemembering(true);
+    try {
+      const food = await saveEntryAsFood(entry);
+      toast.success(`Đã lưu “${food.name}” vào Món của tôi — lần sau chỉ cần chọn.`);
+      notifyDataChanged('foods');
+      onSaved({ ...entry, custom_food_id: food.id }, 'edit');
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setRemembering(false);
     }
   };
 
@@ -150,6 +184,32 @@ export function QuickAddSheet({ open, onClose, date, meal: defaultMeal, entry, i
           <span className="pl-1 text-[13px] font-semibold text-muted">Bữa</span>
           <Segmented<MealType> ariaLabel="Bữa ăn" value={meal} onChange={setMeal} options={MEAL_TYPES.map((m) => ({ value: m, label: MEAL_SHORT[m] }))} />
         </div>
+        {entry ? (
+          <RememberRow saved={!!entry.custom_food_id} busy={remembering} onSave={() => void remember()} />
+        ) : (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={keep}
+            onClick={() => setKeep((k) => !k)}
+            className="flex min-h-[48px] w-full items-center gap-3 rounded-2xl border border-line bg-white/[0.03] px-4 text-left transition-colors hover:bg-white/[0.05]"
+          >
+            <BookmarkPlus className="h-5 w-5 shrink-0 text-gold" aria-hidden="true" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[14px] font-semibold text-text">Lưu vào Món của tôi</span>
+              <span className="block text-[12px] text-muted">Lần sau chọn lại bằng một chạm.</span>
+            </span>
+            <span
+              aria-hidden="true"
+              className={clsx(
+                'grid h-6 w-6 shrink-0 place-items-center rounded-md border transition-colors',
+                keep ? 'border-gold bg-gold text-[#1a0e02]' : 'border-line bg-transparent text-transparent',
+              )}
+            >
+              <Check className="h-4 w-4" />
+            </span>
+          </button>
+        )}
         <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
       </form>
     </BottomSheet>

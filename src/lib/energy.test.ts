@@ -82,6 +82,21 @@ describe('goalCalories', () => {
     expect(goalCalories(1014, 'maintain', null, 'female')).toBe(1200);
     expect(goalCalories(1014, 'gain', null, 'female')).toBe(1310);
   });
+  it('never proposes less than 800 kcal (DB bound), even for a tiny TDEE', () => {
+    // 30 kg, 120 cm, 100 y, sedentary woman: BMR 389 → TDEE 467
+    const tdee = calcTDEE(calcBMR('female', 30, 120, 100), 'sedentary');
+    expect(tdee).toBeLessThan(800);
+    for (const g of ['lose', 'recomp', 'maintain', 'gain'] as const) {
+      expect(goalCalories(tdee, g, 'fast', 'female')).toBeGreaterThanOrEqual(800);
+    }
+    expect(isCalorieFloored(tdee, 'lose', 'medium', 'female')).toBe(true);
+  });
+  it('never proposes more than 6000 kcal (DB bound)', () => {
+    const tdee = calcTDEE(calcBMR('male', 300, 230, 20), 'very_active');
+    expect(tdee).toBeGreaterThan(6000);
+    expect(goalCalories(tdee, 'gain', null, 'male')).toBe(6000);
+    expect(goalCalories(tdee, 'maintain', null, 'male')).toBe(6000);
+  });
   it('isCalorieFloored flags a shrunken deficit', () => {
     expect(isCalorieFloored(2500, 'lose', 'medium', 'male')).toBe(false);
     expect(isCalorieFloored(1800, 'lose', 'fast', 'male')).toBe(true);

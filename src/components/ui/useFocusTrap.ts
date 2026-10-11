@@ -26,8 +26,13 @@ export function useFocusTrap(ref: RefObject<HTMLElement>, active: boolean, onEsc
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // An Escape that cancels an IME composition (mobile keyboards) must not also close the dialog.
+        if (e.isComposing || e.keyCode === 229) return;
         e.stopPropagation();
-        escRef.current?.();
+        if (escRef.current) {
+          e.preventDefault(); // we close — don't let the browser also act on it (e.g. exit fullscreen)
+          escRef.current();
+        }
         return;
       }
       if (e.key !== 'Tab') return;

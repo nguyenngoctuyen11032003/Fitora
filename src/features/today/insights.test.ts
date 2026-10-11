@@ -156,6 +156,25 @@ describe('buildInsights', () => {
     expect(slight?.text).toContain('30 kcal');
   });
 
+  it('names a multi-day over-budget run and ranks it higher', () => {
+    const streaked = buildInsights({ ...base, eaten: 2150, remaining: -150, hour: 20, overStreak: 3 })[0];
+    expect(streaked.id).toBe('kcal-over');
+    expect(streaked.text).toBe('Đã vượt 150 kcal — ngày thứ 3 liên tiếp vượt mục tiêu. Đi bộ nhanh khoảng 35 phút là bù lại được.');
+    const single = buildInsights({ ...base, eaten: 2150, remaining: -150, hour: 20, overStreak: 1 })[0];
+    expect(single.text).toBe('Đã vượt 150 kcal. Đi bộ nhanh khoảng 35 phút là bù lại được.');
+    expect(streaked.priority).toBeGreaterThan(single.priority);
+    // Late evening, big overrun, multi-day run → plan-ahead advice, still never "nhịn bữa".
+    const late = buildInsights({ ...base, eaten: 2600, remaining: -600, hour: 22, overStreak: 2 })[0];
+    expect(late.text).toContain('ngày thứ 2 liên tiếp');
+    expect(late.text).toContain('đừng nhịn bữa');
+  });
+
+  it('a tiny overrun stays "slight" even on a multi-day run', () => {
+    const r = buildInsights({ ...base, eaten: 2030, remaining: -30, hour: 20, overStreak: 4 });
+    expect(r.map((x) => x.id)).not.toContain('kcal-over');
+    expect(r.map((x) => x.id)).toContain('kcal-slight');
+  });
+
   it('does not suggest a walk late at night', () => {
     const r = buildInsights({ ...base, eaten: 2150, remaining: -150, hour: 22 })[0];
     expect(r.id).toBe('kcal-over');

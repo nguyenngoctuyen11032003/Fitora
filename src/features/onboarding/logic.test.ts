@@ -31,6 +31,7 @@ import {
   previewPlan,
   sanitizeDraft,
   targetDateLabel,
+  suggestTargetWeight,
   type GoalDraft,
 } from './logic';
 
@@ -359,5 +360,63 @@ describe('live preview & restore', () => {
     expect(validateGoal({ ...draft, goal: 'gain', target_weight_kg: 70 }).target).toMatch(/cao hơn hiện tại/);
     expect(validateGoal({ ...draft, goal: 'maintain', target_weight_kg: 50 })).toEqual({});
     expect(validateGoal({ ...draft, target_weight_kg: 20 }).target).toMatch(/từ 30 đến 300/);
+  });
+});
+
+describe('suggestTargetWeight (one-tap target)', () => {
+  const base = { ...draft, target_weight_kg: null };
+  it('lose with a high BMI: first milestone −10 %, or BMI 22,9 when that is closer', () => {
+    // 172 cm, 76,6 kg (BMI 25,9): −10 % = 68,94 > BMI-22,9 weight 67,75 → 69
+    expect(suggestTargetWeight({ ...base, height_cm: 172, weight_kg: 76.6 })).toMatchObject({ kg: 69 });
+    // 175 cm, 74 kg (BMI 24,2): −10 % = 66,6 < 70,13 → BMI 22,9 → 70
+    expect(suggestTargetWeight({ ...base, height_cm: 175, weight_kg: 74 })).toMatchObject({ kg: 70 });
+  });
+  it('lose with a normal BMI: −3 kg but never under BMI 18,5', () => {
+    expect(suggestTargetWeight({ ...base, height_cm: 160, weight_kg: 55 })).toMatchObject({ kg: 52 });
+    // 160 cm → BMI 18,5 = 47,36 kg; 49 − 3 = 46 → 47,5
+    expect(suggestTargetWeight({ ...base, height_cm: 160, weight_kg: 49 })).toMatchObject({ kg: 47.5 });
+  });
+  it('no suggestion to lose when already underweight', () => {
+    expect(suggestTargetWeight({ ...base, height_cm: 170, weight_kg: 52 })).toBeNull();
+  });
+  it('gain: towards BMI 18,5 when underweight, else +3 kg below BMI 25', () => {
+    // 170 cm, 48 kg: +10 % = 52,8 < 53,47 → 53
+    expect(suggestTargetWeight({ ...base, goal: 'gain', height_cm: 170, weight_kg: 48 })).toMatchObject({ kg: 53 });
+    // 170 cm, 52 kg: +10 % = 57,2 ≥ 53,47 → BMI 18,5 = 53,5
+    expect(suggestTargetWeight({ ...base, goal: 'gain', height_cm: 170, weight_kg: 52 })).toMatchObject({ kg: 53.5 });
+    expect(suggestTargetWeight({ ...base, goal: 'gain', height_cm: 170, weight_kg: 62 })).toMatchObject({ kg: 65 });
+    // already obese → nothing sensible to suggest
+    expect(suggestTargetWeight({ ...base, goal: 'gain', height_cm: 170, weight_kg: 80 })).toBeNull();
+  });
+  it('only for lose / gain, and the suggestion always passes validation', () => {
+    expect(suggestTargetWeight({ ...base, goal: 'maintain' })).toBeNull();
+    expect(suggestTargetWeight({ ...base, goal: 'recomp' })).toBeNull();
+    for (const goal of ['lose', 'gain'] as const)
+      for (let h = 120; h <= 230; h += 7)
+        for (let w = 30; w <= 300; w += 3.5) {
+          const d = { ...base, goal, height_cm: h, weight_kg: w };
+          const s = suggestTargetWeight(d);
+          if (s) expect(validateGoal({ ...d, target_weight_kg: s.kg })).toEqual({});
+        }
+  });
+});
+
+describe('plan invariants over the whole input range', () => {
+  it('suggested macros always add up to the target (±2 kcal) and the target is savable', () => {
+    for (const sex of ['male', 'female'] as const)
+      for (const goal of ['lose', 'gain', 'maintain', 'recomp'] as const)
+        for (const activity_level of ['sedentary', 'moderate', 'very_active'] as const)
+          for (let h = 120; h <= 230; h += 22)
+            for (let w = 30; w <= 300; w += 27)
+              for (const birth_date of ['2012-01-01', '1990-06-15', '1927-01-01']) {
+                const p = computePlan({ ...draft, sex, goal, activity_level, height_cm: h, weight_kg: w, birth_date, target_weight_kg: null }, TODAY)!;
+                expect(p).not.toBeNull();
+                expect(Math.abs(macroKcal(p.macros) - p.kcal)).toBeLessThanOrEqual(2);
+                expect(p.kcal).toBeGreaterThanOrEqual(800);
+                expect(p.kcal).toBeLessThanOrEqual(6000);
+                expect(validatePlan(p)).toEqual({});
+                // a deficit goal is never a surplus unless TDEE is under the 800 kcal hard minimum
+                if ((goal === 'lose' || goal === 'recomp') && p.tdee >= 800) expect(p.kcal).toBeLessThanOrEqual(Math.round(p.tdee / 10) * 10);
+              }
   });
 });

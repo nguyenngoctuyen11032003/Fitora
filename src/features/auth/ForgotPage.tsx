@@ -1,15 +1,18 @@
 import { Mail, MailCheck, Send } from 'lucide-react';
 import { useRef, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { requestPasswordReset } from '@/services/auth';
 import { errorMessage } from '@/services/errors';
 import { AuthLayout } from './AuthLayout';
 import { useCooldown } from './PasswordToggle';
+import { normalizeEmail, readLastEmail } from '@/lib/lastEmail';
 
 export default function ForgotPage() {
-  const [email, setEmail] = useState('');
+  const location = useLocation();
+  // Carry over what was typed on the login form, else the last address used on this device.
+  const [email, setEmail] = useState(() => normalizeEmail((location.state as { email?: unknown } | null)?.email) ?? readLastEmail());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);

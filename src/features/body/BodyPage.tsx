@@ -1,4 +1,4 @@
-import { Camera, Columns2, ImagePlus, Plus } from 'lucide-react';
+import { Camera, Columns2, ImagePlus, Pencil, Plus } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
@@ -8,12 +8,12 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Segmented } from '@/components/ui/Segmented';
 import { useToast } from '@/components/ui/Toast';
 import { useProfile } from '@/context/ProfileContext';
-import { formatDayVi } from '@/lib/date';
+import { formatDayVi, todayISO } from '@/lib/date';
 import { notifyDataChanged } from '@/lib/events';
 import { useAsync } from '@/lib/hooks';
 import { compressImage } from '@/lib/image';
 import { deleteMeasurement, deletePhoto, listMeasurements, listPhotos } from '@/services/body';
-import type { BodyMeasurement, PhotoPose, ProgressPhoto } from '@/types/db';
+import type { BodyMeasurement, ProgressPhoto } from '@/types/db';
 import { CompareView } from './CompareView';
 import { num, sortAsc, toggleSelection } from './lib';
 import { MeasurementSheet } from './MeasurementSheet';
@@ -50,6 +50,7 @@ export default function BodyPage() {
     }
     return null;
   }, [rows]);
+  const measuredToday = rows.some((r) => r.measured_on === todayISO());
   const paths = useMemo(() => (tab === 'photos' ? photos.map((p) => p.storage_path) : []), [tab, photos]);
   const { urls, error: urlError, retry: retryUrls } = usePhotoUrls(paths);
 
@@ -88,7 +89,6 @@ export default function BodyPage() {
   const libRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<PendingPhoto | null>(null);
   const [compressing, setCompressing] = useState(false);
-  const [lastPose, setLastPose] = useState<PhotoPose>('front');
   const [viewer, setViewer] = useState<number | null>(null);
   const [compare, setCompare] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
@@ -118,7 +118,6 @@ export default function BodyPage() {
   };
 
   const onUploaded = (p: ProgressPhoto) => {
-    setLastPose(p.pose);
     ph.setData((prev) =>
       [p, ...(prev ?? [])].sort((a, b) => (a.taken_on === b.taken_on ? (a.created_at < b.created_at ? 1 : -1) : a.taken_on < b.taken_on ? 1 : -1)),
     );
@@ -147,11 +146,18 @@ export default function BodyPage() {
   // ---- footer (thumb zone)
   let footer;
   if (tab === 'measure') {
-    footer = (
-      <Button block size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => setSheet({ open: true, editing: null })}>
-        Thêm số đo
+    // Empty history → the empty state's own "Ghi lần cân đầu tiên" is the only CTA.
+    // Already measured today → the sheet opens on today's entry, so say so.
+    footer = rows.length ? (
+      <Button
+        block
+        size="lg"
+        icon={measuredToday ? <Pencil className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
+        onClick={() => setSheet({ open: true, editing: null })}
+      >
+        {measuredToday ? 'Cập nhật số đo hôm nay' : 'Thêm số đo'}
       </Button>
-    );
+    ) : undefined;
   } else if (compare) {
     footer = (
       <div className="flex gap-2.5">
@@ -216,7 +222,6 @@ export default function BodyPage() {
           }}
           onSelect={(p) => setSelected((s) => toggleSelection(s, p.id))}
           onOpen={(p) => setViewer(photos.findIndex((x) => x.id === p.id))}
-          onCamera={() => camRef.current?.click()}
           onRetry={() => void ph.reload()}
           urlError={urlError}
           onRetryUrls={retryUrls}
@@ -247,7 +252,7 @@ export default function BodyPage() {
         onCancel={() => setToDelete(null)}
       />
 
-      <PhotoUploadSheet pending={pending} rows={rows} defaultPose={lastPose} onClose={() => setPending(null)} onUploaded={onUploaded} />
+      <PhotoUploadSheet pending={pending} rows={rows} photos={photos} onClose={() => setPending(null)} onUploaded={onUploaded} />
       <PhotoViewer
         photos={photos}
         index={viewer}

@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Cookie, MoonStar, Sparkles, Sun, Sunrise, Utensils, type LucideIcon } from 'lucide-react';
+import { ChefHat, Cookie, Layers, MoonStar, Sparkles, Sun, Sunrise, Utensils, type LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { formatGrams, formatNumber } from '@/lib/format';
 import { signedUrls } from '@/services/storage';
@@ -131,4 +131,44 @@ export function useMealPhotoUrls(entries: Array<Pick<MealEntry, 'photo_path'>>):
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   return urls;
+}
+
+/** Thumbnail for a food option / saved food: its photo, else an icon tile (scan = sparkles). */
+export function FoodThumb({
+  url,
+  kind,
+  size = 44,
+}: {
+  url?: string;
+  /** 'ai' = saved from a scan, 'saved' = other saved food, 'template' = meal template, 'food' = database / history. */
+  kind: 'ai' | 'saved' | 'template' | 'food';
+  size?: number;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (url && !failed) {
+    return (
+      <img
+        src={url}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        onError={() => setFailed(true)}
+        className="shrink-0 rounded-xl border border-line object-cover"
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+  const Icon = kind === 'ai' ? Sparkles : kind === 'template' ? Layers : kind === 'saved' ? ChefHat : Utensils;
+  return (
+    <span
+      aria-hidden="true"
+      className={clsx(
+        'grid shrink-0 place-items-center rounded-xl border border-line',
+        kind === 'food' ? 'bg-white/[0.04] text-text/60' : 'bg-gold/10 text-gold',
+      )}
+      style={{ width: size, height: size }}
+    >
+      <Icon className="h-[18px] w-[18px]" />
+    </span>
+  );
 }

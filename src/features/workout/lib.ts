@@ -1,6 +1,6 @@
 // Pure helpers for the workout screen (unit-tested in lib.test.ts).
 import { ACTIVITIES, CATEGORY_DEFAULT_MET, findActivity, type ActivityDef, type ActivityVariant } from '@/data/activities';
-import { addDays } from '@/lib/date';
+import { addDays, diffDays } from '@/lib/date';
 import { metKcal, stepsKcal } from '@/lib/energy';
 import {
   WORKOUT_CATEGORY_LABELS,
@@ -17,10 +17,11 @@ export const FALLBACK_WEIGHT_KG = 65;
 
 /** Latest measured weight → start weight from onboarding → fallback. */
 export function resolveWeight(latest: number | string | null | undefined, startWeight: number | string | null | undefined): { kg: number; source: 'measured' | 'profile' | 'fallback' } {
-  // numeric columns may arrive as strings; ignore implausible values (typos like 7 or 700 kg)
+  // numeric columns may arrive as strings; ignore implausible values (typos like 7 or 700 kg).
+  // Bounds match METRIC_RANGES.weight_kg of the body feature (25–300 kg).
   const ok = (v: unknown) => {
     const n = Number(v);
-    return v !== null && v !== undefined && v !== '' && Number.isFinite(n) && n >= 20 && n <= 400 ? n : null;
+    return v !== null && v !== undefined && v !== '' && Number.isFinite(n) && n >= 25 && n <= 300 ? n : null;
   };
   const m = ok(latest);
   if (m !== null) return { kg: m, source: 'measured' };
@@ -262,7 +263,7 @@ export function workoutFromTemplate(t: WorkoutTemplate, date: string, status: Wo
 }
 
 const sameSession = (a: Pick<Workout, 'title' | 'activity' | 'start_time'>, b: Pick<Workout, 'title' | 'activity' | 'start_time'>) =>
-  a.activity === b.activity && a.title.trim().toLowerCase() === b.title.trim().toLowerCase() && (a.start_time ?? '').slice(0, 5) === (b.start_time ?? '').slice(0, 5);
+  sessionKey(a) === sessionKey(b) && (a.start_time ?? '').slice(0, 5) === (b.start_time ?? '').slice(0, 5);
 
 export interface PlanCopyOptions {
   /** Recompute kcal at this weight (else keep the source's kcal). */
@@ -313,7 +314,7 @@ export function recentSessions<T extends Pick<Workout, 'activity' | 'title' | 'm
   const seen = new Set<string>();
   const out: T[] = [];
   for (const w of sorted) {
-    const k = `${w.activity}|${w.title.trim().toLowerCase()}|${Number(w.met)}|${w.duration_min}`;
+    const k = `${sessionKey(w)}|${Number(w.met)}|${w.duration_min}`;
     if (seen.has(k)) continue;
     seen.add(k);
     out.push(w);
@@ -404,4 +405,133 @@ export function once<A extends unknown[]>(fn: (...args: A) => void): (...args: A
     done = true;
     fn(...args);
   };
+}
+
+// ---- distance remembered in notes ------------------------------------------
+// fit_workouts has no distance column; the km the user entered is kept as the
+// first line of `notes` ("Quãng đường 5,2 km") so editing / repeating restores it.
+
+const DIST_LINE = /^\s*Quãng đường:?\s*(\d+(?:[.,]\d+)?)\s*km\s*(?:\n|$)/i;
+
+/** Splits a stored note into its distance (km) and the user's own text. */
+export function splitDistanceNote(notes: string | null | undefined): { km: number | null; rest: string } {
+  const s = notes ?? '';
+  const m = DIST_LINE.exec(s);
+  if (!m) return { km: null, rest: s };
+  const km = Number(m[1].replace(',', '.'));
+  return { km: km > 0 && km <= 1000 ? km : null, rest: s.slice(m[0].length) };
+}
+
+/** Distance line + user's text (≤ 1000 chars, the DB limit); null when both are empty. */
+export function joinDistanceNote(km: number | null | undefined, rest: string | null | undefined): string | null {
+  const text = (rest ?? '').trim();
+  const line = km && km > 0 ? `Quãng đường ${formatKm(km)} km` : '';
+  const out = [line, text].filter(Boolean).join('\n').slice(0, 1000);
+  return out || null;
+}
+
+/** "5,2" (1 decimal, Vietnamese comma, no trailing ",0"). */
+export function formatKm(km: number): string {
+  const r = Math.round(km * 10) / 10;
+  return (Number.isInteger(r) ? String(r) : r.toFixed(1)).replace('.', ',');
+}
+
+/** Running pace "6:05/km" for `km` in `minutes`, '' when unknown. */
+export function paceLabel(km: number | null | undefined, minutes: number | null | undefined): string {
+  if (!km || !minutes || !(km > 0) || !(minutes > 0)) return '';
+  let total = Math.round((minutes * 60) / km);
+  const m = Math.floor(total / 60);
+  total -= m * 60;
+  return `${m}:${String(total).padStart(2, '0')}/km`;
+}
+
+/** Activity has speed-based variants (running, walking, road cycling) — distance ↔ pace makes sense. */
+export function isSpeedBased(activity: string | null | undefined): boolean {
+  return !!findActivity(activity)?.variants.some((v) => v.kmh);
+}
+
+// ---- habits: "you usually do this on Mondays" ------------------------------
+
+type HabitRow = Pick<Workout, 'id' | 'activity' | 'title' | 'met' | 'duration_min' | 'workout_on' | 'created_at' | 'status' | 'start_time'>;
+
+/** Same session regardless of legacy keys / case / diacritics. */
+export function sessionKey(w: Pick<Workout, 'activity' | 'title'>): string {
+  return `${findActivity(w.activity)?.key ?? normalizeVi(w.activity)}|${normalizeVi(w.title)}`;
+}
+
+export interface Suggestion<T> {
+  /** Most recent past session to copy. */
+  source: T;
+  /** 'weekday': done on this weekday in `count` of the last weeks; 'last': the latest session (no habit yet). */
+  reason: 'weekday' | 'last';
+  count: number;
+}
+
+export interface SuggestOptions {
+  /** How many weeks back to look for the weekday habit (default 8). */
+  weeks?: number;
+  limit?: number;
+}
+
+/**
+ * Sessions to suggest for `date`: what the user did on the same weekday in
+ * the previous weeks — at least twice, or exactly one week ago — most frequent
+ * first. Sessions already on `date` (any status) are left out. When there is
+ * no habit and the day is still empty, the latest done session is offered
+ * ("repeat last session").
+ */
+export function suggestSessions<T extends HabitRow>(history: T[], date: string, onDay: Pick<Workout, 'activity' | 'title'>[], opts: SuggestOptions = {}): Suggestion<T>[] {
+  const weeks = opts.weeks ?? 8;
+  const limit = opts.limit ?? 3;
+  const from = addDays(date, -7 * weeks);
+  const lastWeek = addDays(date, -7);
+  const taken = new Set(onDay.map(sessionKey));
+  const newest = (a: T, b: T) => b.workout_on.localeCompare(a.workout_on) || b.created_at.localeCompare(a.created_at);
+  const done = history.filter((w) => w.status === 'done' && w.workout_on < date).sort(newest);
+
+  const groups = new Map<string, { source: T; days: Set<string> }>();
+  for (const w of done) {
+    if (w.workout_on < from || diffDays(w.workout_on, date) % 7 !== 0) continue;
+    const k = sessionKey(w);
+    if (taken.has(k)) continue;
+    const g = groups.get(k);
+    if (g) g.days.add(w.workout_on);
+    else groups.set(k, { source: w, days: new Set([w.workout_on]) });
+  }
+  const habits = [...groups.values()]
+    .filter((g) => g.days.size >= 2 || g.days.has(lastWeek))
+    .sort((a, b) => b.days.size - a.days.size || newest(a.source, b.source))
+    .slice(0, limit)
+    .map((g): Suggestion<T> => ({ source: g.source, reason: 'weekday', count: g.days.size }));
+  if (habits.length || onDay.length) return habits;
+
+  const last = done.find((w) => !taken.has(sessionKey(w)));
+  return last ? [{ source: last, reason: 'last', count: 1 }] : [];
+}
+
+/** Insert row that repeats `src` on `date` (kcal at today's weight, catalogue key resolved). */
+export function repeatSession(src: Workout, date: string, status: WorkoutStatus, weightKg: number): NewWorkout {
+  return {
+    ...toInsert(src),
+    activity: findActivity(src.activity)?.key ?? src.activity,
+    workout_on: date,
+    status,
+    kcal: metKcal(Number(src.met), weightKg, src.duration_min),
+  };
+}
+
+/** Templates by last use (from `history`'s template_id), never-used ones by name. */
+export function rankTemplates<T extends Pick<WorkoutTemplate, 'id' | 'name'>>(templates: T[], history: Pick<Workout, 'template_id' | 'workout_on' | 'created_at'>[]): T[] {
+  const last = new Map<string, string>();
+  for (const w of history) {
+    if (!w.template_id) continue;
+    const stamp = `${w.workout_on}|${w.created_at}`;
+    if ((last.get(w.template_id) ?? '') < stamp) last.set(w.template_id, stamp);
+  }
+  return [...templates].sort((a, b) => {
+    const la = last.get(a.id) ?? '';
+    const lb = last.get(b.id) ?? '';
+    if (la !== lb) return lb.localeCompare(la);
+    return a.name.localeCompare(b.name, 'vi');
+  });
 }

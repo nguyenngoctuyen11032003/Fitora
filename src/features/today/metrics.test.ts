@@ -17,8 +17,12 @@ import {
   macroStatus,
   progressPercent,
   mealForHour,
+  overBudgetStreak,
   targetsFromProfile,
+  applyMealDelta,
+  clockKey,
 } from './metrics';
+import { guessMeal } from '@/features/food/lib';
 
 describe('energyBalance', () => {
   it('remaining = target − eaten + workout + steps', () => {
@@ -116,6 +120,11 @@ describe('meals', () => {
     expect(mealForHour(7)).toBe('breakfast');
     expect(mealForHour(12)).toBe('lunch');
     expect(mealForHour(15)).toBe('snack');
+    expect(mealForHour(10, 15)).toBe('breakfast');
+    expect(mealForHour(10, 30)).toBe('lunch');
+    expect(mealForHour(21, 29)).toBe('dinner');
+    expect(mealForHour(21, 30)).toBe('snack');
+    expect(mealForHour(3, 59)).toBe('snack');
     expect(mealForHour(19)).toBe('dinner');
     expect(mealForHour(23)).toBe('snack');
   });
@@ -190,6 +199,35 @@ describe('computeStreaks', () => {
   });
 });
 
+describe('overBudgetStreak', () => {
+  const row = (day: string, kcal_in: number, workout_kcal = 0) => ({ day, kcal_in, workout_kcal });
+  const today = { date: '2026-10-11', over: true };
+
+  it('counts consecutive over-budget days ending today', () => {
+    const h = [row('2026-10-10', 2300), row('2026-10-09', 2100), row('2026-10-08', 1900)];
+    expect(overBudgetStreak(h, today, 2000)).toBe(3);
+  });
+
+  it('is 0 while today is not over, even after over days', () => {
+    const h = [row('2026-10-10', 2300), row('2026-10-09', 2100)];
+    expect(overBudgetStreak(h, { ...today, over: false }, 2000)).toBe(0);
+  });
+
+  it('credits the whole workout burn: a training day over target is not flagged', () => {
+    const h = [row('2026-10-10', 2300, 400), row('2026-10-09', 2300)];
+    expect(overBudgetStreak(h, today, 2000)).toBe(1);
+  });
+
+  it('an unlogged or missing day breaks the streak (no data ≠ over)', () => {
+    expect(overBudgetStreak([row('2026-10-09', 2500)], today, 2000)).toBe(1);
+    expect(overBudgetStreak([row('2026-10-10', 0), row('2026-10-09', 2500)], today, 2000)).toBe(1);
+  });
+
+  it('needs a positive target', () => {
+    expect(overBudgetStreak([row('2026-10-10', 2300)], today, 0)).toBe(0);
+  });
+});
+
 describe('heroSummary', () => {
   it('reads remaining / over and the budget share', () => {
     expect(heroSummary({ remaining: 1234, eaten: 800, budget: 2034, over: false })).toBe(
@@ -198,5 +236,44 @@ describe('heroSummary', () => {
     expect(heroSummary({ remaining: -150, eaten: 2150, budget: 2000, over: true })).toBe(
       'Đã vượt 150 kcal. Đã ăn 2.150 trên ngân sách 2.000 kcal (107%).',
     );
+  });
+});
+
+describe('meal suggestion consistency', () => {
+  it('matches the food search guessMeal() at every minute of the day', () => {
+    for (let m = 0; m < 24 * 60; m++) {
+      const d = new Date(2026, 9, 12, Math.floor(m / 60), m % 60);
+      expect(mealForHour(d.getHours(), d.getMinutes())).toBe(guessMeal(d));
+    }
+  });
+  it('clockKey changes on a meal boundary inside the hour, not every minute', () => {
+    const at = (h: number, m: number) => clockKey(new Date(2026, 9, 12, h, m));
+    expect(at(10, 5)).toBe(at(10, 29));
+    expect(at(10, 29)).not.toBe(at(10, 30));
+    expect(at(11, 0)).not.toBe(at(10, 59));
+  });
+});
+
+describe('applyMealDelta', () => {
+  const sum = { kcal_in: 500, protein_g: 20, carbs_g: 60, fat_g: 10, fiber_g: 3, workout_kcal: 100, water_ml: 750, steps: 3000 };
+  const entry = (id: string, kcal: number, eaten_on = '2026-10-12') =>
+    ({ id, eaten_on, meal: 'lunch', name: id, kcal, protein_g: 10, carbs_g: 30, fat_g: 5, fiber_g: 1.5 }) as MealEntry;
+  const a = entry('a', 500);
+
+  it('adds entries and their totals, keeps water / steps / workout', () => {
+    const r = applyMealDelta([a], sum, '2026-10-12', [entry('b', 320.4)]);
+    expect(r.meals.map((m) => m.id)).toEqual(['a', 'b']);
+    expect(r.summary).toMatchObject({ kcal_in: 820.4, protein_g: 30, carbs_g: 90, fat_g: 15, fiber_g: 4.5, water_ml: 750, steps: 3000, workout_kcal: 100 });
+  });
+  it('removes entries (undo) and never goes negative', () => {
+    const r = applyMealDelta([a], { ...sum, kcal_in: 200 }, '2026-10-12', [], ['a']);
+    expect(r.meals).toEqual([]);
+    expect(r.summary.kcal_in).toBe(0);
+  });
+  it('is idempotent and ignores other days', () => {
+    const meals = [a];
+    const r = applyMealDelta(meals, sum, '2026-10-12', [a, entry('y', 100, '2026-10-11')], ['zz']);
+    expect(r.meals).toBe(meals);
+    expect(r.summary).toBe(sum);
   });
 });

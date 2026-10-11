@@ -102,6 +102,7 @@ export function MeasurementSheet({ open, editing, rows, lastWeight, onClose, onS
   );
 
   const save = async () => {
+    if (saving) return;
     setTried(true);
     if (!dateOk || invalid || empty) {
       if (empty) toast.error('Hãy nhập ít nhất một chỉ số.');
@@ -135,7 +136,7 @@ export function MeasurementSheet({ open, editing, rows, lastWeight, onClose, onS
       open={open}
       onClose={() => !saving && onClose()}
       height="full"
-      title={editing ? 'Sửa số đo' : 'Thêm số đo'}
+      title={editing ? 'Sửa số đo' : existing ? 'Cập nhật số đo' : 'Thêm số đo'}
       description="Mỗi ngày một bản ghi · để trống ô nào không đo."
       footer={
         <div className="flex items-center gap-2.5">
@@ -171,7 +172,7 @@ export function MeasurementSheet({ open, editing, rows, lastWeight, onClose, onS
         {/* Weight — the main number */}
         <section className="flex flex-col gap-2" aria-label="Cân nặng và mỡ">
           <div className="grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] gap-3">
-            <NumberField label="Cân nặng" unit="kg" value={vals.weight_kg} onChange={set('weight_kg')} decimals={1} min={20} max={400} placeholder={lastWeight ? formatNumber(lastWeight, 1) : '—'} error={errOf('weight_kg')} />
+            <NumberField label="Cân nặng" unit="kg" value={vals.weight_kg} onChange={set('weight_kg')} decimals={1} min={25} max={300} placeholder={lastWeight ? formatNumber(lastWeight, 1) : '—'} error={errOf('weight_kg')} />
             <NumberField label="Mỡ cơ thể" unit="%" value={vals.body_fat_pct} onChange={set('body_fat_pct')} decimals={1} min={2} max={75} placeholder="—" error={errOf('body_fat_pct')} />
           </div>
           {jump && (

@@ -74,10 +74,22 @@ export function buildInsights(
 
   // 1. Consistency.
   if (s.loggedDays === 0) {
-    out.push({ kind: 'nudge', tone: 'info', text: `Chưa có bữa nào được ghi trong ${unit} này — ghi một bữa để bắt đầu nhé.` });
+    // A past period cannot be "started" any more → plain statement instead of a call to action.
+    const current = s.days.some((d) => d.isToday);
+    out.push({
+      kind: 'nudge',
+      tone: 'info',
+      text: current ? `Chưa có bữa nào được ghi trong ${unit} này — ghi một bữa để bắt đầu nhé.` : 'Không có bữa ăn nào được ghi trong kỳ này.',
+    });
   } else {
+    // The streak sentence only when it adds information: a streak equal to the logged-day
+    // count just repeats the "N/M ngày" lead ("ghi 7/7 ngày. Chuỗi 7 ngày" reads twice).
     const streak =
-      s.currentStreak >= 2 ? ` Chuỗi hiện tại ${s.currentStreak} ngày liên tiếp.` : s.longestStreak >= 3 ? ` Chuỗi dài nhất ${s.longestStreak} ngày.` : '';
+      s.currentStreak >= 2 && s.currentStreak < s.loggedDays
+        ? ` Chuỗi hiện tại ${s.currentStreak} ngày liên tiếp.`
+        : s.currentStreak < 2 && s.longestStreak >= 3 && s.longestStreak < s.loggedDays
+          ? ` Chuỗi dài nhất ${s.longestStreak} ngày.`
+          : '';
     const ratio = s.loggingRate;
     const lead =
       ratio >= 0.85

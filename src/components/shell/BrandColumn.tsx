@@ -39,7 +39,8 @@ export function BrandColumn() {
         .catch(() => {});
     };
     void load();
-    const off = onDataChanged(() => void load());
+    // Saved foods / profile edits don't change today's numbers.
+    const off = onDataChanged((kind) => kind !== 'foods' && kind !== 'profile' && void load());
     const onFocus = () => void load();
     window.addEventListener('focus', onFocus);
     return () => {

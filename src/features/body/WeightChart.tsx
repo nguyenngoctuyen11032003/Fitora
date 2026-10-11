@@ -35,6 +35,9 @@ function Tip({ active, payload, showAvg }: TipProps) {
 /** Show the 7-day average line from this many points (fewer → it would just duplicate the series). */
 const AVG_MIN_POINTS = 4;
 
+const DAY_MS = 86_400_000;
+type ChartPoint = SeriesPoint & { ts: number };
+
 /** Weight trend (gold series + 7-day moving average, crosshair tooltip, optional dashed target line). */
 export function WeightChart({ rows, target }: { rows: BodyMeasurement[]; target?: number | null }) {
   const [range, setRange] = useState<Range>(() => defaultChartRange(rows, todayISO()));
@@ -42,13 +45,25 @@ export function WeightChart({ rows, target }: { rows: BodyMeasurement[]; target?
   const gid = useId().replace(/:/g, '');
   const today = todayISO();
   // Average over ALL weigh-ins, then window → the first point in range still averages its prior week.
-  const all = useMemo(() => movingAverage(weightSeries(rows, null, today)), [rows, today]);
+  // Each point carries its timestamp so the x-axis is proportional to TIME: a gap of weeks
+  // without weighing shows as a gap, instead of squeezing sparse points next to each other.
+  const all = useMemo(
+    () => movingAverage(weightSeries(rows, null, today)).map((p): ChartPoint => ({ ...p, ts: Date.parse(p.date) })),
+    [rows, today],
+  );
   const data = useMemo(() => {
     if (range === 'all') return all;
     const from = weightSeries(rows, Number(range), today)[0]?.date;
     return from ? all.filter((d) => d.date >= from) : [];
   }, [all, rows, range, today]);
   const showAvg = data.length >= AVG_MIN_POINTS;
+  // Time domain (±half a day of padding; a lone point gets a day on each side).
+  const [tsLo, tsHi] = useMemo((): [number, number] => {
+    if (!data.length) return [0, 1];
+    const a = data[0].ts;
+    const b = data[data.length - 1].ts;
+    return a === b ? [a - DAY_MS, b + DAY_MS] : [a - DAY_MS / 2, b + DAY_MS / 2];
+  }, [data]);
 
   // Target joins the y-domain only when near the data; otherwise it would flatten the trend
   // (shown in the header instead).
@@ -115,8 +130,11 @@ export function WeightChart({ rows, target }: { rows: BodyMeasurement[]; target?
                 </linearGradient>
               </defs>
               <XAxis
-                dataKey="date"
-                tickFormatter={(d: string) => formatDayVi(d, 'short')}
+                dataKey="ts"
+                type="number"
+                scale="time"
+                domain={[tsLo, tsHi]}
+                tickFormatter={(t: number) => formatDayVi(new Date(t).toISOString().slice(0, 10), 'short')}
                 tick={{ fill: 'rgba(235,220,205,0.45)', fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}

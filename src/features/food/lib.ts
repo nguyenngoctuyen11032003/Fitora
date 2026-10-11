@@ -1,7 +1,7 @@
 // Pure nutrition math + food search for the diary / search screens (no React, no Supabase).
 import type { FoodCategory, FoodItem, FoodUnit, Nutrients } from '@/data/foods';
-import type { CustomFood, FitProfile, MealEntry, MealSource, MealType, NewMealEntry } from '@/types/db';
-import { MEAL_TYPES } from '@/types/db';
+import type { CustomFood, CustomFoodSource, FitProfile, MealEntry, MealSource, MealTemplate, MealType, NewMealEntry } from '@/types/db';
+import { MEAL_LABELS, MEAL_TYPES } from '@/types/db';
 import { activityModel, effectiveWeight, energyBalance, targetsFromProfile, type EnergyBalance } from '@/features/today/metrics';
 
 /* ===================================================================== */
@@ -42,6 +42,12 @@ export interface FoodOption {
   gramsKnown: boolean;
   /** Source to store when this option is logged. */
   source: MealSource;
+  /** Photo ('<uid>/meals/…') shown as thumbnail and shared by the entries logged from it. */
+  photoPath?: string | null;
+  /** Saved foods: times logged (use_count), last use and how it was saved. */
+  useCount?: number;
+  lastUsedAt?: string | null;
+  savedFrom?: CustomFoodSource;
 }
 
 const r1 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 10) / 10;
@@ -82,6 +88,10 @@ export function fromCustomFood(cf: CustomFood): FoodOption {
     searchKeys: [normalizeVi(cf.name), normalizeVi(cf.brand)].filter(Boolean),
     gramsKnown: true,
     source: 'custom',
+    photoPath: cf.photo_path ?? null,
+    useCount: Math.max(0, Number(cf.use_count) || 0),
+    lastUsedAt: cf.last_used_at ?? null,
+    savedFrom: cf.source,
   };
 }
 
@@ -89,7 +99,11 @@ export function fromCustomFood(cf: CustomFood): FoodOption {
  * A past entry as a re-loggable option. With grams we derive per-100 g values;
  * without (manual / AI without weight) we treat 1 unit as a pseudo 100 g portion.
  */
-export function fromEntry(e: Pick<MealEntry, 'name' | 'quantity' | 'unit' | 'grams' | 'kcal' | 'protein_g' | 'carbs_g' | 'fat_g' | 'fiber_g' | 'source'>): FoodOption {
+export function fromEntry(
+  e: Pick<MealEntry, 'name' | 'quantity' | 'unit' | 'grams' | 'kcal' | 'protein_g' | 'carbs_g' | 'fat_g' | 'fiber_g' | 'source'> & {
+    photo_path?: string | null;
+  },
+): FoodOption {
   const q = e.quantity > 0 ? e.quantity : 1;
   const gramsKnown = e.grams > 0;
   const basis = gramsKnown ? e.grams : q * 100; // grams the stored nutrients refer to
@@ -107,6 +121,7 @@ export function fromEntry(e: Pick<MealEntry, 'name' | 'quantity' | 'unit' | 'gra
     searchKeys: [normalizeVi(e.name)],
     gramsKnown,
     source: e.source === 'search' || e.source === 'custom' ? e.source : 'manual',
+    photoPath: e.photo_path ?? null,
   };
 }
 
@@ -190,6 +205,8 @@ export function toNewEntry(opt: FoodOption, qty: number, unit: string, meal: Mea
     ...p,
     source: opt.source,
     custom_food_id: opt.origin === 'custom' ? (opt.customFoodId ?? null) : null,
+    // Re-logging a saved / scanned dish keeps its photo (meal photos are reference-counted).
+    photo_path: opt.origin === 'db' ? null : (opt.photoPath ?? null),
   };
 }
 
@@ -396,16 +413,178 @@ export function recentFoods(entries: MealEntry[], foods: FoodItem[], customs: Cu
     if (seen.has(opt.key) || seen.has(nameKey)) continue;
     seen.add(opt.key);
     seen.add(nameKey);
-    const units = unitOptions(opt);
-    const unitOk = units.some((u) => u.unit === e.unit);
-    // Logged by weight in a unit the food no longer offers (g ↔ ml for drinks): keep the weight.
-    const weightUnit = !unitOk && isWeightUnit(e.unit) && e.grams > 0 ? units.find((u) => isWeightUnit(u.unit) && u.grams === 1) : undefined;
     const count = Math.max(1, counts.get(normalizeVi(e.name)) ?? 1);
-    if (weightUnit) out.push({ option: opt, quantity: r1(e.grams), unit: weightUnit.unit, count });
-    else out.push({ option: opt, quantity: unitOk && e.quantity > 0 ? e.quantity : 1, unit: unitOk ? e.unit : opt.defaultUnit, count });
+    out.push({ option: opt, ...lastPortion(opt, e), count });
     if (out.length >= limit) break;
   }
   return out;
+}
+
+/** The portion of `e` expressed in a unit `opt` offers (falls back to 1 × default unit). */
+export function lastPortion(opt: FoodOption, e: Pick<MealEntry, 'unit' | 'quantity' | 'grams'>): { quantity: number; unit: string } {
+  const units = unitOptions(opt);
+  const unitOk = units.some((u) => u.unit === e.unit);
+  // Logged by weight in a unit the food no longer offers (g ↔ ml for drinks): keep the weight.
+  const weightUnit = !unitOk && isWeightUnit(e.unit) && e.grams > 0 ? units.find((u) => isWeightUnit(u.unit) && u.grams === 1) : undefined;
+  if (weightUnit) return { quantity: r1(e.grams), unit: weightUnit.unit };
+  return { quantity: unitOk && e.quantity > 0 ? e.quantity : 1, unit: unitOk ? e.unit : opt.defaultUnit };
+}
+
+/** Default portion to log an option with one tap: 1 household unit, or 100 g / ml. */
+export function defaultPortion(opt: Pick<FoodOption, 'defaultUnit'>): { quantity: number; unit: string } {
+  return { quantity: isWeightUnit(opt.defaultUnit) ? 100 : 1, unit: opt.defaultUnit };
+}
+
+/* ===================================================================== */
+/* Smart suggestions ("what do I usually eat at this meal?")               */
+/* ===================================================================== */
+
+/** Whole days from `from` to `to` ('YYYY-MM-DD', local); negative when `from` is later. */
+export function daysBetween(from: string, to: string): number {
+  const p = (s: string) => {
+    const [y, m, d] = s.slice(0, 10).split('-').map(Number);
+    return Date.UTC(y, (m || 1) - 1, d || 1);
+  };
+  const v = Math.round((p(to) - p(from)) / 86_400_000);
+  return Number.isFinite(v) ? v : 0;
+}
+
+export interface MealSuggestion extends RecentFood {
+  /** Higher = more typical for this meal. */
+  score: number;
+}
+
+export interface MealSuggestionInput {
+  /** Logged history (any meals, e.g. the last 60 days). */
+  entries: MealEntry[];
+  customs: CustomFood[];
+  foods: FoodItem[];
+  meal: MealType;
+  /** Day being logged: its entries don't count as habit, and foods already in that meal are skipped. */
+  date: string;
+  limit?: number;
+}
+
+/**
+ * Foods the user usually eats at `meal`: every past entry at that meal adds a weight that
+ * fades with age (half after ~2 weeks), and saved foods remembered for that meal
+ * (default_meal) add their use count. Foods already logged in that meal on `date` are left
+ * out. Each suggestion carries the portion last eaten at that meal.
+ */
+export function mealSuggestions({ entries, customs, foods, meal, date, limit = 6 }: MealSuggestionInput): MealSuggestion[] {
+  const already = new Set(entries.filter((e) => e.eaten_on === date && e.meal === meal).map((e) => normalizeVi(e.name)));
+  const byKey = new Map<string, MealSuggestion & { last: string }>();
+  const nameToKey = new Map<string, string>();
+  const sorted = entries
+    .filter((e) => e.meal === meal && e.eaten_on !== date)
+    .sort((a, b) => (b.eaten_on + b.created_at).localeCompare(a.eaten_on + a.created_at));
+  for (const e of sorted) {
+    const name = normalizeVi(e.name);
+    if (already.has(name)) continue;
+    const opt = withEntryUnit(optionForEntry(e, foods, customs), e);
+    const key = nameToKey.get(name) ?? nameToKey.get(normalizeVi(opt.name)) ?? opt.key;
+    nameToKey.set(name, key);
+    nameToKey.set(normalizeVi(opt.name), key);
+    const age = Math.max(0, daysBetween(e.eaten_on, date));
+    const w = 1 / (1 + age / 14);
+    const cur = byKey.get(key);
+    if (cur) {
+      cur.score += w;
+      cur.count += 1;
+    } else {
+      // Newest first → the first entry seen sets the portion.
+      byKey.set(key, { option: opt, ...lastPortion(opt, e), count: 1, score: w, last: e.eaten_on + e.created_at });
+    }
+  }
+  for (const cf of customs) {
+    if (cf.default_meal !== meal || already.has(normalizeVi(cf.name))) continue;
+    const bonus = 0.5 + Math.min(Math.max(0, cf.use_count || 0), 10) * 0.15;
+    const key = nameToKey.get(normalizeVi(cf.name)) ?? `custom:${cf.id}`;
+    const cur = byKey.get(key);
+    if (cur) cur.score += bonus;
+    else {
+      const opt = fromCustomFood(cf);
+      byKey.set(key, { option: opt, ...defaultPortion(opt), count: 0, score: bonus, last: cf.last_used_at ?? '' });
+    }
+  }
+  return [...byKey.values()]
+    .sort((a, b) => b.score - a.score || b.last.localeCompare(a.last) || a.option.name.localeCompare(b.option.name, 'vi'))
+    .slice(0, limit)
+    .map(({ last: _l, ...s }) => s);
+}
+
+/**
+ * Templates to offer for `meal`: the ones made for that meal, then the meal-less ones,
+ * each group most recently / often used first (the service's order is kept).
+ */
+export function templatesForMeal(templates: MealTemplate[], meal: MealType, limit = 3): MealTemplate[] {
+  const own = templates.filter((t) => t.meal === meal);
+  const any = templates.filter((t) => t.meal == null);
+  return [...own, ...any].slice(0, limit);
+}
+
+/** "Bữa sáng quen thuộc", or "… 2", "… 3" when that name is taken (case / diacritics ignored). */
+export function defaultTemplateName(meal: MealType, existing: string[]): string {
+  const base = `${MEAL_LABELS[meal]} quen thuộc`;
+  const taken = new Set(existing.map(normalizeVi));
+  if (!taken.has(normalizeVi(base))) return base;
+  for (let i = 2; i < 100; i++) if (!taken.has(normalizeVi(`${base} ${i}`))) return `${base} ${i}`;
+  return base;
+}
+
+/** Same dishes (names, any order, duplicates counted) — "this meal is already a template". */
+export function sameDishes(a: ReadonlyArray<{ name: string }>, b: ReadonlyArray<{ name: string }>): boolean {
+  if (a.length !== b.length || !a.length) return false;
+  const key = (l: ReadonlyArray<{ name: string }>) => l.map((x) => normalizeVi(x.name)).sort().join('|');
+  return key(a) === key(b);
+}
+
+/** "Phở bò, Trà đá" · "Phở bò, Trà đá +2 món" */
+export function dishesSummary(items: ReadonlyArray<{ name: string }>, max = 2): string {
+  const names = items.map((i) => i.name);
+  const head = names.slice(0, max).join(', ');
+  return names.length > max ? `${head} +${names.length - max} món` : head;
+}
+
+/** "hôm nay" · "hôm qua" · "3 ngày trước" · "2 tuần trước" · "4 tháng trước" (local dates). */
+export function relativeDayVi(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return '';
+  const t = new Date(iso);
+  if (Number.isNaN(t.getTime())) return '';
+  const loc = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const d = daysBetween(loc(t), loc(now));
+  if (d <= 0) return 'hôm nay';
+  if (d === 1) return 'hôm qua';
+  if (d < 7) return `${d} ngày trước`;
+  if (d < 30) return `${Math.floor(d / 7)} tuần trước`;
+  if (d < 365) return `${Math.floor(d / 30)} tháng trước`;
+  return `${Math.floor(d / 365)} năm trước`;
+}
+
+/** "Đã ăn 7 lần · hôm qua" · "Chưa ăn lần nào". */
+export function usageLabel(useCount: number | null | undefined, lastUsedAt: string | null | undefined, now: Date = new Date()): string {
+  const n = Math.max(0, Number(useCount) || 0);
+  if (!n) return 'Chưa ăn lần nào';
+  const when = relativeDayVi(lastUsedAt, now);
+  return when ? `Đã ăn ${n} lần · ${when}` : `Đã ăn ${n} lần`;
+}
+
+/** Local copy of a saved food after one more use (mirrors fit_mark_food_used). */
+export function bumpUsage<T extends { use_count: number; last_used_at: string | null }>(row: T, now: Date = new Date()): T {
+  return { ...row, use_count: (Number(row.use_count) || 0) + 1, last_used_at: now.toISOString() };
+}
+
+/**
+ * A saved food named like a database dish ("Bún bò Huế" saved from a scan) also answers to
+ * that dish's aliases ("bun bo"), so the user's own version — their photo, their portion —
+ * is found by the same words and, with the saved-food boost, ranks above the generic one.
+ */
+export function withDbAliases(opt: FoodOption, foods: FoodItem[]): FoodOption {
+  if (opt.origin !== 'custom') return opt;
+  const db = matchDbFood(opt.name, foods);
+  if (!db) return opt;
+  const keys = [...new Set([...opt.searchKeys, ...db.aliases.map(normalizeVi)])].filter(Boolean);
+  return keys.length === opt.searchKeys.length ? opt : { ...opt, searchKeys: keys };
 }
 
 /** Option key → times logged, for searchFoods' frequency boost. */
@@ -561,7 +740,8 @@ export function searchFoods(query: string, options: FoodOption[], opts: SearchOp
     if (r !== undefined) best += 150 - Math.min(r, 20) * 2;
     const n = opts.frequency?.get(o.key) ?? 0;
     if (n > 1) best += (Math.min(n, 10) - 1) * 6;
-    if (o.origin === 'custom') best += 20;
+    // Saved foods lead their tier, frequently used ones more (never enough to jump a tier).
+    if (o.origin === 'custom') best += 20 + Math.min(Math.max(0, o.useCount ?? 0), 10) * 8;
     scored.push({ o, s: best });
   }
   scored.sort((a, b) => b.s - a.s || a.o.name.length - b.o.name.length || a.o.name.localeCompare(b.o.name, 'vi'));

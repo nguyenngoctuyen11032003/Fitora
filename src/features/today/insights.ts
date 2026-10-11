@@ -47,6 +47,8 @@ export interface InsightInput {
   loggingStreak?: number;
   /** Consecutive days the water target was reached, today included once reached (optional). */
   waterStreak?: number;
+  /** Consecutive days over the calorie budget ending today (0 when today is not over). Optional. */
+  overStreak?: number;
 }
 
 const n0 = (v: number) => formatNumber(v, 0);
@@ -99,17 +101,22 @@ export function buildInsights(i: InsightInput): Insight[] {
     add('kcal-slight', 'info', 54, `Vượt nhẹ ${n0(-i.remaining)} kcal — gần như đúng mục tiêu, không cần bù gì thêm.`);
   } else if (i.remaining < 0) {
     const over = -i.remaining;
+    // Several days in a row over budget is a pattern worth naming (and ranking higher).
+    const run = Math.max(0, Math.floor(i.overStreak ?? 0));
+    const head = run >= 2 ? `Đã vượt ${n0(over)} kcal — ngày thứ ${run} liên tiếp vượt mục tiêu.` : `Đã vượt ${n0(over)} kcal.`;
     // Extra activity only raises the budget once the activity already in the target is used up.
     const minutes = walkMinutesFor(over + Math.max(0, i.uncreditedActivity ?? 0), i.weightKg);
     let text: string;
     if (minutes > 0 && minutes <= MAX_WALK_MIN && i.hour < LATE_HOUR && !isLateNight(i.hour)) {
-      text = `Đã vượt ${n0(over)} kcal. Đi bộ nhanh khoảng ${minutes} phút là bù lại được.`;
+      text = `${head} Đi bộ nhanh khoảng ${minutes} phút là bù lại được.`;
     } else if (i.hour < 17) {
-      text = `Đã vượt ${n0(over)} kcal. Các bữa còn lại hãy ưu tiên rau xanh và đạm nạc, bớt cơm và đồ chiên.`;
+      text = `${head} Các bữa còn lại hãy ưu tiên rau xanh và đạm nạc, bớt cơm và đồ chiên.`;
+    } else if (run >= 2) {
+      text = `${head} Mai thử lên thực đơn từ sáng để quay lại nhịp — đừng nhịn bữa để bù.`;
     } else {
       text = `Đã vượt ${n0(over)} kcal so với mục tiêu. Không sao — mai quay lại nhịp, đừng nhịn bữa để bù.`;
     }
-    add('kcal-over', 'warn', 90, text);
+    add('kcal-over', 'warn', run >= 2 ? 92 : 90, text);
   } else if (i.eaten > 0 && i.remaining <= 150 && i.hour >= 17) {
     add(
       'kcal-close',

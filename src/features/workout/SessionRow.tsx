@@ -4,6 +4,7 @@ import { formatTime } from '@/lib/date';
 import { formatNumber } from '@/lib/format';
 import type { Workout } from '@/types/db';
 import { ActivityIcon } from './ActivityIcon';
+import { formatKm, splitDistanceNote } from './lib';
 
 interface Props {
   workout: Workout;
@@ -17,6 +18,7 @@ interface Props {
 export function SessionRow({ workout: w, pending, onToggle, onOpen, index = 0 }: Props) {
   const done = w.status === 'done';
   const time = formatTime(w.start_time);
+  const { km } = splitDistanceNote(w.notes);
   return (
     <li
       className={clsx('glass-card flex items-stretch gap-1 p-1.5 pr-2 animate-fade-slide-up motion-reduce:animate-none', pending && 'opacity-60')}
@@ -44,12 +46,12 @@ export function SessionRow({ workout: w, pending, onToggle, onOpen, index = 0 }:
         type="button"
         onClick={onOpen}
         className="flex min-h-[56px] min-w-0 flex-1 items-center gap-3 rounded-[18px] py-2 pl-1 pr-1 text-left transition-colors hover:bg-white/[0.04]"
-        aria-label={`Sửa ${w.title}, ${w.duration_min} phút, ${formatNumber(w.kcal)} kcal${done ? '' : ', lên lịch'}`}
+        aria-label={`Sửa ${w.title}, ${w.duration_min} phút, ${km ? `${formatKm(km)} km, ` : ''}${formatNumber(w.kcal)} kcal${done ? '' : ', lên lịch'}`}
       >
         <ActivityIcon activity={w.activity} category={w.category} size={40} muted={!done} />
         <span className="min-w-0 flex-1">
           <span className={clsx('block truncate text-[15px] font-bold tracking-[-0.01em]', done ? 'text-text' : 'text-text/80')}>{w.title}</span>
-          <span className="mt-0.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[12.5px] text-muted">
+          <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 whitespace-nowrap text-[12.5px] leading-[1.45] text-muted">
             {time && (
               <>
                 <Clock className="h-3.5 w-3.5" aria-hidden="true" />
@@ -58,12 +60,13 @@ export function SessionRow({ workout: w, pending, onToggle, onOpen, index = 0 }:
               </>
             )}
             <span className="tabular">{w.duration_min} phút</span>
-            {!done && (
+            {km ? (
               <>
                 <span aria-hidden="true">·</span>
-                <span className="font-semibold text-text/70">Lên lịch</span>
+                <span className="tabular">{formatKm(km)} km</span>
               </>
-            )}
+            ) : null}
+            {!done && <span className="rounded-full bg-white/[0.08] px-1.5 text-[11px] font-bold uppercase tracking-[0.06em] text-text/75">Lên lịch</span>}
           </span>
         </span>
         <span className="flex shrink-0 flex-col items-end">
@@ -72,7 +75,7 @@ export function SessionRow({ workout: w, pending, onToggle, onOpen, index = 0 }:
           </span>
           <span className="mt-1 text-[10.5px] font-bold uppercase tracking-[0.12em] text-muted">kcal</span>
         </span>
-        <ChevronRight className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
+        <ChevronRight className="hidden h-4 w-4 shrink-0 text-muted min-[380px]:block" aria-hidden="true" />
       </button>
     </li>
   );
