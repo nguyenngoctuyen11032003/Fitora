@@ -8,22 +8,30 @@ import {
   Droplets,
   Footprints,
   Info,
+  Lightbulb,
   Ruler,
   Scale,
+  Sparkles,
   Target,
   TrendingDown,
   TrendingUp,
+  Trophy,
   XCircle,
   type LucideIcon,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { lazy, Suspense, useMemo, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { CountUp, GlassButton, GlassCard, MacroBar, ProgressBar, Segmented } from '@/components/ui';
+import { CountUp, GlassButton, GlassCard, MacroBar, ProgressBar, Segmented, Skeleton } from '@/components/ui';
 import { bmiCategory } from '@/lib/energy';
 import { formatKcal, formatKg, formatMl, formatNumber, formatSigned } from '@/lib/format';
-import type { FitProfile } from '@/types/db';
-import { CalorieChart, WeightChart } from './charts';
-import type { Period, ReportSummary, VerdictTone } from './lib';
+import { formatDayVi } from '@/lib/date';
+import type { FitProfile, Goal } from '@/types/db';
+import { buildInsights, comparePeriods, type Insight, type InsightKind } from './insights';
+import { ddmm, type DayPoint, type Period, type ReportSummary, type VerdictTone } from './lib';
+
+// recharts is heavy → its own chunk; the headline and stats paint before it arrives.
+const CalorieChart = lazy(() => import('./charts').then((m) => ({ default: m.CalorieChart })));
+const WeightChart = lazy(() => import('./charts').then((m) => ({ default: m.WeightChart })));
 
 // ───────────────────────── Shared bits ─────────────────────────
 
@@ -51,6 +59,55 @@ function LegendDot({ color, label, dashed }: { color: string; label: string; das
     </span>
   );
 }
+
+/**
+ * Fixed-height chart slot (no CLS while recharts loads), with a text summary for screen readers
+ * and a visually hidden data table as the accessible equivalent of the chart.
+ */
+function ChartFrame({
+  height,
+  label,
+  caption,
+  columns,
+  rows,
+  children,
+}: {
+  height: number;
+  label: string;
+  caption: string;
+  columns: string[];
+  rows: (string | number)[][];
+  children: ReactNode;
+}) {
+  return (
+    <div className="-mx-1 min-w-0">
+      <div className="w-full min-w-0 overflow-hidden" style={{ height }} role="img" aria-label={label}>
+        <Suspense fallback={<Skeleton height={height} className="w-full" />}>{children}</Suspense>
+      </div>
+      <table className="sr-only">
+        <caption>{caption}</caption>
+        <thead>
+          <tr>
+            {columns.map((c) => (
+              <th key={c} scope="col">
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={String(r[0])}>
+              {r.map((v, i) => (i === 0 ? <th key={i} scope="row">{v}</th> : <td key={i}>{v}</td>))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const elapsedOnly = (days: DayPoint[]) => days.filter((d) => !d.future);
 
 // ───────────────────────── Period navigation ─────────────────────────
 
@@ -124,16 +181,27 @@ const TONE: Record<VerdictTone, { icon: LucideIcon; cls: string; num: string }> 
 export function Headline({ s, goalLabel }: { s: ReportSummary; goalLabel: string | null }) {
   const t = TONE[s.verdict.tone];
   const VIcon = t.icon;
-  const hasBalance = s.loggedDays > 0 && s.maintenance != null;
+  const hasBalance = s.countedDays > 0 && s.maintenance != null;
   const deficit = s.balance < 0;
   const digits = formatNumber(Math.abs(s.balance)).length + 1;
   const numSize = digits <= 5 ? 'text-[84px]' : digits <= 6 ? 'text-[72px]' : 'text-[60px]';
+
+  const notes: string[] = [];
+  if (s.todayPending) notes.push('chưa tính hôm nay (chưa hết ngày)');
+  if (s.partialDays > 0) notes.push(`bỏ qua ${s.partialDays} ngày ghi dưới ${formatNumber(s.partialThreshold)} kcal (có thể thiếu bữa)`);
+
+  let emptyText: string;
+  if (s.loggedDays === 0) emptyText = 'Chưa có bữa ăn nào được ghi trong kỳ này.';
+  else if (s.maintenance == null) emptyText = 'Cần thông tin hồ sơ (giới tính, ngày sinh, chiều cao, cân nặng, mức vận động) để tính thâm hụt.';
+  else if (s.partialDays > 0)
+    emptyText = `Các ngày đã qua đều ghi dưới ${formatNumber(s.partialThreshold)} kcal nên chưa đủ tin cậy để tính thâm hụt. Hãy ghi đủ các bữa trong ngày.`;
+  else emptyText = 'Hôm nay chưa kết thúc — cân bằng năng lượng sẽ được tính từ ngày mai, khi có ngày ghi trọn vẹn.';
 
   return (
     <GlassCard padding="lg" className="overflow-hidden animate-fade-slide-up">
       <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-[rgba(225,80,10,0.2)] blur-3xl" aria-hidden="true" />
       <p className="eyebrow relative">
-        Cân bằng năng lượng · {s.loggedDays}/{s.elapsedDays} ngày đã ghi
+        Cân bằng năng lượng
       </p>
 
       {hasBalance ? (
@@ -147,7 +215,10 @@ export function Headline({ s, goalLabel }: { s: ReportSummary; goalLabel: string
           </div>
           <p className="relative mt-2 text-[15px] font-semibold text-text">
             {s.balance === 0 ? 'Cân bằng' : deficit ? 'Thâm hụt' : 'Dư thừa'}
-            <span className="font-medium text-muted"> so với nhu cầu duy trì</span>
+            <span className="font-medium text-muted">
+              {' '}
+              so với tiêu hao ước tính · {s.countedDays} ngày
+            </span>
           </p>
 
           <dl className="relative mt-5 grid grid-cols-2 gap-3">
@@ -161,23 +232,29 @@ export function Headline({ s, goalLabel }: { s: ReportSummary; goalLabel: string
                 {Math.abs(s.estWeightChangeKg) < 0.05 ? '±0' : formatSigned(s.estWeightChangeKg, 1)}
                 <span className="ml-1 text-[13px] font-bold text-muted">kg</span>
               </dd>
+              {s.countedDays !== 7 && Math.abs(s.estWeeklyChangeKg) >= 0.05 && (
+                <p className="tabular text-[11.5px] text-muted">≈ {formatSigned(s.estWeeklyChangeKg, 1)} kg/tuần</p>
+              )}
             </div>
             <div className="rounded-2xl border border-line bg-white/[0.03] px-3.5 py-3">
               <dt className="flex items-center gap-1.5 text-[12px] font-semibold text-muted">
                 <Target className="h-3.5 w-3.5" />
-                So với mục tiêu
+                Nạp TB vs mục tiêu
               </dt>
               <dd className="tabular mt-1 text-[22px] font-extrabold tracking-[-0.03em] text-text">
                 {s.target != null ? formatSigned(s.avgDailyVsTarget) : '—'}
                 <span className="ml-1 text-[13px] font-bold text-muted">kcal/ngày</span>
               </dd>
+              {s.target != null && (
+                <p className="tabular text-[11.5px] text-muted">
+                  {formatNumber(s.avgIn)} / {formatNumber(s.target)} kcal
+                </p>
+              )}
             </div>
           </dl>
         </>
       ) : (
-        <p className="relative mt-3 text-[15px] text-muted">
-          {s.loggedDays === 0 ? 'Chưa có bữa ăn nào được ghi trong kỳ này.' : 'Cần thông tin hồ sơ (cân nặng, chiều cao, mục tiêu) để tính thâm hụt.'}
-        </p>
+        <p className="relative mt-3 text-[15px] text-muted">{emptyText}</p>
       )}
 
       <div className={clsx('relative mt-4 flex gap-3 rounded-2xl border px-3.5 py-3', t.cls)} role="status">
@@ -193,8 +270,9 @@ export function Headline({ s, goalLabel }: { s: ReportSummary; goalLabel: string
 
       {hasBalance && (
         <p className="relative mt-3 text-[11.5px] leading-relaxed text-muted">
-          Ước tính từ nhu cầu duy trì ~{formatKcal(s.maintenance)}/ngày
-          {s.maintenanceBasis === 'target' ? ' (suy từ mục tiêu)' : ''} + vận động, chỉ tính ngày đã ghi. 7.700 kcal ≈ 1 kg.
+          Tiêu hao ước tính TB ~{formatKcal(s.avgExpenditure)}/ngày: nhu cầu duy trì ~{formatKcal(s.maintenance)}
+          {s.maintenanceBasis === 'target' ? ' (suy từ mục tiêu)' : ' theo hồ sơ'}, cộng thêm khi vận động ghi lại vượt mức thường ngày. Chỉ
+          tính ngày ghi đủ{notes.length ? `; ${notes.join('; ')}` : ''}. 7.700 kcal ≈ 1 kg.
         </p>
       )}
     </GlassCard>
@@ -212,14 +290,49 @@ export function CalorieSection({ s, animate, monthly }: { s: ReportSummary; anim
         <LegendDot color="var(--burn)" label="Tiêu hao (tập + bước)" />
         {s.target != null && <LegendDot color="var(--text)" label="Mục tiêu" dashed />}
       </div>
-      <div className="-mx-1">
-        <CalorieChart days={s.days} target={s.target} animate={animate} monthly={monthly} />
-      </div>
+      <CalorieFrame s={s} animate={animate} monthly={monthly} />
       <div className="mt-4 grid grid-cols-2 gap-3 border-t border-line pt-4">
-        <Stat label="TB nạp vào / ngày" value={s.loggedDays ? formatNumber(s.avgIn) : '—'} unit="kcal" />
-        <Stat label="TB tiêu hao / ngày" value={s.elapsedDays ? formatNumber(s.avgBurned) : '—'} unit="kcal" />
+        <Stat
+          label="TB nạp vào / ngày"
+          value={s.loggedDays ? formatNumber(s.avgIn) : '—'}
+          unit="kcal"
+          sub={s.avgBasisDays ? avgBasisText(s) : undefined}
+        />
+        <Stat
+          label="TB vận động / ngày"
+          value={s.trackedDays ? formatNumber(s.avgBurned) : '—'}
+          unit="kcal"
+          sub={s.trackedDays ? `Tập + bước · ${s.trackedDays} ngày có dữ liệu` : 'Tập luyện + bước chân'}
+        />
       </div>
     </GlassCard>
+  );
+}
+
+/** Explicit averaging basis — the same day count as the macro eyebrow ("Trung bình N ngày"). */
+function avgBasisText(s: ReportSummary): string {
+  return s.avgBasisIncomplete ? 'Gồm hôm nay (chưa hết ngày)' : `Trên ${s.avgBasisDays} ngày ghi đủ`;
+}
+
+function CalorieFrame({ s, animate, monthly }: { s: ReportSummary; animate: boolean; monthly: boolean }) {
+  const rows = useMemo(
+    () =>
+      elapsedOnly(s.days).map((d) => [
+        `${d.tick} ${ddmm(d.day)}`,
+        d.logged ? formatKcal(d.kcalIn) : 'Chưa ghi',
+        formatKcal(d.burned),
+        d.budget != null ? formatKcal(d.budget) : '—',
+      ]),
+    [s.days],
+  );
+  const label =
+    s.loggedDays > 0
+      ? `Biểu đồ calo theo ngày: nạp trung bình ${formatNumber(s.avgIn)} kcal${s.target != null ? `, mục tiêu ${formatNumber(s.target)} kcal` : ''}, ${s.loggedDays}/${s.elapsedDays} ngày có ghi.`
+      : 'Biểu đồ calo theo ngày: chưa có dữ liệu.';
+  return (
+    <ChartFrame height={monthly ? 220 : 232} label={label} caption="Calo theo ngày" columns={['Ngày', 'Nạp vào', 'Vận động', 'Ngân sách']} rows={rows}>
+      <CalorieChart days={s.days} target={s.target} animate={animate} monthly={monthly} />
+    </ChartFrame>
   );
 }
 
@@ -243,7 +356,7 @@ export function MacroSection({ s, fit }: { s: ReportSummary; fit: FitProfile | n
   return (
     <GlassCard padding="md" as="section" aria-labelledby="rp-macro">
       <SectionTitle
-        eyebrow="Trung bình mỗi ngày đã ghi"
+        eyebrow={s.avgBasisIncomplete ? 'Trung bình · gồm hôm nay' : `Trung bình ${s.avgBasisDays} ngày`}
         title={<span id="rp-macro">Dinh dưỡng</span>}
         right={
           s.target != null && s.loggedDays > 0 ? (
@@ -256,7 +369,24 @@ export function MacroSection({ s, fit }: { s: ReportSummary; fit: FitProfile | n
       {s.loggedDays === 0 ? (
         <p className="text-sm text-muted">Chưa có dữ liệu dinh dưỡng trong kỳ này.</p>
       ) : (
-        <MacroBar {...s.avgMacros} targets={targets} variant="rows" />
+        <>
+          <MacroBar {...s.avgMacros} targets={targets} variant="rows" />
+          {s.macroSplit && (
+            <div className="mt-4 border-t border-line pt-3">
+              <p className="mb-2 text-[12px] font-semibold text-muted">Tỷ lệ năng lượng từ macro</p>
+              <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-white/[0.06]" aria-hidden="true">
+                <span style={{ width: `${s.macroSplit.protein}%`, background: 'var(--protein)' }} />
+                <span style={{ width: `${s.macroSplit.carbs}%`, background: 'var(--carbs)' }} />
+                <span style={{ width: `${s.macroSplit.fat}%`, background: 'var(--fat)' }} />
+              </div>
+              <p className="tabular mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] font-semibold text-muted">
+                <LegendDot color="var(--protein)" label={`Đạm ${s.macroSplit.protein}%`} />
+                <LegendDot color="var(--carbs)" label={`Tinh bột ${s.macroSplit.carbs}%`} />
+                <LegendDot color="var(--fat)" label={`Chất béo ${s.macroSplit.fat}%`} />
+              </p>
+            </div>
+          )}
+        </>
       )}
     </GlassCard>
   );
@@ -270,7 +400,9 @@ export function WeightSection({
   monthly,
   waistDelta,
   latestKnown,
+  goal,
 }: {
+  goal: Goal | null;
   s: ReportSummary;
   animate: boolean;
   monthly: boolean;
@@ -280,6 +412,9 @@ export function WeightSection({
   const n = s.weightPoints.length;
   const bmi = s.bmiLast;
   const cat = bmi ? bmiCategory(bmi) : null;
+  // Colour the weight change by whether it moves toward the goal.
+  const toward = (d: number | null) =>
+    d == null || d === 0 || !goal || goal === 'recomp' || goal === 'maintain' ? undefined : (goal === 'lose') === d < 0 ? 'text-ok' : 'text-gold';
   return (
     <GlassCard padding="md" as="section" aria-labelledby="rp-weight">
       <SectionTitle
@@ -292,26 +427,42 @@ export function WeightSection({
         }
       />
       {n >= 2 ? (
-        <div className="-mx-1">
-          <WeightChart days={s.days} animate={animate} monthly={monthly} />
-        </div>
+        <>
+          {s.weightTrend && (
+            <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1.5">
+              <LegendDot color="var(--gold)" label="Cân nặng" />
+              <LegendDot color="var(--ember)" label="Xu hướng" dashed />
+            </div>
+          )}
+          <ChartFrame
+            height={monthly ? 180 : 194}
+            label={`Biểu đồ cân nặng: ${n} lần cân, từ ${formatKg(s.weightFirst)} đến ${formatKg(s.weightLast)}${
+              s.weightTrend ? `, xu hướng ${formatSigned(s.weightTrend.slopeKgPerWeek, 1)} kg/tuần` : ''
+            }.`}
+            caption="Cân nặng theo ngày"
+            columns={['Ngày', 'Cân nặng', 'BMI']}
+            rows={s.weightPoints.map((p) => [ddmm(p.day), formatKg(p.weight), p.bmi != null ? formatNumber(p.bmi, 1) : '—'])}
+          >
+            <WeightChart days={s.days} animate={animate} monthly={monthly} />
+          </ChartFrame>
+        </>
       ) : (
         <div className="flex items-center gap-3 rounded-2xl border border-dashed border-line px-4 py-4 text-[13px] leading-relaxed text-muted">
           <Scale className="h-5 w-5 shrink-0 text-gold" aria-hidden="true" />
           {n === 1
             ? 'Mới có 1 lần cân trong kỳ. Cân thêm để thấy xu hướng.'
             : latestKnown
-              ? `Chưa cân trong kỳ này. Lần gần nhất: ${formatKg(latestKnown.kg)}.`
+              ? `Chưa cân trong kỳ này. Lần gần nhất: ${formatKg(latestKnown.kg)} (${formatDayVi(latestKnown.on, 'long')}).`
               : 'Chưa có số cân nào. Cân 2–3 lần mỗi tuần, cùng giờ buổi sáng để xu hướng chính xác.'}
         </div>
       )}
       <div className="mt-4 grid grid-cols-3 gap-2 border-t border-line pt-4">
-        <Stat label="Hiện tại" value={s.weightLast != null ? formatNumber(s.weightLast, 1) : '—'} unit={s.weightLast != null ? 'kg' : undefined} />
+        <Stat label="Lần cân cuối" value={s.weightLast != null ? formatNumber(s.weightLast, 1) : '—'} unit={s.weightLast != null ? 'kg' : undefined} />
         <Stat
           label="Thay đổi"
           value={
             s.weightDelta != null ? (
-              <span className={s.weightDelta < 0 ? 'text-ok' : s.weightDelta > 0 ? 'text-gold' : undefined}>{formatSigned(s.weightDelta, 1)}</span>
+              <span className={toward(s.weightDelta)}>{formatSigned(s.weightDelta, 1)}</span>
             ) : (
               '—'
             )
@@ -320,6 +471,20 @@ export function WeightSection({
         />
         <Stat label="BMI" value={bmi ? formatNumber(bmi, 1) : '—'} sub={cat?.label} />
       </div>
+      {s.weightTrend && (
+        <p className="mt-3 flex items-center gap-2 text-[13px] text-muted">
+          {s.weightTrend.slopeKgPerWeek < 0 ? (
+            <TrendingDown className="h-4 w-4 text-gold" aria-hidden="true" />
+          ) : (
+            <TrendingUp className="h-4 w-4 text-gold" aria-hidden="true" />
+          )}
+          Xu hướng:{' '}
+          <span className={clsx('tabular font-bold text-text', toward(s.weightTrend.slopeKgPerWeek))}>
+            {Math.abs(s.weightTrend.slopeKgPerWeek) < 0.05 ? '±0' : formatSigned(s.weightTrend.slopeKgPerWeek, 1)} kg/tuần
+          </span>
+          <span className="text-[11.5px]">(hồi quy tuyến tính)</span>
+        </p>
+      )}
       {waistDelta != null && (
         <p className="mt-3 flex items-center gap-2 text-[13px] text-muted">
           <Ruler className="h-4 w-4 text-gold" aria-hidden="true" />
@@ -407,6 +572,87 @@ export function CompletionSection({ s }: { s: ReportSummary }) {
         />
       </div>
     </section>
+  );
+}
+
+// ───────────────────────── Insights ─────────────────────────
+
+const INSIGHT_ICON: Record<InsightKind, LucideIcon> = {
+  consistency: CalendarCheck,
+  best: Trophy,
+  protein: Target,
+  trend: TrendingDown,
+  compare: Sparkles,
+  nudge: Lightbulb,
+};
+
+function Delta({ label, value, unit, digits = 0 }: { label: string; value: number | null; unit: string; digits?: 0 | 1 }) {
+  return (
+    <div className="min-w-0 rounded-2xl border border-line bg-white/[0.03] px-3 py-2.5">
+      <p className="truncate text-[11.5px] font-semibold text-muted">{label}</p>
+      <p className="tabular mt-0.5 text-[16px] font-extrabold tracking-[-0.02em] text-text">
+        {value == null ? '—' : value === 0 ? '±0' : formatSigned(value, digits)}
+        {value != null && <span className="ml-1 text-[11px] font-bold text-muted">{unit}</span>}
+      </p>
+    </div>
+  );
+}
+
+/** Short summary of the period + comparison with the previous one. Wording is never shaming. */
+export function InsightsSection({
+  s,
+  prev,
+  period,
+  goal,
+  proteinTarget,
+}: {
+  s: ReportSummary;
+  prev: ReportSummary | null;
+  period: Period;
+  goal: Goal | null;
+  proteinTarget: number | null;
+}) {
+  const insights: Insight[] = useMemo(() => buildInsights(s, { period, goal, proteinTarget, prev }), [s, period, goal, proteinTarget, prev]);
+  const cmp = useMemo(() => comparePeriods(s, prev), [s, prev]);
+  const hasCmp = cmp.avgIn != null || cmp.loggingPts != null || cmp.weight != null || cmp.protein != null;
+  if (!insights.length && !hasCmp) return null;
+  const prevName = period === 'week' ? 'tuần trước' : 'tháng trước';
+  return (
+    <GlassCard padding="md" as="section" aria-labelledby="rp-insights">
+      <SectionTitle eyebrow="Tóm tắt kỳ" title={<span id="rp-insights">Điểm nổi bật</span>} />
+      {insights.length > 0 && (
+        <ul className="flex flex-col gap-2.5">
+          {insights.map((it) => {
+            const Icon = it.kind === 'trend' && /tăng/.test(it.text) ? TrendingUp : INSIGHT_ICON[it.kind];
+            return (
+              <li key={it.kind} className="flex gap-3 text-[13.5px] leading-relaxed text-[rgba(237,228,216,0.88)]">
+                <span
+                  className={clsx(
+                    'mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-xl border',
+                    it.tone === 'good' ? 'border-[rgba(127,209,139,0.3)] bg-[rgba(127,209,139,0.08)] text-ok' : 'border-line bg-white/[0.04] text-gold',
+                  )}
+                  aria-hidden="true"
+                >
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">{it.text}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {hasCmp && (
+        <div className={clsx(insights.length > 0 && 'mt-4 border-t border-line pt-4')}>
+          <p className="mb-2 text-[12px] font-semibold text-muted">So với {prevName}</p>
+          <div className="grid grid-cols-2 gap-2 min-[400px]:grid-cols-4">
+            <Delta label="Nạp TB/ngày" value={cmp.avgIn} unit="kcal" />
+            <Delta label="Đạm TB/ngày" value={cmp.protein} unit="g" digits={1} />
+            <Delta label="Tỉ lệ ngày ghi" value={cmp.loggingPts} unit="%" />
+            <Delta label="Cân nặng" value={cmp.weight} unit="kg" digits={1} />
+          </div>
+        </div>
+      )}
+    </GlassCard>
   );
 }
 

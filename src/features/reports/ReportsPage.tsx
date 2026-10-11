@@ -11,7 +11,7 @@ import { latestWeight, listMeasurements } from '@/services/body';
 import { getRangeSummary } from '@/services/summary';
 import { GOAL_LABELS } from '@/types/db';
 import { buildReport, canGoNext, isCurrentPeriod, periodCaption, periodLabel, periodRange, shiftPeriod, type Period } from './lib';
-import { CalorieSection, CompletionSection, Headline, LinkCards, MacroSection, PeriodNav, WeightSection } from './sections';
+import { CalorieSection, CompletionSection, Headline, InsightsSection, LinkCards, MacroSection, PeriodNav, WeightSection } from './sections';
 
 const PERIOD_KEY = 'fitora.reports.period';
 
@@ -33,15 +33,21 @@ export default function ReportsPage() {
   const [period, setPeriod] = useState<Period>(readPeriod);
   const [anchor, setAnchor] = useState(today);
   const { from, to } = periodRange(period, anchor);
+  const prevRange = periodRange(period, shiftPeriod(period, anchor, -1));
   const key = `${from}|${to}`;
 
+  // useAsync drops stale responses (token), and `fresh` below is keyed by range, so rapid
+  // prev/next/period switching never shows data from a superseded request.
   const { data, error, loading, reload } = useAsync(async () => {
-    const [rows, latest, measurements] = await Promise.all([
+    const [rows, prevRows, latest, measurements] = await Promise.all([
       getRangeSummary(from, to),
+      // Comparison is a nice-to-have: never fail the whole report because of it.
+      getRangeSummary(prevRange.from, prevRange.to).catch(() => null),
       latestWeight().catch(() => null),
       listMeasurements(from, to).catch(() => []),
     ]);
-    return { key: `${from}|${to}`, rows, latest, measurements };
+    return { key: `${from}|${to}`, rows, prevRows, prev: prevRange, latest, measurements };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
 
   useEffect(() => onDataChanged(() => void reload()), [reload]);
@@ -73,6 +79,19 @@ export default function ReportsPage() {
       refWeightKg: fresh.latest?.weight_kg ?? null,
     });
   }, [fresh, from, to, period, today, fit]);
+
+  const prevSummary = useMemo(() => {
+    if (!fresh?.prevRows) return null;
+    return buildReport({
+      rows: fresh.prevRows,
+      from: fresh.prev.from,
+      to: fresh.prev.to,
+      period,
+      today,
+      profile: fit,
+      refWeightKg: fresh.latest?.weight_kg ?? null,
+    });
+  }, [fresh, period, today, fit]);
 
   const waistDelta = useMemo(() => {
     const ws = (fresh?.measurements ?? []).filter((m) => m.waist_cm != null);
@@ -155,6 +174,9 @@ export default function ReportsPage() {
           <>
             <Headline s={summary} goalLabel={goalLabel} />
             <div className="animate-fade-slide-up animate-delay-100">
+              <InsightsSection s={summary} prev={prevSummary} period={period} goal={fit?.goal ?? null} proteinTarget={fit?.protein_g ?? null} />
+            </div>
+            <div className="animate-fade-slide-up animate-delay-100">
               <CalorieSection s={summary} animate={animate} monthly={monthly} />
             </div>
             <div className="animate-fade-slide-up animate-delay-200">
@@ -163,6 +185,7 @@ export default function ReportsPage() {
             <div className="animate-fade-slide-up animate-delay-300">
               <WeightSection
                 s={summary}
+                goal={fit?.goal ?? null}
                 animate={animate}
                 monthly={monthly}
                 waistDelta={waistDelta}
