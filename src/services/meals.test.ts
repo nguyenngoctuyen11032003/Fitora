@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Fake fit_meal_entries table: rows by id, each with a photo_path.
+// Fake fit_meal_entries table: rows by id, each with a photo_path; plus saved foods (fit_custom_foods).
 let rows: Array<{ id: string; photo_path: string | null }> = [];
+let foods: Array<{ id: string; photo_path: string | null }> = [];
 let countFails = false;
 const removed: string[][] = [];
 
-function table() {
+function table(name: string) {
+  const list = () => (name === 'fit_custom_foods' ? foods : rows);
   return {
     delete: () => ({
       eq: (_c: string, id: string) => ({
@@ -20,22 +22,23 @@ function table() {
     }),
     select: () => ({
       eq: async (_c: string, path: string) =>
-        countFails ? { count: null, error: { message: 'boom' } } : { count: rows.filter((r) => r.photo_path === path).length, error: null },
+        countFails ? { count: null, error: { message: 'boom' } } : { count: list().filter((r) => r.photo_path === path).length, error: null },
     }),
   };
 }
-vi.mock('@/lib/supabase', () => ({ db: () => ({ from: () => table() }) }));
+vi.mock('@/lib/supabase', () => ({ db: () => ({ from: (t: string) => table(t) }) }));
 vi.mock('./storage', () => ({
   removeImages: vi.fn(async (p: string[]) => void removed.push(p)),
   signedUrl: vi.fn(),
   uploadImage: vi.fn(),
 }));
 
-import { deleteMeal, PHOTO_CLEANUP_DELAY_MS } from './meals';
+import { deleteMeal, PHOTO_CLEANUP_DELAY_MS, schedulePhotoCleanup } from './meals';
 
 beforeEach(() => {
   vi.useFakeTimers();
   rows = [];
+  foods = [];
   removed.length = 0;
   countFails = false;
 });
@@ -67,6 +70,21 @@ describe('deleteMeal photo cleanup', () => {
     await deleteMeal('1');
     await vi.advanceTimersByTimeAsync(PHOTO_CLEANUP_DELAY_MS);
     expect(removed).toEqual([]);
+  });
+
+  it('keeps a photo that a saved (scanned) dish still shows', async () => {
+    rows = [{ id: '1', photo_path: 'u/meals/p.webp' }];
+    foods = [{ id: 'f', photo_path: 'u/meals/p.webp' }];
+    await deleteMeal('1');
+    await vi.advanceTimersByTimeAsync(PHOTO_CLEANUP_DELAY_MS);
+    expect(removed).toEqual([]);
+  });
+
+  it('schedulePhotoCleanup ignores empty paths and removes unused ones', async () => {
+    schedulePhotoCleanup(null);
+    schedulePhotoCleanup('u/meals/q.webp');
+    await vi.advanceTimersByTimeAsync(PHOTO_CLEANUP_DELAY_MS);
+    expect(removed).toEqual([['u/meals/q.webp']]);
   });
 
   it('keeps the photo when the usage check fails', async () => {

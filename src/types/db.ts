@@ -55,6 +55,19 @@ export interface FitProfile {
 }
 export type FitProfilePatch = Partial<Omit<FitProfile, 'user_id' | 'created_at' | 'updated_at'>>;
 
+/** Where a saved food came from: typed by hand, confirmed after an AI scan, or saved from a logged meal entry. */
+export type CustomFoodSource = 'manual' | 'ai' | 'meal';
+export const CUSTOM_FOOD_SOURCE_LABELS: Record<CustomFoodSource, string> = {
+  manual: 'Tự tạo',
+  ai: 'Từ ảnh quét',
+  meal: 'Từ nhật ký',
+};
+
+/**
+ * public.fit_custom_foods = "Món của tôi / món đã lưu" (nutrition per 100 g + one default serving).
+ * Migrations 001400 + 20261012000100. Usage columns are written only by the
+ * `fit_mark_food_used` RPC (services: markCustomFoodUsed / logCustomFood / saveScannedDishes).
+ */
 export interface CustomFood {
   id: string;
   user_id: string;
@@ -67,15 +80,54 @@ export interface CustomFood {
   carbs_100g: number;
   fat_100g: number;
   fiber_100g: number;
+  source: CustomFoodSource;
+  /** '<uid>/meals/<uuid>.webp' (own folder) or null. Shown with mealPhotoUrl(). */
+  photo_path: string | null;
+  use_count: number;
+  /** ISO timestamp of the last time it was logged; null = never. */
+  last_used_at: string | null;
+  /** Meal it is usually eaten at (pre-selects the meal when re-logging). */
+  default_meal: MealType | null;
   created_at: string;
   updated_at: string;
 }
-export type NewCustomFood = Omit<CustomFood, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'brand' | 'serving_label' | 'fiber_100g'> & {
-  brand?: string | null;
-  serving_label?: string;
-  fiber_100g?: number;
-};
-export type CustomFoodPatch = Partial<Omit<CustomFood, 'id' | 'user_id' | 'created_at' | 'updated_at'>>;
+export type NewCustomFood = Pick<CustomFood, 'name' | 'serving_grams' | 'kcal_100g' | 'protein_100g' | 'carbs_100g' | 'fat_100g'> &
+  Partial<Pick<CustomFood, 'brand' | 'serving_label' | 'fiber_100g' | 'source' | 'photo_path' | 'default_meal'>>;
+/** Editable fields. use_count / last_used_at are bumped only through markCustomFoodUsed(). */
+export type CustomFoodPatch = Partial<
+  Omit<CustomFood, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'use_count' | 'last_used_at'>
+>;
+
+/** One item of a meal template (values are the TOTAL for the item, like a MealEntry). */
+export interface MealTemplateItem {
+  name: string;
+  quantity: number;
+  unit: string;
+  grams: number;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  fiber_g: number;
+  /** Linked saved food (re-logged as source 'custom'); not a DB foreign key, may be stale. */
+  custom_food_id: string | null;
+}
+
+/** public.fit_meal_templates = "Bữa mẫu": a named set of items re-logged with one tap. */
+export interface MealTemplate {
+  id: string;
+  user_id: string;
+  name: string;
+  /** Preferred meal; null = choose when logging. */
+  meal: MealType | null;
+  items: MealTemplateItem[];
+  total_kcal: number;
+  use_count: number;
+  last_used_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export type MealTemplatePatch = Partial<Pick<MealTemplate, 'name' | 'meal' | 'items'>>;
 
 export interface MealEntry {
   id: string;

@@ -78,8 +78,8 @@ export default function RegisterPage() {
             <MailCheck className="h-7 w-7" aria-hidden="true" />
           </span>
           <p className="text-[15px] leading-relaxed text-muted">
-            Fitora đã gửi liên kết xác nhận tới <strong className="text-text">{email.trim()}</strong>. Mở email và bấm liên kết để kích hoạt tài khoản —
-            tài khoản này dùng được cho cả Note_mytasks. Không thấy email? Hãy xem cả thư mục Spam.
+            Fitora đã gửi liên kết xác nhận tới <strong className="text-text">{email.trim()}</strong>. Mở email và bấm liên kết để kích hoạt tài khoản.
+            Không thấy email? Hãy xem cả thư mục Spam.
           </p>
           <Button variant="secondary" block loading={resending} disabled={cooldown > 0} onClick={resend}>
             {cooldown > 0 ? `Gửi lại email (${cooldown}s)` : 'Gửi lại email'}
@@ -93,7 +93,6 @@ export default function RegisterPage() {
     <AuthLayout
       eyebrow="Bắt đầu hành trình"
       title="Tạo tài khoản"
-      subtitle="Một tài khoản cho cả Fitora và Note_mytasks."
       compact
       footer={
         <>

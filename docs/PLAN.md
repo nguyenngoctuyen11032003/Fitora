@@ -21,7 +21,7 @@ GitHub Actions → GitHub Pages              supabase/functions/fitora-food-ai  
 - Migration Fitora nằm trong repo Note_mytasks vì `supabase db push` yêu cầu thư mục migration local chứa **toàn bộ** lịch sử của project.
 - AI nhận diện món ăn: Edge Function `fitora-food-ai` (Deno) gọi Claude vision; khóa `ANTHROPIC_API_KEY` là Supabase secret, không bao giờ vào FE.
 
-## 2. Database (Note_mytasks/supabase/migrations/20261009001400_fitora_schema.sql, …001500_fitora_storage.sql)
+## 2. Database (Note_mytasks/supabase/migrations/20261009001400_fitora_schema.sql, …001500_fitora_storage.sql, 20261012000100_fitora_saved_foods.sql)
 
 Quy ước giống Note_mytasks: `user_id uuid not null default auth.uid() references auth.users on delete cascade`, enum = `text + CHECK`,
 RLS bật, policy chỉ chủ sở hữu (select/insert/update/delete cho `authenticated`, USING + WITH CHECK), `revoke all … from anon`,
@@ -30,7 +30,7 @@ composite FK `(x_id, user_id) → parent(id, user_id)`, trigger `public.set_upda
 | Bảng | Cột chính |
 |---|---|
 | `fit_profiles` (PK `user_id`) | `sex` ('male','female'), `birth_date` date, `height_cm` numeric 80–250, `activity_level` ('sedentary','light','moderate','active','very_active'), `goal` ('lose','gain','maintain','recomp'), `goal_pace` ('slow','medium','fast') null, `start_weight_kg`, `target_weight_kg` numeric null, `calorie_target` int 800–6000, `protein_g`/`carbs_g`/`fat_g` int 0–1000, `macro_custom` bool default false, `water_target_ml` int default 2000, `step_target` int default 8000, `onboarded_at` timestamptz null, timestamps |
-| `fit_custom_foods` | `id`, `user_id`, `name` 1–120, `brand` null, `serving_label` text default '1 phần', `serving_grams` numeric >0, `kcal_100g`, `protein_100g`, `carbs_100g`, `fat_100g`, `fiber_100g` numeric ≥0, timestamps, `unique(id,user_id)` |
+| `fit_custom_foods` = **Món của tôi / món đã lưu** | `id`, `user_id`, `name` 1–120, `brand` null, `serving_label` text default '1 phần', `serving_grams` numeric >0 ≤10000, `kcal_100g` 0–1000, `protein_100g`, `carbs_100g`, `fat_100g`, `fiber_100g` numeric 0–100, timestamps, `unique(id,user_id)`; **(000100)** `source` ('manual','ai','meal') default 'manual', `photo_path` text null (thư mục của chính mình, như `fit_meal_entries`), `use_count` int ≥0 default 0, `last_used_at` timestamptz null, `default_meal` (4 bữa) null; index `(user_id, last_used_at desc nulls last)` |
 | `fit_meal_entries` | `id`, `user_id`, `eaten_on` date, `meal` ('breakfast','lunch','dinner','snack'), `name` 1–120, `quantity` numeric >0, `unit` text 1–20, `grams` numeric ≥0, `kcal`, `protein_g`, `carbs_g`, `fat_g`, `fiber_g` numeric ≥0, `source` ('ai','search','custom','manual'), `custom_food_id` null (composite FK, SET NULL), `photo_path` text null, `ai_meta` jsonb null, timestamps; index `(user_id, eaten_on)` |
 | `fit_workout_templates` | `id`, `user_id`, `name` 1–80, `category`, `activity` text, `met` numeric 1–25, `duration_min` int 1–1440, `notes` null, timestamps, `unique(id,user_id)` |
 | `fit_workouts` | `id`, `user_id`, `workout_on` date, `start_time` time null, `category` ('gym','cardio','yoga','running','swimming','cycling','team_sport','walking','other'), `activity` text (key trong `src/data/activities.ts` hoặc tự do), `title` 1–80, `met` numeric 1–25, `duration_min` int 1–1440, `kcal` numeric ≥0, `status` ('planned','done') default 'done', `template_id` null (composite FK, SET NULL), `notes` null, timestamps; index `(user_id, workout_on)` |
@@ -38,11 +38,14 @@ composite FK `(x_id, user_id) → parent(id, user_id)`, trigger `public.set_upda
 | `fit_body_measurements` | `id`, `user_id`, `measured_on` date, `weight_kg`, `body_fat_pct`, `chest_cm`, `waist_cm`, `hip_cm`, `thigh_cm`, `arm_cm` (numeric null, ít nhất 1 cột khác null), `note`, timestamps, `unique(user_id, measured_on)` |
 | `fit_progress_photos` | `id`, `user_id`, `taken_on` date, `pose` ('front','side','back','other') default 'front', `storage_path` text, `note` null, `created_at` |
 | `fit_ai_usage` (PK `user_id, used_on`) | `count` int — chỉ ghi qua RPC |
+| `fit_meal_templates` = **Bữa mẫu** (000100) | `id`, `user_id`, `name` 1–80, `meal` (4 bữa) null, `items` jsonb **mảng 1–30 phần tử**, ≤32 KB, mỗi phần tử `{name, quantity, unit, grams, kcal, protein_g, carbs_g, fat_g, fiber_g, custom_food_id|null}` (giá trị TỔNG như một `fit_meal_entries`; `custom_food_id` trong JSON không phải FK, có thể đã bị xóa), `total_kcal` numeric ≥0, `use_count` int ≥0, `last_used_at` null, timestamps, `unique(id,user_id)`; index `(user_id, last_used_at desc nulls last)` |
 
 **RPC** (`security invoker`, chỉ `authenticated` được execute):
 - `fit_day_summary(p_date date) → jsonb` `{kcal_in, protein_g, carbs_g, fat_g, fiber_g, workout_kcal, water_ml, steps}`
 - `fit_range_summary(p_from date, p_to date) → table(day date, kcal_in, protein_g, carbs_g, fat_g, fiber_g, workout_kcal, water_ml, steps, weight_kg)` — mỗi ngày trong khoảng một dòng (generate_series), khoảng ≤ 366 ngày; `weight_kg` = số đo của đúng ngày đó hoặc null; `workout_kcal` chỉ tính `status='done'`.
 - `fit_ai_quota_consume(p_limit int default 40) → boolean` (`security definer`, `search_path=''`): tăng `fit_ai_usage` hôm nay của `auth.uid()`, trả false nếu vượt hạn mức.
+- `fit_mark_food_used(p_ids uuid[], p_meal text default null) → setof fit_custom_foods` (000100, invoker): `use_count+1`, `last_used_at=now()` nguyên tử cho các món của chính mình (≤100 id); `p_meal` khác null ⇒ thành `default_meal`. Service chỉ ghi các cột usage qua RPC này (`clean()` bỏ `use_count`/`last_used_at` khỏi insert/update).
+- `fit_mark_meal_template_used(p_id uuid) → setof fit_meal_templates` (000100, invoker): như trên cho bữa mẫu.
 
 **Storage**: bucket **private** `fitora`, 5 MB, `image/webp|jpeg|png`. Đường dẫn `<uid>/meals/<uuid>.webp`, `<uid>/progress/<uuid>.webp`.
 Policy chỉ trong thư mục của chính mình (giống `avatars`). Hiển thị bằng `createSignedUrl` (1 giờ).
@@ -104,11 +107,20 @@ Bottom nav (5): Hôm nay `/` · Nhật ký `/diary` · **Scan** (nút tròn nổ
 
 ### Shared API (Foundation tạo, mọi người import)
 - `src/lib/supabase.ts`: `export const supabase`.
-- `src/types/db.ts`: kiểu dòng cho mọi bảng ở §2 (`FitProfile`, `MealEntry`, `NewMealEntry`, `CustomFood`, `Workout`, `WorkoutTemplate`, `DailyLog`, `BodyMeasurement`, `ProgressPhoto`, `DaySummary`, `RangeSummaryRow`, `MealType`, `Goal`, `GoalPace`, `ActivityLevel`, `WorkoutCategory`, `Sex`), và `AiDish`, `AiScanResponse`.
+- `src/types/db.ts`: kiểu dòng cho mọi bảng ở §2 (`FitProfile`, `MealEntry`, `NewMealEntry`, `CustomFood` (+ `CustomFoodSource`, `CUSTOM_FOOD_SOURCE_LABELS`), `NewCustomFood`, `CustomFoodPatch` (không gồm `use_count`/`last_used_at`), `MealTemplate`, `MealTemplateItem`, `MealTemplatePatch`, `Workout`, `WorkoutTemplate`, `DailyLog`, `BodyMeasurement`, `ProgressPhoto`, `DaySummary`, `RangeSummaryRow`, `MealType`, `Goal`, `GoalPace`, `ActivityLevel`, `WorkoutCategory`, `Sex`), và `AiDish`, `AiScanResponse`.
 - `src/services/*.ts` — CRUD mỏng, ném `Error` có message tiếng Việt:
   - `profile.ts`: `getSharedProfile()`, `getFitProfile()`, `upsertFitProfile(patch)`
-  - `meals.ts`: `listMeals(date)`, `addMealEntries(entries: NewMealEntry[])`, `updateMeal(id, patch)`, `deleteMeal(id)`, `uploadMealPhoto(blob) → path`
-  - `foods.ts`: `listCustomFoods()`, `createCustomFood`, `updateCustomFood`, `deleteCustomFood`
+  - `meals.ts`: `listMeals(date)`, `addMealEntries(entries: NewMealEntry[])`, `updateMeal(id, patch)`, `deleteMeal(id)`, `uploadMealPhoto(blob) → path`, `schedulePhotoCleanup(path)` / `photoInUse(path)` — ảnh món chỉ bị xóa sau 15 s khi không còn `fit_meal_entries` **và** `fit_custom_foods` nào trỏ tới (món đã lưu giữ ảnh scan).
+  - `foods.ts` — **món đã lưu ("nhớ, không làm lại")**. Feature KHÔNG query `fit_custom_foods` trực tiếp:
+    - `listCustomFoods()` — sắp xếp `compareByUse`: `last_used_at` desc (chưa dùng xuống cuối) → `use_count` desc → tên (collation vi).
+    - `createCustomFood(food)`, `updateCustomFood(id, patch)`, `deleteCustomFood(id)` (entry đã ghi giữ nguyên số liệu, `custom_food_id`→null; ảnh dọn sau nếu không còn ai dùng).
+    - `markCustomFoodUsed(id | ids, meal?) → CustomFood[]` — best-effort, KHÔNG bao giờ throw (thống kê không được làm hỏng một lần ghi đã thành công).
+    - `findCustomFoodByName(name, foods?)` — so khớp bỏ dấu/hoa thường/dấu câu (`normalizeFoodName`), trùng thì lấy món dùng nhiều nhất.
+    - `saveScannedDishes(dishes, {photoPath?, meal?, markUsed?=true}) → CustomFood[]` (cùng thứ tự `dishes`) — gọi khi người dùng **xác nhận lưu kết quả scan**: upsert theo tên chuẩn hóa (món đã có ⇒ cập nhật số liệu, giữ ảnh cũ nếu có; món mới ⇒ `source 'ai'` + ảnh scan), tính là 1 lần dùng (đừng gọi `markCustomFoodUsed` lần nữa). Dùng `id` trả về làm `custom_food_id` cho các entry vừa ghi.
+    - `saveEntryAsFood(entry)` — "Lưu món này" từ nhật ký (`source 'meal'`), gắn `custom_food_id` cho entry.
+    - `logCustomFood(food, date, meal, servings=1) → MealEntry` — **ghi lại 1 chạm**: entry `source 'custom'`, dùng chung ảnh của món, rồi tăng usage + nhớ `default_meal`.
+    - Thuần (không request): `per100FromTotals(totals)` (tổng → 1 khẩu phần của đơn vị, vd. "1,5 bát 750 g" ⇒ "1 bát" 500 g + giá trị /100 g; đơn vị g/ml ⇒ "1 phần"; thiếu khối lượng ⇒ nâng lên mức nhỏ nhất để /100 g nằm trong giới hạn DB, kcal 1 khẩu phần giữ nguyên), `customFoodEntry(food, date, meal, servings)`, `servingUnitOf(label)`, `normalizeFoodName`, `compareByUse`.
+  - `mealTemplates.ts` — **Bữa mẫu**: `listMealTemplates()` (thứ tự `compareByUse`), `createMealTemplate(name, meal|null, items)`, `updateMealTemplate(id, {name?, meal?, items?})` (`total_kcal` luôn tính lại), `deleteMealTemplate(id)`, `logMealTemplate(template, date, meal?) → MealEntry[]` (bữa mặc định = `template.meal`, thiếu cả hai ⇒ lỗi "Hãy chọn bữa ăn."; item gắn món còn tồn tại ⇒ `source 'custom'` + ảnh món, món đã xóa ⇒ `'manual'`; tăng usage bữa mẫu + món, không đổi `default_meal` của món). Thuần: `templateItemsFromEntries(entries)` ("Lưu bữa này làm bữa mẫu"), `templateEntries`, `cleanTemplateItems`, `templateTotalKcal`, `MAX_TEMPLATE_ITEMS = 30`.
   - `workouts.ts`: `listWorkouts(from,to)`, `addWorkout`, `updateWorkout`, `deleteWorkout`, `listTemplates`, `createTemplate`, `deleteTemplate`
   - `daily.ts`: `getDailyLog(date)`, `setWater(date, ml)`, `addWater(date, deltaMl)`, `setSteps(date, steps)`
   - `body.ts`: `listMeasurements(from?,to?)`, `upsertMeasurement`, `deleteMeasurement`, `listPhotos()`, `uploadProgressPhoto(blob, meta)`, `deletePhoto(id)`, `signedPhotoUrl(path)`

@@ -2,6 +2,7 @@ export * from './errors';
 export * from './profile';
 export * from './meals';
 export * from './foods';
+export * from './mealTemplates';
 export * from './workouts';
 export * from './daily';
 export * from './body';

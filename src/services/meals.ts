@@ -91,30 +91,41 @@ export async function updateMeal(id: string, patch: MealEntryPatch): Promise<Mea
  */
 export const PHOTO_CLEANUP_DELAY_MS = 15_000;
 
-/** True when some entry still points at `path`. A failed check counts as "in use": an orphan file is harmless, a lost photo is not. */
-async function photoInUse(path: string): Promise<boolean> {
-  const { count, error } = await db().from('fit_meal_entries').select('id', { count: 'exact', head: true }).eq('photo_path', path);
-  return !!error || !!count;
+/** Tables whose `photo_path` may point at a meal photo (a saved scanned dish keeps the scan photo). */
+const PHOTO_TABLES = ['fit_meal_entries', 'fit_custom_foods'] as const;
+
+/**
+ * True when some meal entry OR saved food still points at `path`. A failed check counts
+ * as "in use": an orphan file is harmless, a lost photo is not.
+ */
+export async function photoInUse(path: string): Promise<boolean> {
+  const results = await Promise.all(
+    PHOTO_TABLES.map((t) => db().from(t).select('id', { count: 'exact', head: true }).eq('photo_path', path)),
+  );
+  return results.some(({ count, error }) => !!error || !!count);
 }
 
 /**
- * Deletes the entry. Its photo is removed only after PHOTO_CLEANUP_DELAY_MS and only if
- * no entry uses it by then (multi-dish scans share one photo; an undo restores the row).
+ * Removes a meal photo after PHOTO_CLEANUP_DELAY_MS, only if nothing references it by then
+ * (multi-dish scans share one photo, a saved food may keep it, an undo restores the row).
  * If the app closes before then the file stays as a harmless orphan.
  */
+export function schedulePhotoCleanup(path: string | null | undefined): void {
+  if (!path) return;
+  setTimeout(() => {
+    photoInUse(path)
+      .then((used) => (used ? undefined : removeImages([path])))
+      .catch(() => {});
+  }, PHOTO_CLEANUP_DELAY_MS);
+}
+
+/** Deletes the entry; its photo is cleaned up later by schedulePhotoCleanup. */
 export async function deleteMeal(id: string): Promise<void> {
   const row = await run(
     db().from('fit_meal_entries').delete().eq('id', id).select('photo_path').maybeSingle<{ photo_path: string | null }>(),
     'Không xóa được món ăn.',
   );
-  const path = row?.photo_path;
-  if (path) {
-    setTimeout(() => {
-      photoInUse(path)
-        .then((used) => (used ? undefined : removeImages([path])))
-        .catch(() => {});
-    }, PHOTO_CLEANUP_DELAY_MS);
-  }
+  schedulePhotoCleanup(row?.photo_path);
 }
 
 /** Upload a (compressed) meal photo → storage path '<uid>/meals/<uuid>.webp'. */

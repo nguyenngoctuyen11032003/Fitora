@@ -27,7 +27,6 @@ import { NumberField } from '@/components/ui/NumberField';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
-import { Logo } from '@/components/ui/Logo';
 import { useAuth } from '@/context/AuthContext';
 import { useProfile } from '@/context/ProfileContext';
 import { formatDayVi } from '@/lib/date';
@@ -219,7 +218,6 @@ export default function ProfilePage() {
 
       {/* About */}
       <footer className="mt-10 flex flex-col items-center gap-2 text-center">
-        <Logo size={36} />
         <p className="display text-[22px] text-text">Fitora</p>
         <p className="text-[13px] text-muted">Huấn luyện viên dinh dưỡng & thể hình AI</p>
         <p className="tabular flex items-center gap-1.5 text-[12px] text-muted">

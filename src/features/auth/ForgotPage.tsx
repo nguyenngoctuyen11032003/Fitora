@@ -38,7 +38,7 @@ export default function ForgotPage() {
     <AuthLayout
       eyebrow="Khôi phục"
       title={sent ? 'Đã gửi liên kết' : 'Quên mật khẩu'}
-      subtitle={sent ? undefined : 'Nhập email của bạn, Fitora sẽ gửi liên kết đặt lại mật khẩu (áp dụng cho cả Note_mytasks).'}
+      subtitle={sent ? undefined : 'Nhập email của bạn, Fitora sẽ gửi liên kết đặt lại mật khẩu.'}
       compact
       footer={
         <Link to="/login" className="inline-flex min-h-[44px] items-center font-bold text-gold hover:underline">

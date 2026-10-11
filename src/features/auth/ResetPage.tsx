@@ -40,7 +40,7 @@ export default function ResetPage() {
     try {
       await updatePassword(password);
       endRecovery();
-      toast.success('Đã đổi mật khẩu. Mật khẩu mới dùng cho cả Note_mytasks.');
+      toast.success('Đã đổi mật khẩu.');
       navigate('/', { replace: true });
     } catch (err) {
       setError(errorMessage(err));

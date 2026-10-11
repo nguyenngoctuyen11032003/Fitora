@@ -2,7 +2,6 @@ import clsx from 'clsx';
 import { ArrowUpRight, LogOut, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Logo } from '@/components/ui/Logo';
 import { Portal } from '@/components/ui/Portal';
 import { useFocusTrap } from '@/components/ui/useFocusTrap';
 import { useAuth } from '@/context/AuthContext';
@@ -17,7 +16,7 @@ export const MENU_LINKS: { to: string; label: string; hint: string }[] = [
   { to: '/progress', label: 'Tiến trình', hint: 'Báo cáo tuần / tháng' },
   { to: '/body', label: 'Cơ thể', hint: 'Cân nặng, số đo, ảnh' },
   { to: '/goals', label: 'Mục tiêu', hint: 'Calo & macro mỗi ngày' },
-  { to: '/profile', label: 'Hồ sơ', hint: 'Tài khoản dùng chung' },
+  { to: '/profile', label: 'Hồ sơ', hint: 'Thông tin & cài đặt' },
 ];
 
 export interface MenuOverlayProps {
@@ -67,8 +66,7 @@ export function MenuOverlay({ open, onClose }: MenuOverlayProps) {
         <div className="pointer-events-none absolute -bottom-32 -left-20 h-80 w-80 rounded-full bg-black/40 blur-[80px]" aria-hidden="true" />
 
         <div className="relative flex items-center justify-between px-5 pt-[calc(var(--safe-top)+12px)]">
-          <span className="flex items-center gap-2.5">
-            <Logo size={32} glow />
+          <span className="flex items-center">
             <span className="display text-[22px] text-white">Fitora</span>
           </span>
           <button type="button" onClick={onClose} aria-label="Đóng menu" className="glass circle text-white" data-autofocus>
@@ -130,7 +128,6 @@ export function MenuOverlay({ open, onClose }: MenuOverlayProps) {
             <LogOut className="h-5 w-5" aria-hidden="true" />
             {busy ? 'Đang đăng xuất…' : 'Đăng xuất'}
           </button>
-          <p className="mt-3 text-center text-[11px] text-white/50">Tài khoản dùng chung với Note_mytasks</p>
         </div>
       </div>
     </Portal>

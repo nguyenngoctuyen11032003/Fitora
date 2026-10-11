@@ -2,7 +2,6 @@ import clsx from 'clsx';
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Avatar } from '@/components/ui/Avatar';
-import { Logo } from '@/components/ui/Logo';
 import { useProfile } from '@/context/ProfileContext';
 import { greetingVi } from '@/lib/date';
 import { MenuOverlay } from './MenuOverlay';
@@ -44,7 +43,6 @@ export function TopBar({ eyebrow, title, right, className }: TopBarProps) {
           <p className="eyebrow truncate !text-[10px]">{eyebrow ?? greetingVi()}</p>
           <p className="mt-0.5 truncate text-[17px] font-bold tracking-[-0.02em] text-text">{title ?? displayName}</p>
         </div>
-        <Logo size={28} className="mr-1 opacity-95" />
         {right}
         <MenuButton onClick={() => setMenu(true)} open={menu} />
       </div>
