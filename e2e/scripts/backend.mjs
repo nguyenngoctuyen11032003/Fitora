@@ -53,7 +53,8 @@ if (cmd === 'start') {
     shell: true, stdio: 'inherit',
   });
   if (r.status !== 0) process.exit(r.status ?? 1);
-  spawnSync(`${CLI} db reset --local --workdir "${WORKDIR}" --yes`, { shell: true, stdio: 'inherit' });
+  const reset = spawnSync(`${CLI} db reset --local --workdir "${WORKDIR}" --yes`, { shell: true, stdio: 'inherit' });
+  if (reset.status !== 0) process.exit(reset.status ?? 1); // migration lỗi ⇒ dừng sớm (CI)
   const { apiUrl } = localEnv();
   console.log(`Local Supabase sẵn sàng: ${apiUrl}`);
 } else if (cmd === 'stop') {

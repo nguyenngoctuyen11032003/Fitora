@@ -27,8 +27,11 @@ jobs:
   build:
     name: Build site
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: read # configure-pages đọc cấu hình Pages site
     env:
       VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
       VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
@@ -42,8 +45,13 @@ jobs:
 
       - run: npm ci
 
+      # --strict: thiếu VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY → fail ngay, không deploy bản build rỗng.
       - name: Chặn secret lọt vào biến VITE_*
         run: node .github/scripts/check-public-env.mjs --strict
+
+      # Fail sớm, rõ ràng nếu Pages chưa bật (Settings → Pages → Source = "GitHub Actions").
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
 
       - run: npm run build
 
@@ -54,7 +62,7 @@ jobs:
   pages:
     name: Deploy to GitHub Pages
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       pages: write
       id-token: write

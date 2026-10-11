@@ -62,7 +62,11 @@ Cả hai workflow chạy `.github/scripts/check-public-env.mjs`, chặn build n�
 key hoặc có biến `VITE_*` trông giống secret.
 
 Ứng dụng dùng **HashRouter** (`#/diary`) vì GitHub Pages không rewrite SPA; liên kết email dùng query string
-(`?code=…`, `?token_hash=…&type=…`) nên không đụng hash route.
+(`?code=…`, `?token_hash=…&type=…`) nên không đụng hash route. `public/404.html` chuyển link dạng đường dẫn
+(`/<repo>/diary`) sang `/<repo>/#/diary`.
+
+Sau khi đặt biến / bật Pages, chạy lại: `gh workflow run deploy.yml` (hoặc Actions → Deploy → Run workflow).
+Workflow fail sớm nếu thiếu biến `VITE_*` (bước kiểm tra env) hoặc Pages chưa bật (bước `configure-pages`).
 
 ## Cấu trúc
 

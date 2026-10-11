@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Fitora</title>
+    <script>
+      // GitHub Pages fallback. The app uses HashRouter, so a path-style link such as
+      // /Fitora/diary would 404 here; redirect it to /Fitora/#/diary (query kept).
+      (function () {
+        var l = window.location;
+        var parts = l.pathname.split('/').filter(Boolean);
+        var onProjectSite = /\.github\.io$/i.test(l.hostname) && parts.length > 0;
+        var base = onProjectSite ? '/' + parts.shift() + '/' : '/';
+        var route = parts.join('/');
+        l.replace(base + (route ? '#/' + route + l.search : l.search) + (route ? '' : l.hash));
+      })();
+    </script>
+  </head>
+  <body style="background:#120906;color:#f5ebe6;font-family:system-ui,sans-serif">
+    <noscript><a href="./" style="color:inherit">Fitora</a></noscript>
+  </body>
+</html>

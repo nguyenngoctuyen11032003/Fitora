@@ -1,4 +1,6 @@
 # Kiểm tra mọi Pull Request (và được deploy.yml gọi lại trước khi deploy).
+# Job web: typecheck · unit test · build. Job e2e: Playwright trên Supabase local
+# (caller có thể tắt bằng `with: { skip_e2e: true }`).
 # Không cần secret: build chỉ dùng biến public VITE_* (Repository Variables).
 name: CI
 
@@ -6,6 +8,11 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      skip_e2e:
+        description: Bỏ qua job e2e (Playwright + Supabase local)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,7 +24,7 @@ concurrency:
 jobs:
   web:
     name: Typecheck · test · build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
@@ -42,3 +49,66 @@ jobs:
         run: npm test
 
       - run: npm run build
+
+  # Playwright e2e trên Supabase LOCAL (Docker) — không bao giờ chạm project hosted.
+  # Schema lấy từ repo public Note_mytasks (supabase/migrations). backend.mjs tìm
+  # backend ở e2e/../../Note_mytasks ⇒ checkout 2 repo cạnh nhau trong workspace.
+  e2e:
+    name: E2E (Playwright · Supabase local)
+    if: ${{ !inputs.skip_e2e }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: Fitora/e2e
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: Fitora
+
+      - name: Checkout backend (Note_mytasks)
+        uses: actions/checkout@v7
+        with:
+          repository: nguyenngoctuyen11032003/Note_mytasks
+          ref: main
+          path: Note_mytasks
+          sparse-checkout: supabase
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            Fitora/package-lock.json
+            Fitora/e2e/package-lock.json
+
+      - name: npm ci (app)
+        run: npm ci
+        working-directory: Fitora
+
+      - name: npm ci (e2e)
+        run: npm ci
+
+      - name: Cài Chromium cho Playwright
+        run: npx playwright install --with-deps chromium
+
+      # start + db reset ⇒ áp toàn bộ migrations theo thứ tự trên DB trống.
+      - name: Khởi động Supabase local
+        run: npm run backend:start
+
+      - name: Playwright
+        run: npm test
+
+      - name: Lưu báo cáo Playwright
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            Fitora/e2e/playwright-report
+            Fitora/e2e/test-results
+          retention-days: 7
+
+      - name: Dừng Supabase local
+        if: ${{ always() }}
+        run: npm run backend:stop
