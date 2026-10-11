@@ -1,14 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import type { BodyMeasurement, ProgressPhoto } from '@/types/db';
+import { computePlan, draftToPatch, profileToDraft } from '@/features/onboarding/logic';
+import type { BodyMeasurement, FitProfile, ProgressPhoto } from '@/types/db';
 import {
+  defaultChartRange,
   deltaTone,
   fieldDelta,
   groupByMonth,
   groupByWeek,
   hasAnyMetric,
+  latestValue,
+  METRIC_RANGES,
+  movingAverage,
+  rangeError,
+  waistToHeight,
+  weightJump,
   num,
   orderPair,
+  planRefresh,
   sortAsc,
+  targetStatus,
   toggleSelection,
   weightOn,
   weightSeries,
@@ -163,5 +173,160 @@ describe('hasAnyMetric', () => {
   it('needs at least one value', () => {
     expect(hasAnyMetric({})).toBe(false);
     expect(hasAnyMetric({ weight_kg: null, arm_cm: 30 })).toBe(true);
+  });
+});
+
+describe('deltaTone by goal for circumferences', () => {
+  it('rewards bigger chest / arm / thigh when building muscle', () => {
+    expect(deltaTone('arm_cm', 0.5, 'gain')).toBe('good');
+    expect(deltaTone('chest_cm', -1, 'gain')).toBe('bad');
+    expect(deltaTone('thigh_cm', 1, 'recomp')).toBe('good');
+    expect(deltaTone('arm_cm', 1, 'lose')).toBe('neutral');
+  });
+  it('does not punish a bigger waist on a gain goal', () => {
+    expect(deltaTone('waist_cm', 1, 'gain')).toBe('neutral');
+    expect(deltaTone('waist_cm', 1, 'lose')).toBe('bad');
+    expect(deltaTone('hip_cm', -2, 'lose')).toBe('neutral');
+  });
+});
+
+describe('targetStatus', () => {
+  it('counts the remaining kilos in the goal direction', () => {
+    expect(targetStatus(76.6, 70, 'lose', 78)).toEqual({ reached: false, remaining: 6.6, direction: 'down', pct: 0.18 });
+    expect(targetStatus(60, 65, 'gain', 58)).toEqual({ reached: false, remaining: 5, direction: 'up', pct: 0.29 });
+  });
+  it('treats going past the target in the goal direction as reached', () => {
+    expect(targetStatus(68.4, 70, 'lose', 78)?.reached).toBe(true);
+    expect(targetStatus(68.4, 70, 'lose', 78)?.pct).toBe(1);
+    expect(targetStatus(66, 65, 'gain', 58)?.reached).toBe(true);
+    expect(targetStatus(70.02, 70, 'lose', null)?.reached).toBe(true);
+  });
+  it('uses a ±1 kg band for maintain / recomp', () => {
+    expect(targetStatus(70.8, 70, 'maintain', null)?.reached).toBe(true);
+    expect(targetStatus(72, 70, 'maintain', null)).toEqual({ reached: false, remaining: 2, direction: 'down', pct: null });
+  });
+  it('returns null without a current weight or a target', () => {
+    expect(targetStatus(null, 70, 'lose', 78)).toBeNull();
+    expect(targetStatus(70, null, 'lose', 78)).toBeNull();
+  });
+  it('clamps progress when the weight moved the wrong way', () => {
+    expect(targetStatus(79, 70, 'lose', 78)?.pct).toBe(0);
+  });
+});
+
+describe('defaultChartRange', () => {
+  it('keeps 3 months when there is enough recent data', () => {
+    expect(defaultChartRange([m('2026-10-01', { weight_kg: 71 }), m('2026-10-05', { weight_kg: 70 })], '2026-10-09')).toBe('90');
+  });
+  it('widens the window when the last 3 months have fewer than 2 weigh-ins', () => {
+    expect(defaultChartRange([m('2026-03-01', { weight_kg: 74 }), m('2026-10-05', { weight_kg: 70 })], '2026-10-09')).toBe('365');
+    expect(defaultChartRange([m('2024-03-01', { weight_kg: 74 }), m('2024-04-05', { weight_kg: 70 })], '2026-10-09')).toBe('all');
+    expect(defaultChartRange([], '2026-10-09')).toBe('90');
+  });
+});
+
+describe('planRefresh', () => {
+  const TODAY = new Date(2026, 9, 11);
+  const base = {
+    user_id: 'u', sex: 'male', birth_date: '1996-01-15', height_cm: 172, activity_level: 'moderate', goal: 'lose', goal_pace: 'medium',
+    start_weight_kg: 78, target_weight_kg: 70, calorie_target: 0, protein_g: 0, carbs_g: 0, fat_g: 0, macro_custom: false,
+    water_target_ml: 2700, step_target: 10000, onboarded_at: 'x', created_at: '', updated_at: '',
+  } as FitProfile;
+  // Saved exactly as /goals would have saved it at 78 kg.
+  const d78 = profileToDraft(base, 78, TODAY);
+  const saved = { ...base, ...draftToPatch(d78, computePlan(d78, TODAY)!) } as FitProfile;
+
+  it('no hint when the weight has not changed (plan is up to date)', () => {
+    expect(planRefresh(saved, 78, TODAY)).toBeNull();
+  });
+
+  it('ignores rounding noise from a small weigh-in change', () => {
+    expect(planRefresh(saved, 77.9, TODAY)).toBeNull();
+  });
+
+  it('suggests a refresh after a meaningful weight change', () => {
+    const r = planRefresh(saved, 72, TODAY);
+    expect(r).not.toBeNull();
+    expect(r!.from).toBe(saved.calorie_target);
+    expect(r!.to).toBeLessThan(saved.calorie_target!);
+  });
+
+  it('PostgREST numeric strings are handled', () => {
+    const asStrings = { ...saved, calorie_target: String(saved.calorie_target), protein_g: String(saved.protein_g) } as unknown as FitProfile;
+    expect(planRefresh(asStrings, 78, TODAY)).toBeNull();
+  });
+
+  it('never for a manual plan, missing weight, or no profile', () => {
+    expect(planRefresh({ ...saved, macro_custom: true }, 60, TODAY)).toBeNull();
+    expect(planRefresh(saved, null, TODAY)).toBeNull();
+    expect(planRefresh(null, 72, TODAY)).toBeNull();
+    expect(planRefresh({ ...saved, onboarded_at: null } as unknown as FitProfile, 72, TODAY)).toBeNull();
+  });
+});
+
+describe('movingAverage', () => {
+  it('averages over a trailing 7-day time window, not a point count', () => {
+    const s = [
+      { date: '2026-10-01', weight: 70 },
+      { date: '2026-10-03', weight: 69 },
+      { date: '2026-10-07', weight: 68 }, // window 01..07 → 69
+      { date: '2026-10-08', weight: 67 }, // 01 drops out → (69+68+67)/3 = 68
+      { date: '2026-10-30', weight: 66 }, // alone in its window
+    ];
+    expect(movingAverage(s).map((p) => p.avg)).toEqual([70, 69.5, 69, 68, 66]);
+    expect(movingAverage([])).toEqual([]);
+  });
+  it('keeps the raw weight on each point', () => {
+    expect(movingAverage([{ date: '2026-10-01', weight: 70.4 }])[0]).toEqual({ date: '2026-10-01', weight: 70.4, avg: 70.4 });
+  });
+});
+
+describe('latestValue', () => {
+  it('returns the most recent non-null value of a key', () => {
+    const rows = [m('2026-10-05', { waist_cm: 80 }), m('2026-10-09', { weight_kg: 70 }), m('2026-10-01', { waist_cm: 82 })];
+    expect(latestValue(rows, 'waist_cm')).toEqual({ value: 80, date: '2026-10-05' });
+    expect(latestValue(rows, 'hip_cm')).toBeNull();
+  });
+});
+
+describe('waistToHeight', () => {
+  it('computes the ratio and bands', () => {
+    expect(waistToHeight(80, 170)).toEqual({ ratio: 0.47, key: 'healthy', label: 'Khỏe mạnh' });
+    expect(waistToHeight(90, 170)?.key).toBe('elevated');
+    expect(waistToHeight(110, 170)?.key).toBe('high');
+    expect(waistToHeight(60, 170)?.key).toBe('low');
+    expect(waistToHeight('85', '170')?.ratio).toBe(0.5);
+  });
+  it('is null on missing / invalid input', () => {
+    expect(waistToHeight(null, 170)).toBeNull();
+    expect(waistToHeight(80, 0)).toBeNull();
+  });
+});
+
+describe('weightJump', () => {
+  const rows = [m('2026-10-01', { weight_kg: 70 }), m('2026-10-08', { weight_kg: 69.5 }), m('2026-10-10', { waist_cm: 80 })];
+  it('flags an implausible change vs the nearest other weigh-in', () => {
+    expect(weightJump(rows, '2026-10-09', 7)).toEqual({ diff: -62.5, date: '2026-10-08', weight: 69.5 });
+    expect(weightJump(rows, '2026-10-09', 73)).toEqual({ diff: 3.5, date: '2026-10-08', weight: 69.5 });
+  });
+  it('allows normal day-to-day drift and longer-term change', () => {
+    expect(weightJump(rows, '2026-10-09', 71)).toBeNull(); // +1.5 in 1 day
+    expect(weightJump(rows, '2026-10-29', 66)).toBeNull(); // −3.5 in 21 days (allowed 5.15)
+  });
+  it('ignores the same day (editing) and far-away / missing data', () => {
+    expect(weightJump(rows, '2026-10-08', 90)?.date).toBe('2026-10-01');
+    expect(weightJump([m('2026-10-08', { weight_kg: 69.5 })], '2026-10-08', 90)).toBeNull();
+    expect(weightJump(rows, '2027-03-01', 90)).toBeNull();
+    expect(weightJump(rows, '2026-10-09', null)).toBeNull();
+  });
+});
+
+describe('rangeError', () => {
+  it('validates against realistic ranges with a decimal comma message', () => {
+    expect(rangeError('weight_kg', 68.5)).toBeUndefined();
+    expect(rangeError('weight_kg', null)).toBeUndefined();
+    expect(rangeError('weight_kg', 685)).toBe('Từ 20 đến 400');
+    expect(rangeError('arm_cm', 120)).toBe(`Từ ${METRIC_RANGES.arm_cm[0]} đến ${METRIC_RANGES.arm_cm[1]}`);
+    expect(rangeError('body_fat_pct', 1)).toBeDefined();
   });
 });

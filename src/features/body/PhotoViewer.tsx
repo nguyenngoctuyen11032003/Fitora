@@ -41,31 +41,60 @@ export function PhotoViewer({ photos, index, urls, rows, onIndex, onDelete, onCo
     if (n >= 0 && n < photos.length) onIndex(n);
   };
 
+  const goRef = useRef(go);
+  goRef.current = go;
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
       // photos are newest first → "next" in time = left
-      if (e.key === 'ArrowRight') go(1);
-      if (e.key === 'ArrowLeft') go(-1);
+      if (e.key === 'ArrowRight') goRef.current(1);
+      else if (e.key === 'ArrowLeft') goRef.current(-1);
+      else return;
+      e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  });
+  }, [open]);
+
+  // Warm the neighbours so swiping shows the next photo instantly.
+  useEffect(() => {
+    if (index === null) return;
+    for (const i of [index - 1, index + 1]) {
+      const u = photos[i] && urls[photos[i].storage_path];
+      if (u) {
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = u;
+      }
+    }
+  }, [index, photos, urls]);
 
   if (!open || index === null) return null;
   const p = photos[index];
   const url = urls[p.storage_path];
   const w = weightOn(rows, p.taken_on, 3);
 
-  const down = (e: RPointerEvent) => {
-    if ((e.target as HTMLElement).closest('button')) return;
+  const down = (e: RPointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('button') || (e.pointerType === 'mouse' && e.button !== 0)) return;
     start.current = { x: e.clientX, y: e.clientY };
   };
-  const move = (e: RPointerEvent) => {
-    if (start.current) setDx(e.clientX - start.current.x);
+  const move = (e: RPointerEvent<HTMLDivElement>) => {
+    if (!start.current) return;
+    const mx = e.clientX - start.current.x;
+    const my = e.clientY - start.current.y;
+    // Mostly vertical → it's a scroll / pull, not a swipe.
+    if (!dx && Math.abs(my) > Math.abs(mx) && Math.abs(my) > 10) {
+      start.current = null;
+      return;
+    }
+    if (Math.abs(mx) > 6 && !e.currentTarget.hasPointerCapture?.(e.pointerId)) e.currentTarget.setPointerCapture?.(e.pointerId);
+    // Rubber-band at the ends.
+    const atEnd = (mx > 0 && index === 0) || (mx < 0 && index === photos.length - 1);
+    setDx(atEnd ? mx / 3 : mx);
   };
   const up = () => {
-    if (!start.current) return;
+    if (!start.current) return setDx(0);
     start.current = null;
     if (dx < -60) go(1);
     else if (dx > 60) go(-1);

@@ -24,6 +24,8 @@ import { PhotoViewer } from './PhotoViewer';
 import { usePhotoUrls } from './usePhotoUrls';
 
 type Tab = 'measure' | 'photos';
+/** Source files above this are refused before decoding (would stall low-end phones). */
+const MAX_SOURCE_BYTES = 30 * 1024 * 1024;
 
 export default function BodyPage() {
   const toast = useToast();
@@ -40,7 +42,7 @@ export default function BodyPage() {
   const m = useAsync(() => listMeasurements(), []);
   const ph = useAsync(() => listPhotos(), []);
   const rows = useMemo(() => sortAsc(m.data ?? []), [m.data]);
-  const photos = ph.data ?? [];
+  const photos = useMemo(() => ph.data ?? [], [ph.data]);
   const lastWeight = useMemo(() => {
     for (let i = rows.length - 1; i >= 0; i--) {
       const w = num(rows[i].weight_kg);
@@ -49,7 +51,7 @@ export default function BodyPage() {
     return null;
   }, [rows]);
   const paths = useMemo(() => (tab === 'photos' ? photos.map((p) => p.storage_path) : []), [tab, photos]);
-  const { urls } = usePhotoUrls(paths);
+  const { urls, error: urlError, retry: retryUrls } = usePhotoUrls(paths);
 
   // ---- measurements
   const [sheet, setSheet] = useState<{ open: boolean; editing: BodyMeasurement | null }>({ open: false, editing: null });
@@ -100,6 +102,10 @@ export default function BodyPage() {
       toast.error('Hãy chọn một tệp ảnh.');
       return;
     }
+    if (file.size > MAX_SOURCE_BYTES) {
+      toast.error(`Ảnh quá lớn (${Math.round(file.size / 1024 / 1024)} MB) — hãy chọn ảnh dưới ${MAX_SOURCE_BYTES / 1024 / 1024} MB.`);
+      return;
+    }
     setCompressing(true);
     try {
       const c = await compressImage(file, { maxSide: 1440, quality: 0.84 });
@@ -121,9 +127,11 @@ export default function BodyPage() {
   const removePhoto = async (p: ProgressPhoto) => {
     try {
       await deletePhoto(p.id);
-      const next = photos.filter((x) => x.id !== p.id);
-      ph.setData(next);
+      // Filter the latest list (an upload may have landed while the delete was in flight).
+      const next = (ph.data ?? photos).filter((x) => x.id !== p.id);
+      ph.setData((prev) => (prev ?? []).filter((x) => x.id !== p.id));
       setSelected((s) => s.filter((id) => id !== p.id));
+      setPair((pr) => (pr && (pr[0].id === p.id || pr[1].id === p.id) ? null : pr));
       setViewer((i) => (i === null || !next.length ? null : Math.min(i, next.length - 1)));
       toast.success('Đã xóa ảnh');
     } catch (e) {
@@ -210,6 +218,8 @@ export default function BodyPage() {
           onOpen={(p) => setViewer(photos.findIndex((x) => x.id === p.id))}
           onCamera={() => camRef.current?.click()}
           onRetry={() => void ph.reload()}
+          urlError={urlError}
+          onRetryUrls={retryUrls}
         />
       )}
 

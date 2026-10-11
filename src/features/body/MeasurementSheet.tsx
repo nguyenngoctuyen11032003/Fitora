@@ -11,19 +11,10 @@ import { formatKg, formatNumber } from '@/lib/format';
 import { deleteMeasurement, upsertMeasurement } from '@/services/body';
 import type { BodyMeasurement } from '@/types/db';
 import { BodyDiagram } from './BodyDiagram';
-import { CIRCUMFERENCES, hasAnyMetric, num, type CircKey, type MetricKey } from './lib';
+import { CIRCUMFERENCES, hasAnyMetric, METRIC_RANGES, num, rangeError, weightJump, type CircKey, type MetricKey } from './lib';
 
 type Values = Record<MetricKey, number | null>;
 const EMPTY: Values = { weight_kg: null, body_fat_pct: null, chest_cm: null, waist_cm: null, hip_cm: null, thigh_cm: null, arm_cm: null };
-const RANGES: Record<MetricKey, [number, number]> = {
-  weight_kg: [20, 400],
-  body_fat_pct: [1, 75],
-  chest_cm: [20, 300],
-  waist_cm: [20, 300],
-  hip_cm: [20, 300],
-  thigh_cm: [10, 200],
-  arm_cm: [5, 150],
-};
 
 const fromRow = (r: BodyMeasurement | null | undefined): Values =>
   r
@@ -61,6 +52,8 @@ export function MeasurementSheet({ open, editing, rows, lastWeight, onClose, onS
   const [active, setActive] = useState<CircKey | null>(null);
   const [saving, setSaving] = useState(false);
   const [tried, setTried] = useState(false);
+  /** Id of the stored row whose values are in the form (editing row, or a day's row loaded on date change). */
+  const [source, setSource] = useState<string | null>(null);
 
   const byDate = useMemo(() => new Map(rows.map((r) => [r.measured_on, r])), [rows]);
   const existing = byDate.get(date) ?? null;
@@ -73,6 +66,7 @@ export function MeasurementSheet({ open, editing, rows, lastWeight, onClose, onS
     setDate(d);
     setVals(fromRow(base));
     setNote(base?.note ?? '');
+    setSource(base?.id ?? null);
     setTried(false);
     setActive(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -85,20 +79,27 @@ export function MeasurementSheet({ open, editing, rows, lastWeight, onClose, onS
     if (row) {
       setVals(fromRow(row));
       setNote(row.note ?? '');
+      setSource(row.id);
+    } else if (source && source !== editing?.id) {
+      // The form shows another day's stored values → don't copy them onto an empty day.
+      setVals(fromRow(editing));
+      setNote(editing?.note ?? '');
+      setSource(editing?.id ?? null);
     }
-    // Moving an entry to an empty day keeps the typed values.
+    // Moving the edited entry (or freshly typed values) to an empty day keeps them.
   };
 
   const set = (k: MetricKey) => (v: number | null) => setVals((p) => ({ ...p, [k]: v }));
-  const errOf = (k: MetricKey) => {
-    const v = vals[k];
-    if (v === null) return undefined;
-    const [lo, hi] = RANGES[k];
-    return v < lo || v > hi ? `Từ ${lo} đến ${hi}` : undefined;
-  };
-  const invalid = (Object.keys(RANGES) as MetricKey[]).some((k) => errOf(k));
+  const errOf = (k: MetricKey) => rangeError(k, vals[k]);
+  const invalid = (Object.keys(METRIC_RANGES) as MetricKey[]).some((k) => errOf(k));
   const dateOk = isISODate(date) && date <= todayISO();
   const empty = !hasAnyMetric(vals);
+  // Soft warning only (typo like 6,85 → 68,5, or the wrong unit) — saving is still allowed.
+  const jump = useMemo(
+    () => (dateOk && !errOf('weight_kg') ? weightJump(rows, date, vals.weight_kg) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, date, dateOk, vals.weight_kg],
+  );
 
   const save = async () => {
     setTried(true);
@@ -108,10 +109,11 @@ export function MeasurementSheet({ open, editing, rows, lastWeight, onClose, onS
     }
     setSaving(true);
     try {
-      // Moving an edited entry to another day: delete the old day afterwards.
       const row = await upsertMeasurement({ measured_on: date, ...vals, note: note.trim() || null });
+      // Moving the edited entry to an EMPTY day: delete the old day afterwards. When the new day
+      // already had its own entry, the user edited that entry instead — keep the original day.
       let replacedId: string | undefined;
-      if (editing && editing.measured_on !== date && editing.id !== row.id) {
+      if (editing && !existing && editing.measured_on !== date && editing.id !== row.id) {
         await deleteMeasurement(editing.id).catch(() => {});
         replacedId = editing.id;
       }
@@ -161,17 +163,26 @@ export function MeasurementSheet({ open, editing, rows, lastWeight, onClose, onS
           {updatingOther && (
             <p className="flex items-start gap-2 rounded-2xl border border-[rgba(237,180,11,0.3)] bg-[rgba(237,180,11,0.08)] px-3 py-2.5 text-[13px] text-text/90">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
-              Ngày này đã có số đo — đã nạp lại để bạn cập nhật.
+              Ngày này đã có số đo — đã nạp lại để bạn cập nhật.{editing ? ` Số đo ngày ${formatDayVi(editing.measured_on, 'short')} giữ nguyên.` : ''}
             </p>
           )}
         </div>
 
         {/* Weight — the main number */}
         <section className="flex flex-col gap-2" aria-label="Cân nặng và mỡ">
-          <div className="grid grid-cols-[1.25fr_1fr] gap-3">
+          <div className="grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] gap-3">
             <NumberField label="Cân nặng" unit="kg" value={vals.weight_kg} onChange={set('weight_kg')} decimals={1} min={20} max={400} placeholder={lastWeight ? formatNumber(lastWeight, 1) : '—'} error={errOf('weight_kg')} />
-            <NumberField label="Mỡ cơ thể" unit="%" value={vals.body_fat_pct} onChange={set('body_fat_pct')} decimals={1} min={1} max={75} placeholder="—" error={errOf('body_fat_pct')} />
+            <NumberField label="Mỡ cơ thể" unit="%" value={vals.body_fat_pct} onChange={set('body_fat_pct')} decimals={1} min={2} max={75} placeholder="—" error={errOf('body_fat_pct')} />
           </div>
+          {jump && (
+            <p role="status" className="flex items-start gap-2 rounded-2xl border border-[rgba(237,180,11,0.3)] bg-[rgba(237,180,11,0.08)] px-3 py-2.5 text-[13px] text-text/90">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
+              <span>
+                Chênh <b className="tabular">{jump.diff > 0 ? '+' : '−'}{formatNumber(Math.abs(jump.diff), 1)} kg</b> so với {formatKg(jump.weight)} ngày{' '}
+                {formatDayVi(jump.date, 'short')} — kiểm tra lại số cân nhé.
+              </span>
+            </p>
+          )}
           {lastWeight !== null && vals.weight_kg === null && (
             <div>
               <Chip size="sm" onClick={() => set('weight_kg')(lastWeight)} className="!min-h-[36px] !px-3">

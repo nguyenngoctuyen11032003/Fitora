@@ -1,5 +1,5 @@
 import { ChevronsLeftRight, X } from 'lucide-react';
-import { useRef, useState, type KeyboardEvent, type PointerEvent as RPointerEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as RPointerEvent } from 'react';
 import { GlassButton } from '@/components/ui/GlassButton';
 import { Portal } from '@/components/ui/Portal';
 import { Segmented } from '@/components/ui/Segmented';
@@ -28,6 +28,11 @@ export function CompareView({ pair, urls, rows, goal, onClose }: CompareViewProp
   const box = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
   useFocusTrap(panel, !!pair, onClose);
+  const pairKey = pair ? `${pair[0].id}|${pair[1].id}` : '';
+  // A new pair starts centred.
+  useEffect(() => {
+    if (pairKey) setPos(50);
+  }, [pairKey]);
 
   if (!pair) return null;
   const [before, after] = orderPair(pair[0], pair[1]);
@@ -42,12 +47,16 @@ export function CompareView({ pair, urls, rows, goal, onClose }: CompareViewProp
     setPos(Math.min(100, Math.max(0, ((clientX - r.left) / r.width) * 100)));
   };
   const down = (e: RPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     dragging.current = true;
     e.currentTarget.setPointerCapture?.(e.pointerId);
     setFromX(e.clientX);
   };
   const move = (e: RPointerEvent) => dragging.current && setFromX(e.clientX);
-  const up = () => (dragging.current = false);
+  const up = (e: RPointerEvent<HTMLDivElement>) => {
+    dragging.current = false;
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  };
   const onKey = (e: KeyboardEvent) => {
     const step = e.shiftKey ? 10 : 2;
     if (e.key === 'ArrowLeft') setPos((p) => Math.max(0, p - step));

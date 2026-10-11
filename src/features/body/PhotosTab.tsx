@@ -27,9 +27,12 @@ export interface PhotosTabProps {
   onOpen: (p: ProgressPhoto) => void;
   onCamera: () => void;
   onRetry: () => void;
+  /** Signing the private image links failed (thumbnails stay blank). */
+  urlError?: unknown;
+  onRetryUrls?: () => void;
 }
 
-export function PhotosTab({ photos, urls, rows, loading, error, compare, selected, onToggleCompare, onSelect, onOpen, onCamera, onRetry }: PhotosTabProps) {
+export function PhotosTab({ photos, urls, rows, loading, error, compare, selected, onToggleCompare, onSelect, onOpen, onCamera, onRetry, urlError, onRetryUrls }: PhotosTabProps) {
   const [groupBy, setGroupBy] = useState<GroupBy>('month');
   const groups = useMemo(
     () => (groupBy === 'week' ? groupByWeek(photos, (p) => p.taken_on, todayISO()) : groupByMonth(photos, (p) => p.taken_on)),
@@ -89,6 +92,18 @@ export function PhotosTab({ photos, urls, rows, loading, error, compare, selecte
   return (
     <div className="flex flex-col gap-4">
       {privacy}
+
+      {urlError ? (
+        <div role="alert" className="flex items-center gap-3 rounded-2xl border border-[rgba(255,107,94,0.3)] bg-[rgba(255,107,94,0.08)] px-3.5 py-2.5 text-[13px] text-text/90">
+          <ImageOff className="h-4 w-4 shrink-0 text-[var(--danger-text)]" aria-hidden="true" />
+          <span className="flex-1">Không tải được ảnh xem trước — kiểm tra kết nối rồi thử lại.</span>
+          {onRetryUrls && (
+            <Button variant="secondary" size="sm" onClick={onRetryUrls} icon={<RefreshCw className="h-4 w-4" />}>
+              Thử lại
+            </Button>
+          )}
+        </div>
+      ) : null}
 
       <div className="flex items-center gap-2">
         <Segmented

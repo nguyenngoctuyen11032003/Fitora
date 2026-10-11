@@ -15,7 +15,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
 import { Avatar } from '@/components/ui/Avatar';
@@ -38,6 +38,7 @@ import { useAsync } from '@/lib/hooks';
 import { latestWeight } from '@/services/body';
 import { upsertFitProfile } from '@/services/profile';
 import { ACTIVITY_LABELS, GOAL_LABELS, type FitProfile } from '@/types/db';
+import { targetStatus } from '@/features/body/lib';
 import { version } from '../../../package.json';
 
 const PACE_LABELS: Record<string, string> = { slow: 'chậm', medium: 'vừa', fast: 'nhanh' };
@@ -67,9 +68,15 @@ export default function ProfilePage() {
     }
   };
 
-  const w = weight.data?.weight_kg != null ? Number(weight.data.weight_kg) : fit?.start_weight_kg != null ? Number(fit.start_weight_kg) : null;
+  // Latest weigh-in; before the first one, the start weight from onboarding. Nothing while loading
+  // (avoids flashing the start weight / a wrong BMI before the real latest weight arrives).
+  const measured = weight.data?.weight_kg != null ? Number(weight.data.weight_kg) : null;
+  const startW = fit?.start_weight_kg != null ? Number(fit.start_weight_kg) : null;
+  const w = measured ?? (weight.loading ? null : startW);
   const h = fit?.height_cm != null ? Number(fit.height_cm) : null;
   const bmi = w && h ? calcBMI(w, h) : null;
+  const targetW = fit?.target_weight_kg != null ? Number(fit.target_weight_kg) : null;
+  const toTarget = targetStatus(w, targetW, fit?.goal, startW);
   const age = fit?.birth_date ? calcAge(fit.birth_date) : null;
 
   return (
@@ -85,7 +92,7 @@ export default function ProfilePage() {
             {loading && !shared ? (
               <Skeleton width="70%" height={26} />
             ) : (
-              <h2 className="display truncate text-[28px] text-text">{displayName}</h2>
+              <h2 className="display line-clamp-2 break-words text-[28px] text-text">{displayName}</h2>
             )}
             <p className="mt-1.5 flex items-center gap-1.5 truncate text-[14px] text-muted">
               <Mail className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -107,22 +114,20 @@ export default function ProfilePage() {
       <GlassCard className="animate-fade-slide-up animate-delay-100">
         {fit?.calorie_target ? (
           <>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="eyebrow !text-[10px] text-gold">
-                  {fit.goal ? GOAL_LABELS[fit.goal] : 'Mục tiêu'}
-                  {fit.goal === 'lose' && fit.goal_pace ? ` · ${PACE_LABELS[fit.goal_pace]}` : ''}
-                </p>
-                <p className="mt-2 flex items-end gap-1.5">
-                  <span className="num text-[56px] text-gradient-gold">{formatNumber(fit.calorie_target)}</span>
-                  <span className="mb-1.5 text-[15px] font-bold text-muted">kcal/ngày</span>
-                </p>
-              </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="eyebrow min-w-0 !text-[10px] text-gold">
+                {fit.goal ? GOAL_LABELS[fit.goal] : 'Mục tiêu'}
+                {fit.goal === 'lose' && fit.goal_pace ? ` · ${PACE_LABELS[fit.goal_pace]}` : ''}
+              </p>
               <Link to="/goals" className="glass pill shrink-0 text-sm font-semibold" aria-label="Điều chỉnh mục tiêu">
                 <Pencil className="h-4 w-4" aria-hidden="true" />
                 Điều chỉnh
               </Link>
             </div>
+            <p className="mt-1 flex flex-wrap items-end gap-x-1.5">
+              <span className="num text-[56px] text-gradient-gold">{formatNumber(fit.calorie_target)}</span>
+              <span className="mb-1.5 text-[15px] font-bold text-muted">kcal/ngày</span>
+            </p>
             <MacroBar
               variant="stacked"
               protein_g={fit.protein_g ?? 0}
@@ -131,13 +136,23 @@ export default function ProfilePage() {
               className="mt-4"
             />
             <dl className="mt-4 grid grid-cols-3 gap-2 border-t border-line pt-4 text-center">
-              <Stat label="Hiện tại" value={w ? formatKg(w) : '—'} />
-              <Stat label="Mục tiêu" value={fit.target_weight_kg ? formatKg(Number(fit.target_weight_kg)) : '—'} />
               <Stat
-                label="BMI"
-                value={bmi ? formatNumber(bmi, 1) : '—'}
-                sub={bmi ? bmiCategory(bmi).label : undefined}
+                label="Hiện tại"
+                value={w ? formatKg(w) : '—'}
+                sub={measured !== null && weight.data ? shortDay(weight.data.measured_on) : w ? 'lúc bắt đầu' : undefined}
               />
+              <Stat
+                label="Mục tiêu"
+                value={targetW ? formatKg(targetW) : '—'}
+                sub={
+                  toTarget
+                    ? toTarget.reached
+                      ? 'đã đạt'
+                      : `còn ${toTarget.direction === 'down' ? 'giảm' : 'tăng'} ${formatNumber(toTarget.remaining, 1)} kg`
+                    : undefined
+                }
+              />
+              <Stat label="BMI" value={bmi ? formatNumber(bmi, 1) : '—'} sub={bmi ? `${bmiCategory(bmi).label} (châu Á)` : undefined} />
             </dl>
             {(h || age || fit.activity_level) && (
               <p className="mt-3 text-center text-[12px] text-muted">
@@ -289,6 +304,29 @@ function TargetRow({
   const [draft, setDraft] = useState<number | null>(value);
   const [busy, setBusy] = useState(false);
   const invalid = draft === null || draft < min || draft > max;
+  const dirty = editing && draft !== value;
+
+  // Unsaved edit → ask before closing / reloading the tab.
+  useEffect(() => {
+    if (!dirty) return;
+    const onUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [dirty]);
+
+  const onEditKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (busy) return;
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      setEditing(false);
+    } else if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
+      e.preventDefault();
+      void save();
+    }
+  };
 
   const open = () => {
     setDraft(value);
@@ -326,7 +364,7 @@ function TargetRow({
         )}
       </div>
       {editing && (
-        <div className="mt-3 flex flex-col gap-3 animate-fade-slide-down">
+        <div className="mt-3 flex flex-col gap-3 animate-fade-slide-down" onKeyDown={onEditKey}>
           <NumberField
             label={`Mục tiêu ${label.toLowerCase()}`}
             value={draft}
@@ -348,7 +386,7 @@ function TargetRow({
                 onClick={() => setDraft(p)}
                 aria-pressed={draft === p}
                 className={clsx(
-                  'tabular min-h-[40px] shrink-0 rounded-full border px-3.5 text-[13px] font-semibold transition-colors',
+                  'tabular min-h-[44px] shrink-0 rounded-full border px-3.5 text-[13px] font-semibold transition-colors',
                   draft === p ? 'border-[rgba(237,180,11,0.6)] bg-[rgba(237,180,11,0.15)] text-gold' : 'border-line bg-white/[0.04] text-text/85',
                 )}
               >
@@ -368,4 +406,10 @@ function TargetRow({
       )}
     </div>
   );
+}
+
+/** "Hôm nay" / "Hôm qua", else "9/10" — fits the narrow stat column. */
+function shortDay(date: string): string {
+  const rel = formatDayVi(date);
+  return rel.includes(',') ? formatDayVi(date, 'short') : rel;
 }

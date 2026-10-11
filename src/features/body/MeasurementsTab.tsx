@@ -1,6 +1,7 @@
 import clsx from 'clsx';
-import { ChevronRight, RefreshCw, Ruler, Scale, Target } from 'lucide-react';
+import { ChevronRight, Flame, RefreshCw, Ruler, Scale, Target } from 'lucide-react';
 import { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { BigNumber } from '@/components/ui/BigNumber';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -12,7 +13,7 @@ import { formatKg, formatNumber } from '@/lib/format';
 import { errorMessage } from '@/services/errors';
 import type { BodyMeasurement, FitProfile } from '@/types/db';
 import { DeltaBadge } from './DeltaBadge';
-import { CIRCUMFERENCES, deltaTone, fieldDelta, groupByMonth, num, weightStats } from './lib';
+import { CIRCUMFERENCES, deltaTone, fieldDelta, groupByMonth, latestValue, num, planRefresh, targetStatus, waistToHeight, weightStats, type WhtrKey } from './lib';
 import { WeightChart } from './WeightChart';
 
 const BMI_STYLE: Record<string, string> = {
@@ -20,6 +21,13 @@ const BMI_STYLE: Record<string, string> = {
   normal: 'text-ok border-[rgba(127,209,139,0.35)] bg-[rgba(127,209,139,0.1)]',
   overweight: 'text-gold border-[rgba(237,180,11,0.35)] bg-[rgba(237,180,11,0.1)]',
   obese: 'text-[var(--danger-text)] border-[rgba(255,107,94,0.35)] bg-[rgba(255,107,94,0.1)]',
+};
+
+const WHTR_STYLE: Record<WhtrKey, string> = {
+  low: BMI_STYLE.underweight,
+  healthy: BMI_STYLE.normal,
+  elevated: BMI_STYLE.overweight,
+  high: BMI_STYLE.obese,
 };
 
 export interface MeasurementsTabProps {
@@ -40,6 +48,18 @@ export function MeasurementsTab({ rows, loading, error, fit, onAdd, onEdit, onRe
   const goal = fit?.goal ?? null;
   const height = num(fit?.height_cm);
   const target = num(fit?.target_weight_kg);
+  const derived = useMemo(() => {
+    const bmi = stats.current !== null && height ? calcBMI(stats.current, height) : null;
+    const waist = latestValue(asc, 'waist_cm');
+    return {
+      bmi,
+      cat: bmi ? bmiCategory(bmi) : null,
+      whtr: waist ? waistToHeight(waist.value, height) : null,
+      waistDate: waist?.date ?? null,
+      toTarget: targetStatus(stats.current, target, goal, stats.start),
+      refresh: planRefresh(fit, stats.current),
+    };
+  }, [stats, height, asc, target, goal, fit]);
 
   if (loading && !rows.length) {
     return (
@@ -76,9 +96,7 @@ export function MeasurementsTab({ rows, loading, error, fit, onAdd, onEdit, onRe
     );
   }
 
-  const bmi = stats.current !== null && height ? calcBMI(stats.current, height) : null;
-  const cat = bmi ? bmiCategory(bmi) : null;
-  const toTarget = stats.current !== null && target !== null ? Math.round((target - stats.current) * 10) / 10 : null;
+  const { bmi, cat, whtr, waistDate, toTarget, refresh } = derived;
 
   return (
     <div className="flex flex-col gap-4">
@@ -116,8 +134,32 @@ export function MeasurementsTab({ rows, loading, error, fit, onAdd, onEdit, onRe
               {toTarget !== null && (
                 <span className="inline-flex min-h-[32px] items-center gap-1.5 rounded-full border border-line bg-white/[0.04] px-3 text-[13px] font-semibold text-text/85">
                   <Target className="h-3.5 w-3.5 text-gold" aria-hidden="true" />
-                  {Math.abs(toTarget) < 0.05 ? 'Đã đạt mục tiêu' : `Còn ${formatKg(Math.abs(toTarget))} tới ${formatNumber(target!, 1)}`}
+                  {toTarget.reached
+                    ? goal === 'maintain' || goal === 'recomp'
+                      ? `Trong mục tiêu ${formatKg(target)}`
+                      : `Đã đạt mục tiêu ${formatKg(target)}`
+                    : `Còn ${toTarget.direction === 'down' ? 'giảm' : 'tăng'} ${formatKg(toTarget.remaining)} tới ${formatKg(target)}`}
+                  {!toTarget.reached && toTarget.pct !== null && toTarget.pct > 0 && (
+                    <span className="tabular text-muted">· {Math.round(toTarget.pct * 100)}%</span>
+                  )}
                 </span>
+              )}
+              {whtr && (
+                <span
+                  className={clsx('inline-flex min-h-[32px] items-center gap-1.5 rounded-full border px-3 text-[13px] font-bold', WHTR_STYLE[whtr.key])}
+                  title={waistDate ? `Vòng eo ngày ${formatDayVi(waistDate, 'short')}` : undefined}
+                >
+                  Eo/cao <span className="tabular">{formatNumber(whtr.ratio, 2)}</span>
+                  <span className="font-semibold opacity-90">· {whtr.label}</span>
+                </span>
+              )}
+              {cat && cat.key !== 'normal' && (
+                <p className="w-full text-[12px] leading-relaxed text-muted">
+                  Theo ngưỡng BMI cho người châu Á: bình thường 18,5–22,9 · thừa cân 23–24,9 · béo phì từ 25.
+                </p>
+              )}
+              {whtr && (whtr.key === 'elevated' || whtr.key === 'high') && (
+                <p className="w-full text-[12px] leading-relaxed text-muted">Tỉ lệ vòng eo / chiều cao nên dưới 0,5 (eo dưới một nửa chiều cao).</p>
               )}
             </div>
           </>
@@ -128,6 +170,25 @@ export function MeasurementsTab({ rows, loading, error, fit, onAdd, onEdit, onRe
           </div>
         )}
       </GlassCard>
+
+      {refresh && (
+        <Link
+          to="/goals"
+          className="glass-card flex items-center gap-3 p-3.5 transition-colors hover:bg-white/[0.08] animate-fade-slide-up"
+        >
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-white/[0.06] text-gold">
+            <Flame className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="text-[14px] font-bold text-text">Cập nhật kế hoạch theo cân nặng mới</span>
+            <span className="text-[12px] leading-snug text-muted">
+              Mục tiêu hiện lưu <b className="tabular text-text/90">{formatNumber(refresh.from, 0)} kcal</b>, theo{' '}
+              {formatKg(stats.current)} nên là <b className="tabular text-text/90">{formatNumber(refresh.to, 0)} kcal</b>.
+            </span>
+          </span>
+          <ChevronRight className="h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+        </Link>
+      )}
 
       {stats.count > 0 && (
         <GlassCard className="animate-fade-slide-up animate-delay-100">
@@ -209,7 +270,7 @@ function HistoryRow({
             {fat !== null && (
               <span className="inline-flex items-center gap-1 text-[12px] text-muted">
                 · Mỡ <b className="tabular text-text/90">{formatNumber(fat, 1)}%</b>
-                <DeltaBadge delta={fieldDelta(rows, idx, 'body_fat_pct')} tone={deltaTone('body_fat_pct', fieldDelta(rows, idx, 'body_fat_pct'))} size="sm" />
+                <DeltaBadge delta={fieldDelta(rows, idx, 'body_fat_pct')} tone={deltaTone('body_fat_pct', fieldDelta(rows, idx, 'body_fat_pct'), goal)} size="sm" />
               </span>
             )}
           </div>
@@ -221,7 +282,7 @@ function HistoryRow({
                   <span key={c.key} className="inline-flex items-center gap-1 text-[12px] text-muted">
                     {c.label} <b className="tabular text-text/90">{formatNumber(num(row[c.key]), 1)}</b>
                     {dl !== null && Math.abs(dl) >= 0.05 && (
-                      <span className={clsx('tabular text-[11px] font-bold', deltaTone(c.key, dl) === 'good' ? 'text-ok' : deltaTone(c.key, dl) === 'bad' ? 'text-[var(--danger-text)]' : 'text-text/60')}>
+                      <span className={clsx('tabular text-[11px] font-bold', deltaTone(c.key, dl, goal) === 'good' ? 'text-ok' : deltaTone(c.key, dl, goal) === 'bad' ? 'text-[var(--danger-text)]' : 'text-text/60')}>
                         {dl > 0 ? '+' : '−'}
                         {formatNumber(Math.abs(dl), 1)}
                       </span>
