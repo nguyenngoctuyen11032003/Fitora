@@ -9,3 +9,11 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    # Major bumps (React 19, Router 7, Tailwind 4, TS 7…) need code migrations and
+    # are done by hand; minor/patch updates arrive as one grouped PR.
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
+    groups:
+      npm-minor-patch:
+        update-types: ['minor', 'patch']
