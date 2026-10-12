@@ -15,7 +15,7 @@ export interface LogoProps {
   label?: string;
 }
 
-/** Brand mark (figure + dumbbell + leaf + flame). */
+/** Brand mark (fork + flame + leaf + progress ring). */
 export function Logo({ size = 28, glow, wordmark, className, label }: LogoProps) {
   return (
     <span className={clsx('relative inline-flex shrink-0 items-center gap-2', className)}>
