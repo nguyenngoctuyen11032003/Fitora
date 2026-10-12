@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createAuthStorage } from './authPersistence';
 import { AUTH_STORAGE_KEY, SUPABASE_ANON_KEY, SUPABASE_URL, isConfigured } from './config';
 
 /**
@@ -21,6 +22,8 @@ export const supabase: SupabaseClient | null = isConfigured
         persistSession: true,
         detectSessionInUrl: true,
         storageKey: AUTH_STORAGE_KEY,
+        // "Duy trì đăng nhập 7 ngày" — localStorage with a deadline, or sessionStorage.
+        storage: createAuthStorage(AUTH_STORAGE_KEY),
       },
     })
   : null;

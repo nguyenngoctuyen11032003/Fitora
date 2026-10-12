@@ -3,7 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase';
-import { signOut as authSignOut, verifyEmailLink } from '@/services/auth';
+import { REMEMBER_DAYS, rememberDeadline } from '@/lib/authPersistence';
+import { expireSession, signOut as authSignOut, verifyEmailLink } from '@/services/auth';
 import { forgetSignedUrls } from '@/services/storage';
 import { linkErrorMessage, linkNeedsConfirm, readAuthRedirect } from './authLinks';
 
@@ -196,6 +197,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data.subscription.unsubscribe();
     };
   }, []);
+
+  // "Duy trì đăng nhập 7 ngày": end a remembered session at its deadline even if the
+  // app stays open. Timers stall while a phone sleeps, so re-check on wake/focus too.
+  const signedIn = Boolean(session);
+  useEffect(() => {
+    if (!signedIn) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let done = false;
+    const check = () => {
+      if (done) return;
+      const until = rememberDeadline();
+      if (until === null) return;
+      const left = until - Date.now();
+      clearTimeout(timer);
+      if (left > 0) {
+        timer = setTimeout(check, Math.min(left, 2 ** 31 - 1));
+        return;
+      }
+      done = true;
+      void expireSession().finally(() => {
+        setRecovery(false);
+        setSession(null);
+        forgetSignedUrls();
+        toastRef.current.show(`Phiên đăng nhập ${REMEMBER_DAYS} ngày đã hết hạn. Hãy đăng nhập lại.`, { kind: 'info' });
+        navRef.current('/login', { replace: true });
+      });
+    };
+    check();
+    const onWake = () => document.visibilityState === 'visible' && check();
+    document.addEventListener('visibilitychange', onWake);
+    window.addEventListener('focus', check);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onWake);
+      window.removeEventListener('focus', check);
+    };
+  }, [signedIn]);
 
   const signingOut = useRef<Promise<void> | null>(null);
   const signOut = useCallback(() => {

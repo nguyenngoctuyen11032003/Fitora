@@ -1,6 +1,7 @@
 // Supabase Auth wrapper — mirrors Note_mytasks/src/services/auth.js so both apps
 // behave identically on the shared account (same auth.users).
 import { appBaseUrl, MIN_PASSWORD } from '@/lib/config';
+import { setRememberPref } from '@/lib/authPersistence';
 import { db } from '@/lib/supabase';
 import { FitoraError, invalid, run, toFitoraError } from './errors';
 
@@ -16,13 +17,18 @@ function vPassword(password: string, strength = true): string {
   return password;
 }
 
-export async function signIn(email: string, password: string) {
-  return run(db().auth.signInWithPassword({ email: vEmail(email), password: vPassword(password, false) }));
+/** `remember`: keep the session for REMEMBER_DAYS on this device; otherwise only until the tab closes. */
+export async function signIn(email: string, password: string, remember = true) {
+  const e = vEmail(email);
+  const p = vPassword(password, false);
+  setRememberPref(remember); // must precede the call: supabase-js saves the session inside it
+  return run(db().auth.signInWithPassword({ email: e, password: p }));
 }
 
 /** Returns { user, session } — session is null when e-mail confirmation is required. */
 export async function signUp(email: string, password: string, displayName?: string) {
   const name = typeof displayName === 'string' ? displayName.trim().slice(0, 80) : '';
+  setRememberPref(true); // no checkbox on the register form: default to 7 days
   const data = await run(
     db().auth.signUp({
       email: vEmail(email),
@@ -69,6 +75,18 @@ export async function signOut(): Promise<void> {
 }
 
 /**
+ * The "Duy trì đăng nhập" window ran out: drop the session on this device only
+ * (a global sign-out would also end the user's sessions on other devices).
+ */
+export async function expireSession(): Promise<void> {
+  try {
+    await db().auth.signOut({ scope: 'local' });
+  } catch {
+    /* local sign-out only touches storage; SIGNED_OUT still fires */
+  }
+}
+
+/**
  * ?flow=recovery, not '#/reset': the e-mail templates append '&token_hash=…&type=recovery'
  * to {{ .RedirectTo }}; the legacy PKCE link appends '&code=…' — both need the query form.
  */
@@ -84,6 +102,7 @@ export async function verifyEmailLink(tokenHash: string, type: string) {
   if (!tokenHash || !(EMAIL_LINK_TYPES as readonly string[]).includes(type)) {
     throw new FitoraError('Liên kết đã hết hạn hoặc không hợp lệ. Hãy yêu cầu liên kết mới.', 'link_expired');
   }
+  setRememberPref(true);
   return run(db().auth.verifyOtp({ token_hash: tokenHash, type: type as EmailLinkType }));
 }
 

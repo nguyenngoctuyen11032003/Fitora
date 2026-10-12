@@ -9,6 +9,7 @@ import { resendConfirmation, signIn } from '@/services/auth';
 import { AuthLayout } from './AuthLayout';
 import { PasswordToggle, useCooldown } from './PasswordToggle';
 import { returnPath } from './redirect';
+import { REMEMBER_DAYS } from '@/lib/authPersistence';
 import { readLastEmail, rememberEmail } from '@/lib/lastEmail';
 
 export default function LoginPage() {
@@ -19,6 +20,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState(readLastEmail);
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unconfirmed, setUnconfirmed] = useState(false);
@@ -35,7 +37,7 @@ export default function LoginPage() {
     setError(null);
     setUnconfirmed(false);
     try {
-      await signIn(email, password);
+      await signIn(email, password, remember);
       rememberEmail(email);
       // Back to the page that required sign-in (e.g. a shared #/diary?date=… link).
       navigate(returnPath(location.state), { replace: true });
@@ -103,7 +105,20 @@ export default function LoginPage() {
           required
           trailing={<PasswordToggle shown={show} onToggle={() => setShow((s) => !s)} />}
         />
-        <div className="-mt-1 flex justify-end">
+        <div className="-mt-1 flex flex-wrap items-center justify-between gap-x-3">
+          <label className="inline-flex min-h-[44px] cursor-pointer select-none items-center gap-2.5 text-sm font-semibold text-muted hover:text-text">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              className="h-5 w-5 shrink-0 cursor-pointer rounded accent-[var(--gold)]"
+              aria-describedby="remember-hint"
+            />
+            {`Duy trì đăng nhập ${REMEMBER_DAYS} ngày`}
+          </label>
+          <span id="remember-hint" className="sr-only">
+            Bỏ chọn nếu dùng máy chung: đóng trình duyệt là đăng xuất.
+          </span>
           <Link to="/forgot" state={{ email }} className="inline-flex min-h-[44px] items-center text-sm font-semibold text-muted hover:text-gold">
             Quên mật khẩu?
           </Link>
