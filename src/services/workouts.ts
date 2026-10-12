@@ -3,7 +3,7 @@ import type { NewWorkout, NewWorkoutTemplate, Workout, WorkoutPatch, WorkoutTemp
 import { invalid, run, runRead, vDate } from './errors';
 
 const COLS =
-  'id, user_id, workout_on, start_time, category, activity, title, met, duration_min, kcal, status, template_id, notes, created_at, updated_at';
+  'id, user_id, workout_on, start_time, category, activity, title, met, duration_min, kcal, status, template_id, notes, source, created_at, updated_at';
 const TPL_COLS = 'id, user_id, name, category, activity, met, duration_min, notes, created_at, updated_at';
 
 function clean<T extends WorkoutPatch>(w: T): T {

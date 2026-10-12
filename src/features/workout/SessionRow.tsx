@@ -46,7 +46,7 @@ export function SessionRow({ workout: w, pending, onToggle, onOpen, index = 0 }:
         type="button"
         onClick={onOpen}
         className="flex min-h-[56px] min-w-0 flex-1 items-center gap-3 rounded-[18px] py-2 pl-1 pr-1 text-left transition-colors hover:bg-white/[0.04]"
-        aria-label={`Sửa ${w.title}, ${w.duration_min} phút, ${km ? `${formatKm(km)} km, ` : ''}${formatNumber(w.kcal)} kcal${done ? '' : ', lên lịch'}`}
+        aria-label={`Sửa ${w.title}${w.source === 'gym' ? ' (ghi từ Vyora)' : ''}, ${w.duration_min} phút, ${km ? `${formatKm(km)} km, ` : ''}${formatNumber(w.kcal)} kcal${done ? '' : ', lên lịch'}`}
       >
         <ActivityIcon activity={w.activity} category={w.category} size={40} muted={!done} />
         <span className="min-w-0 flex-1">
@@ -67,6 +67,11 @@ export function SessionRow({ workout: w, pending, onToggle, onOpen, index = 0 }:
               </>
             ) : null}
             {!done && <span className="rounded-full bg-white/[0.08] px-1.5 text-[11px] font-bold uppercase tracking-[0.06em] text-text/75">Lên lịch</span>}
+            {w.source === 'gym' && (
+              <span className="rounded-full bg-gold/15 px-1.5 text-[11px] font-bold uppercase tracking-[0.06em] text-gold" title="Ghi từ ứng dụng Vyora">
+                Vyora
+              </span>
+            )}
           </span>
         </span>
         <span className="flex shrink-0 flex-col items-end">

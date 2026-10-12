@@ -193,12 +193,15 @@ export interface Workout {
   status: WorkoutStatus;
   template_id: string | null;
   notes: string | null;
+  /** 'gym' = logged by the Vyora gym app (session timer); Fitora's own rows are 'fitora'. Never sent on insert/update. */
+  source?: WorkoutSource;
   created_at: string;
   updated_at: string;
 }
+export type WorkoutSource = 'fitora' | 'gym';
 export type NewWorkout = Pick<Workout, 'workout_on' | 'activity' | 'title' | 'met' | 'duration_min'> &
   Partial<Pick<Workout, 'start_time' | 'category' | 'kcal' | 'status' | 'template_id' | 'notes'>>;
-export type WorkoutPatch = Partial<Omit<Workout, 'id' | 'user_id' | 'created_at' | 'updated_at'>>;
+export type WorkoutPatch = Partial<Omit<Workout, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'source'>>;
 
 export interface DailyLog {
   user_id: string;
