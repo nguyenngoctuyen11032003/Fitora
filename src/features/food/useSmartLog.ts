@@ -5,13 +5,20 @@ import { useToast } from '@/components/ui';
 import { notifyDataChanged, onDataChanged } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { useAsync } from '@/lib/hooks';
-import { compareByUse, markCustomFoodUsed } from '@/services/foods';
+import { compareByUse, listCustomFoods, markCustomFoodUsed, type CustomFoodUsage } from '@/services/foods';
 import { createMealTemplate, deleteMealTemplate, listMealTemplates, logMealTemplate, updateMealTemplate } from '@/services/mealTemplates';
 import { addMealEntries, deleteMeal, listMeals } from '@/services/meals';
 import { MEAL_LABELS, type CustomFood, type MealEntry, type MealTemplate, type MealTemplateItem, type MealType } from '@/types/db';
 import { bumpUsage, normalizeVi, templateDuplicates, toNewEntry, type FoodOption } from './lib';
 import { formatQty } from './components/parts';
 import { deferredDelete } from './undo';
+import { undoUsage, usageSnapshots } from './usage';
+
+/** What a log bumped, to give back on "Hoàn tác" (resolved once the best-effort bump is done). */
+export interface UsageUndo {
+  foods?: CustomFoodUsage[];
+  template?: Pick<MealTemplate, 'id' | 'last_used_at'> | null;
+}
 
 export interface LogCallbacks {
   /** Rows just inserted (optimistic lists). */
@@ -24,15 +31,29 @@ export interface LogCallbacks {
 
 const kcalOf = (rows: MealEntry[]) => Math.round(rows.reduce((a, r) => a + (Number(r.kcal) || 0), 0));
 
-/** "Hoàn tác" for logged rows: delete them all, tell the page, refresh other screens. */
+/**
+ * "Hoàn tác" for logged rows: delete them all, tell the page, refresh other screens. When
+ * every row is gone the usage bumps of that log are given back too (`usage`), so an undone
+ * re-log does not count as "đã ăn" nor reorder "Món của tôi" / "Bữa mẫu".
+ */
 function useUndoRows() {
   const toast = useToast();
   return useCallback(
-    (rows: MealEntry[], cb: LogCallbacks) => async () => {
+    (rows: MealEntry[], cb: LogCallbacks, usage?: Promise<UsageUndo | null>, onUsageUndone?: () => void) => async () => {
       const res = await Promise.allSettled(rows.map((r) => deleteMeal(r.id)));
       const removed = rows.filter((_, i) => res[i].status === 'fulfilled').map((r) => r.id);
       if (removed.length) cb.onRemoved?.(removed);
       notifyDataChanged('meals');
+      if (usage && removed.length === rows.length) {
+        void usage
+          .then((u) => (u ? undoUsage(u) : false))
+          .then((changed) => {
+            if (!changed) return;
+            onUsageUndone?.();
+            notifyDataChanged('foods');
+          })
+          .catch(() => undefined);
+      }
       const err = res.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
       if (err) toast.error(err.reason);
     },
@@ -50,18 +71,20 @@ export function useQuickLog() {
         const [row] = await addMealEntries([toNewEntry(opt, portion.quantity, portion.unit, meal, date)]);
         cb.onAdded?.([row]);
         notifyDataChanged('meals');
+        let usage: Promise<UsageUndo | null> | undefined;
         if (opt.origin === 'custom' && opt.customFoodId) {
+          const before: CustomFoodUsage = { id: opt.customFoodId, last_used_at: opt.lastUsedAt ?? null, default_meal: opt.defaultMeal ?? null };
           // Best effort, never throws: usage stats + remember the meal it is eaten at.
-          void markCustomFoodUsed(opt.customFoodId, meal).then(([f]) => {
-            if (f) {
-              cb.onFoodUsed?.(f);
-              notifyDataChanged('foods');
-            }
+          usage = markCustomFoodUsed(opt.customFoodId, meal).then(([f]) => {
+            if (!f) return null;
+            cb.onFoodUsed?.(f);
+            notifyDataChanged('foods');
+            return { foods: [before] };
           });
         }
         toast.success(
           `Đã thêm ${opt.name} (${formatQty(row.quantity, row.unit)} · ${formatNumber(row.kcal)} kcal) vào ${MEAL_LABELS[meal].toLowerCase()}.`,
-          { duration: 6000, action: { label: 'Hoàn tác', onClick: () => void undoRows([row], cb)() } },
+          { duration: 6000, action: { label: 'Hoàn tác', onClick: () => void undoRows([row], cb, usage)() } },
         );
         return row;
       } catch (e) {
@@ -123,7 +146,12 @@ export function useMealTemplates() {
       let skipped = 0;
       // Dishes of the template already in that meal → ask instead of silently doubling them.
       // Best effort: if the check itself fails, log as before (undo is still offered).
-      const existing = await listMeals(date).catch(() => null);
+      // Linked saved foods as they are now: what "Hoàn tác" gives their usage back to.
+      const linked = t.items.map((i) => i.custom_food_id).filter((x): x is string => !!x);
+      const [existing, foodsBefore] = await Promise.all([
+        listMeals(date).catch(() => null),
+        linked.length ? listCustomFoods().catch(() => null) : Promise.resolve(null),
+      ]);
       const dups = existing ? templateDuplicates(t.items, existing, meal) : [];
       if (dups.length) {
         const dupKeys = new Set(dups.map(normalizeVi));
@@ -139,11 +167,16 @@ export function useMealTemplates() {
         const rows = await logMealTemplate(template, date, meal);
         cb.onAdded?.(rows);
         replace(bumpUsage(t));
+        // logMealTemplate awaited its (best-effort) bumps: the template and the linked foods logged.
+        const usage = Promise.resolve<UsageUndo>({
+          template: { id: t.id, last_used_at: t.last_used_at },
+          foods: usageSnapshots(template.items.map((i) => i.custom_food_id), foodsBefore),
+        });
         notifyDataChanged('meals');
         const skippedNote = skipped ? `, bỏ qua ${skipped} món đã có` : '';
         toast.success(`Đã ghi “${t.name}” (${rows.length} món · ${formatNumber(kcalOf(rows))} kcal${skippedNote}) vào ${MEAL_LABELS[meal].toLowerCase()}.`, {
           duration: 6000,
-          action: { label: 'Hoàn tác', onClick: () => void undoRows(rows, cb)() },
+          action: { label: 'Hoàn tác', onClick: () => void undoRows(rows, cb, usage, () => replace(t))() },
         });
         return rows;
       } catch (e) {

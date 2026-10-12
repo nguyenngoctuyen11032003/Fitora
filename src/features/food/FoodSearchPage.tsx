@@ -275,7 +275,7 @@ export default function FoodSearchPage() {
   };
 
   const loadingList = (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 lg:grid lg:grid-cols-2 lg:gap-x-4 lg:gap-y-2">
       {[0, 1, 2, 3].map((i) => (
         <Skeleton key={i} className="h-16 w-full" />
       ))}
@@ -288,16 +288,18 @@ export default function FoodSearchPage() {
       label="Tìm món"
       footer={
         added > 0 ? (
-          <Button block size="lg" icon={<Check className="h-5 w-5" />} onClick={() => navigate(diaryHref)}>
+          <Button block size="lg" icon={<Check className="h-5 w-5" />} onClick={() => navigate(diaryHref)} className="lg:ml-auto lg:flex lg:max-w-[360px]">
             Xong · đã thêm {added} món
           </Button>
         ) : undefined
       }
     >
-      <ScreenHeader back={diaryHref} eyebrow={`${MEAL_LABELS[meal]} · ${formatDayVi(date)}`} title="Thêm món" size="md" />
+      <ScreenHeader back={diaryHref} eyebrow={`${MEAL_LABELS[meal]} · ${formatDayVi(date)}`} title="Thêm món" size="md" className="lg:[&_h1]:text-[40px]" />
 
-      <div className="mt-4 flex flex-col gap-3">
+      <div className="mt-4 flex flex-col gap-3 lg:mt-6 lg:flex-row lg:items-center lg:gap-4">
         <Input
+          wrapperClassName="lg:min-w-0 lg:flex-1"
+          className="lg:[&::-webkit-search-cancel-button]:appearance-none"
           ref={inputRef}
           type="search"
           aria-label="Tìm món ăn"
@@ -325,14 +327,16 @@ export default function FoodSearchPage() {
           enterKeyHint="search"
           autoFocus
         />
-        <Segmented<MealType> ariaLabel="Thêm vào bữa" size="sm" value={meal} onChange={setMeal} options={MEAL_TYPES.map((m) => ({ value: m, label: MEAL_SHORT[m] }))} />
+        <Segmented<MealType> ariaLabel="Thêm vào bữa" size="sm" className="lg:w-[400px] lg:shrink-0" value={meal} onChange={setMeal} options={MEAL_TYPES.map((m) => ({ value: m, label: MEAL_SHORT[m] }))} />
       </div>
 
+      {/* Laptop: list tabs (left) and shortcuts (right) share one row (box-less on phone). */}
+      <div className="contents lg:mt-5 lg:flex lg:items-center lg:justify-between lg:gap-4">
       {/* Shortcuts */}
-      <div className="no-scrollbar -mx-5 mt-4 flex gap-2 overflow-x-auto px-5">
+      <div className="no-scrollbar -mx-5 mt-4 flex gap-2 overflow-x-auto px-5 lg:order-2 lg:mx-0 lg:mt-0 lg:shrink-0 lg:overflow-visible lg:px-0">
         <Link to={`/scan?meal=${meal}&date=${date}`} className="glass inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-full px-4 text-[14px] font-semibold text-text">
           <ScanLine className="h-4 w-4 text-gold" aria-hidden="true" />
-          Scan ảnh
+          Quét ảnh
         </Link>
         <GlassButton variant="pill" onClick={() => setQuickOpen(true)} className="shrink-0">
           <PenLine className="h-4 w-4 text-gold" aria-hidden="true" />
@@ -347,7 +351,7 @@ export default function FoodSearchPage() {
       {!q && (
         <Segmented<Tab>
           ariaLabel="Danh sách món"
-          className="mt-5"
+          className="mt-5 lg:mt-0 lg:min-w-0 lg:max-w-[460px]"
           value={tab}
           onChange={setTab}
           options={[
@@ -357,6 +361,7 @@ export default function FoodSearchPage() {
           ]}
         />
       )}
+      </div>
 
       {/* Only a short summary is announced, never the whole list (screen readers would read every row on each keystroke). */}
       <p role="status" className="sr-only">
@@ -367,7 +372,7 @@ export default function FoodSearchPage() {
           results.length > 0 ? (
             <>
               <p className="mb-2 pl-1 text-[13px] text-muted">{results.length} kết quả</p>
-              <ul className="flex flex-col gap-1">{results.map((o) => renderRow(o))}</ul>
+              <ul className="flex flex-col gap-1 lg:grid lg:grid-cols-2 lg:gap-x-4 lg:gap-y-2">{results.map((o) => renderRow(o))}</ul>
             </>
           ) : (
             <EmptyState
@@ -391,7 +396,7 @@ export default function FoodSearchPage() {
           personalLoading && !history.data ? (
             loadingList
           ) : nothingPersonal ? (
-            <EmptyState compact icon={Sparkles} title="Chưa có gợi ý" description="Món bạn ghi, scan hoặc lưu sẽ hiện ở đây để thêm lại bằng một chạm." />
+            <EmptyState compact icon={Sparkles} title="Chưa có gợi ý" description="Món bạn ghi, quét hoặc lưu sẽ hiện ở đây để thêm lại bằng một chạm." />
           ) : (
             <div className="flex flex-col gap-6">
               {mealTemplates.length > 0 && (
@@ -403,7 +408,7 @@ export default function FoodSearchPage() {
                     </button>
                   }
                 >
-                  <ul className="flex flex-col gap-1">
+                  <ul className="flex flex-col gap-1 lg:grid lg:grid-cols-2 lg:gap-x-4 lg:gap-y-2">
                     {mealTemplates.map((t) => (
                       <TemplateRow key={t.id} template={t} busy={templateBusy === t.id} mealLabel={mealLower} onLog={(x) => void logTemplate(x)} />
                     ))}
@@ -412,14 +417,14 @@ export default function FoodSearchPage() {
               )}
               {suggestions.length > 0 && (
                 <ListSection title={`Hay ăn vào ${mealLower}`} hint="Chạm + để thêm ngay với khẩu phần lần trước">
-                  <ul className="flex flex-col gap-1">
+                  <ul className="flex flex-col gap-1 lg:grid lg:grid-cols-2 lg:gap-x-4 lg:gap-y-2">
                     {suggestions.map((s) => renderRow(s.option, { quantity: s.quantity, unit: s.unit, count: s.count || undefined }))}
                   </ul>
                 </ListSection>
               )}
               {recent.length > 0 && (
                 <ListSection title="Gần đây">
-                  <ul className="flex flex-col gap-1">{recent.map((r) => renderRow(r.option, { quantity: r.quantity, unit: r.unit, count: r.count }))}</ul>
+                  <ul className="flex flex-col gap-1 lg:grid lg:grid-cols-2 lg:gap-x-4 lg:gap-y-2">{recent.map((r) => renderRow(r.option, { quantity: r.quantity, unit: r.unit, count: r.count }))}</ul>
                 </ListSection>
               )}
             </div>
@@ -438,7 +443,7 @@ export default function FoodSearchPage() {
                     </button>
                   }
                 >
-                  <ul className="flex flex-col gap-1">
+                  <ul className="flex flex-col gap-1 lg:grid lg:grid-cols-2 lg:gap-x-4 lg:gap-y-2">
                     {tpl.templates.map((t) => (
                       <TemplateRow key={t.id} template={t} busy={templateBusy === t.id} mealLabel={mealLower} onLog={(x) => void logTemplate(x)} />
                     ))}
@@ -446,15 +451,15 @@ export default function FoodSearchPage() {
                 </ListSection>
               )}
               {savedFoods.length > 0 ? (
-                <ListSection title="Món đã lưu" hint="Món scan xong được lưu tự động · dùng nhiều xếp trước">
-                  <ul className="flex flex-col gap-1">{customOptions.map((o) => renderRow(o, undefined, { edit: true }))}</ul>
+                <ListSection title="Món đã lưu" hint="Món quét xong được lưu tự động · dùng nhiều xếp trước">
+                  <ul className="flex flex-col gap-1 lg:grid lg:grid-cols-2 lg:gap-x-4 lg:gap-y-2">{customOptions.map((o) => renderRow(o, undefined, { edit: true }))}</ul>
                 </ListSection>
               ) : (
                 <EmptyState
                   compact
                   icon={ChefHat}
                   title="Chưa có món đã lưu"
-                  description="Món bạn scan sẽ tự lưu ở đây — lần sau chỉ cần chọn, không phải scan lại. Bạn cũng có thể tự tạo món theo nhãn dinh dưỡng."
+                  description="Món bạn quét sẽ tự lưu ở đây — lần sau chỉ cần chọn, không phải quét lại. Bạn cũng có thể tự tạo món theo nhãn dinh dưỡng."
                   action={
                     <Button icon={<Plus className="h-4 w-4" />} onClick={() => setCustomSheet({ food: null })}>
                       Tạo món riêng
@@ -465,7 +470,7 @@ export default function FoodSearchPage() {
             </div>
           )
         ) : (
-          <ul className="flex flex-col gap-1">{POPULAR.map((o) => renderRow(o))}</ul>
+          <ul className="flex flex-col gap-1 lg:grid lg:grid-cols-2 lg:gap-x-4 lg:gap-y-2">{POPULAR.map((o) => renderRow(o))}</ul>
         )}
       </section>
 
@@ -553,7 +558,7 @@ function ListSection({ title, hint, action, children }: { title: string; hint?: 
 
 function TemplateRow({ template: t, busy, mealLabel, onLog }: { template: MealTemplate; busy: boolean; mealLabel: string; onLog: (t: MealTemplate) => void }) {
   return (
-    <li>
+    <li className="lg:rounded-2xl lg:border lg:border-line lg:bg-white/[0.025]">
       <button
         type="button"
         onClick={() => onLog(t)}
@@ -613,7 +618,7 @@ const FoodRow = memo(function FoodRow({ option, quantity, unit, count, highlight
   const parts = highlight ? highlightParts(option.name, highlight) : null;
   const kind = option.origin === 'custom' ? (option.savedFrom === 'ai' ? 'ai' : 'saved') : 'food';
   return (
-    <li className="flex items-center gap-1">
+    <li className="flex items-center gap-1 lg:rounded-2xl lg:border lg:border-line lg:bg-white/[0.025] lg:pr-2">
       <button
         type="button"
         onClick={() => onPick(option, qty, unit)}

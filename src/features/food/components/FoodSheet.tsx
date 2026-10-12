@@ -47,6 +47,8 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
   const [remembering, setRemembering] = useState(false);
   // Entry just saved to "Món của tôi" (the parent's `entry` prop is not refreshed while open).
   const [rememberedId, setRememberedId] = useState<string | null>(null);
+  // Synchronous guard for "Lưu món này": a double tap in one frame must not save twice.
+  const rememberBusy = useRef(false);
   // Synchronous guard: two taps (or Enter + tap) in the same frame both see saving === false.
   const busy = useRef(false);
 
@@ -123,7 +125,10 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
   };
 
   const remember = async () => {
-    if (!entry || remembering || busy.current) return;
+    // Already saved (linked or saved a moment ago): a second tap must not count another use.
+    if (!entry || entry.custom_food_id || rememberedId === entry.id) return;
+    if (rememberBusy.current || busy.current) return;
+    rememberBusy.current = true;
     setRemembering(true);
     try {
       const food = await saveEntryAsFood(entry);
@@ -134,6 +139,7 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
     } catch (e) {
       toast.error(e);
     } finally {
+      rememberBusy.current = false;
       setRemembering(false);
     }
   };
@@ -245,7 +251,7 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
           />
         </section>
         {entry && (
-          <RememberRow saved={!!entry.custom_food_id || rememberedId === entry.id}busy={remembering} onSave={() => void remember()} />
+          <RememberRow saved={!!entry.custom_food_id || rememberedId === entry.id} busy={remembering} onSave={() => void remember()} />
         )}
         <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
       </form>
@@ -274,7 +280,7 @@ export function RememberRow({ saved, busy, onSave }: { saved: boolean; busy: boo
       <BookmarkPlus className="h-5 w-5 shrink-0 text-gold" aria-hidden="true" />
       <span className="min-w-0 flex-1">
         <span className="block font-semibold text-text">{busy ? 'Đang lưu…' : 'Lưu vào Món của tôi'}</span>
-        <span className="block text-[12px] text-muted">Lần sau chọn lại bằng một chạm, không cần scan hay nhập.</span>
+        <span className="block text-[12px] text-muted">Lần sau chọn lại bằng một chạm, không cần quét hay nhập.</span>
       </span>
     </button>
   );

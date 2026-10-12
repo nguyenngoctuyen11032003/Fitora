@@ -529,6 +529,19 @@ describe('saved food serving labels', () => {
     expect(defaultPortion(fromCustomFood({ ...base, serving_label: '1 phần', serving_grams: 300 }))).toEqual({ quantity: 1, unit: 'phần' });
   });
 
+  it('opens on the amount usually eaten (default_servings) and keeps the usual meal', () => {
+    const bowl = fromCustomFood({ ...base, serving_label: '1 bát', serving_grams: 300, default_servings: 2, default_meal: 'lunch' });
+    expect(defaultPortion(bowl)).toEqual({ quantity: 2, unit: 'bát' });
+    expect(bowl.defaultMeal).toBe('lunch');
+    expect(toNewEntry(bowl, 2, 'bát', 'lunch', '2026-10-09').grams).toBe(600);
+    const slices = fromCustomFood({ ...base, serving_label: '2 lát', serving_grams: 60, default_servings: 1.5 });
+    expect(defaultPortion(slices)).toEqual({ quantity: 3, unit: 'lát' });
+    const milk = fromCustomFood({ ...base, default_servings: 0.5 });
+    expect(defaultPortion(milk)).toEqual({ quantity: 125, unit: 'ml' });
+    // Unknown / invalid → one serving, as before.
+    expect(defaultPortion(fromCustomFood({ ...base, serving_label: '1 bát', serving_grams: 300, default_servings: null }))).toEqual({ quantity: 1, unit: 'bát' });
+  });
+
   it('per-100 g values keep 2 decimals so one serving re-logs as typed', () => {
     const per = per100FromServing({ kcal: 650, protein: 35, carbs: 70, fat: 20, fiber: 4 }, 450);
     expect(per.protein).toBe(7.78);

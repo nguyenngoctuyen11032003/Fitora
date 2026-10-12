@@ -39,6 +39,10 @@ export function QuickAddSheet({ open, onClose, date, meal: defaultMeal, entry, i
   /** Add mode: also keep it in "Món của tôi" so next time it is one tap. */
   const [keep, setKeep] = useState(false);
   const [remembering, setRemembering] = useState(false);
+  // Entry just saved to "Món của tôi" (the parent's `entry` prop is not refreshed while open).
+  const [rememberedId, setRememberedId] = useState<string | null>(null);
+  // Synchronous guard for "Lưu món này": a double tap in one frame must not save twice.
+  const rememberBusy = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -53,6 +57,7 @@ export function QuickAddSheet({ open, onClose, date, meal: defaultMeal, entry, i
     setTried(false);
     setKeep(false);
     setRemembering(false);
+    rememberBusy.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, entry?.id]);
 
@@ -109,16 +114,21 @@ export function QuickAddSheet({ open, onClose, date, meal: defaultMeal, entry, i
   };
 
   const remember = async () => {
-    if (!entry || remembering || busy.current) return;
+    // Already saved (linked or saved a moment ago): a second tap must not count another use.
+    if (!entry || entry.custom_food_id || rememberedId === entry.id) return;
+    if (rememberBusy.current || busy.current) return;
+    rememberBusy.current = true;
     setRemembering(true);
     try {
       const food = await saveEntryAsFood(entry);
+      setRememberedId(entry.id);
       toast.success(`Đã lưu “${food.name}” vào Món của tôi — lần sau chỉ cần chọn.`);
       notifyDataChanged('foods');
       onSaved({ ...entry, custom_food_id: food.id }, 'edit');
     } catch (e) {
       toast.error(e);
     } finally {
+      rememberBusy.current = false;
       setRemembering(false);
     }
   };
@@ -185,7 +195,7 @@ export function QuickAddSheet({ open, onClose, date, meal: defaultMeal, entry, i
           <Segmented<MealType> ariaLabel="Bữa ăn" value={meal} onChange={setMeal} options={MEAL_TYPES.map((m) => ({ value: m, label: MEAL_SHORT[m] }))} />
         </div>
         {entry ? (
-          <RememberRow saved={!!entry.custom_food_id} busy={remembering} onSave={() => void remember()} />
+          <RememberRow saved={!!entry.custom_food_id || rememberedId === entry.id} busy={remembering} onSave={() => void remember()} />
         ) : (
           <button
             type="button"

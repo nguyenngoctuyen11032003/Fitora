@@ -2,7 +2,7 @@
 import type { FoodCategory, FoodItem, FoodUnit, Nutrients } from '@/data/foods';
 import type { CustomFood, CustomFoodSource, FitProfile, MealEntry, MealSource, MealTemplate, MealType, NewMealEntry } from '@/types/db';
 import { MEAL_LABELS, MEAL_TYPES } from '@/types/db';
-import { parseServingLabel } from '@/services/foods';
+import { parseServingLabel, usualServings } from '@/services/foods';
 import { activityModel, effectiveWeight, energyBalance, targetsFromProfile, type EnergyBalance } from '@/features/today/metrics';
 
 /* ===================================================================== */
@@ -50,6 +50,8 @@ export interface FoodOption {
   /** Saved foods: times logged (use_count), last use and how it was saved. */
   useCount?: number;
   lastUsedAt?: string | null;
+  /** Saved foods: the meal it is usually eaten at (snapshot for undoing a usage bump). */
+  defaultMeal?: MealType | null;
   savedFrom?: CustomFoodSource;
 }
 
@@ -103,7 +105,8 @@ export function fromCustomFood(cf: CustomFood): FoodOption {
     per100g: { kcal: cf.kcal_100g, protein: cf.protein_100g, carbs: cf.carbs_100g, fat: cf.fat_100g, fiber: cf.fiber_100g },
     units: [{ unit, grams: serving.grams }],
     defaultUnit: unit,
-    defaultQty: serving.quantity,
+    // The amount the user usually eats (default_servings 2 × "1 bát" → 2 bát), like the one-tap re-log.
+    defaultQty: r2(serving.quantity * usualServings(cf)),
     origin: 'custom',
     customFoodId: cf.id,
     searchKeys: [normalizeVi(cf.name), normalizeVi(cf.brand)].filter(Boolean),
@@ -112,6 +115,7 @@ export function fromCustomFood(cf: CustomFood): FoodOption {
     photoPath: cf.photo_path ?? null,
     useCount: Math.max(0, Number(cf.use_count) || 0),
     lastUsedAt: cf.last_used_at ?? null,
+    defaultMeal: cf.default_meal ?? null,
     savedFrom: cf.source,
   };
 }

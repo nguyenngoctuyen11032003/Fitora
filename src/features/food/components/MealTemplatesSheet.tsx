@@ -83,7 +83,7 @@ export function MealTemplatesSheet({ open, onClose, templates, meal: defaultMeal
               ) : (
                 <li key={t.id} className="glass-card flex items-center gap-2 rounded-2xl p-3">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[15px] font-bold text-text">{t.name}</p>
+                    <p className="line-clamp-2 break-words text-[15px] font-bold leading-snug text-text">{t.name}</p>
                     <p className="line-clamp-2 break-words text-[12px] text-muted">{dishesSummary(t.items, 3)}</p>
                     <p className="tabular text-[12px] text-muted">
                       {t.items.length} món · <span className="font-semibold text-text">{formatNumber(t.total_kcal)} kcal</span>

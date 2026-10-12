@@ -1,4 +1,4 @@
-import { BookmarkCheck, ChevronLeft, ChevronRight, CloudOff, CopyPlus, Layers, Plus, RefreshCw, ScanLine, Utensils } from 'lucide-react';
+import { BookmarkCheck, ChevronLeft, ChevronRight, CloudOff, CopyPlus, Layers, Plus, RefreshCw, ScanLine, Search, Utensils } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
@@ -32,6 +32,7 @@ import {
   templatesForMeal,
 } from './lib';
 import { useMealTemplates, type LogCallbacks } from './useSmartLog';
+import { undoUsage, usageSnapshots } from './usage';
 
 export default function DiaryPage() {
   const toast = useToast();
@@ -169,7 +170,14 @@ export default function DiaryPage() {
       notifyDataChanged('meals');
       // Saved foods eaten again count as a use (best effort, never throws).
       const ids = added.map((x) => x.custom_food_id).filter((x): x is string => !!x);
-      if (ids.length) void markCustomFoodUsed(ids, meal).then((r) => r.length && notifyDataChanged('foods'));
+      // Snapshot BEFORE the bump: "Hoàn tác" gives the usage (count, last use, usual meal) back.
+      const before = usageSnapshots(ids, customs.data);
+      const bumped = ids.length
+        ? markCustomFoodUsed(ids, meal).then((r) => {
+            if (r.length) notifyDataChanged('foods');
+            return new Set(r.map((f) => f.id));
+          })
+        : Promise.resolve(new Set<string>());
       const label = MEAL_LABELS[meal].toLowerCase();
       toast.show(`Đã chép ${added.length} món vào ${label}.`, {
         action: {
@@ -178,7 +186,13 @@ export default function DiaryPage() {
             const ids = new Set(added.map((x) => x.id));
             setRows((d) => d && { ...d, rows: d.rows.filter((x) => !ids.has(x.id)) });
             Promise.all(added.map((x) => deleteMeal(x.id)))
-              .then(() => notifyDataChanged('meals'))
+              .then(() => {
+                notifyDataChanged('meals');
+                // Only the foods that were really bumped (best effort, never throws).
+                void bumped
+                  .then((done) => undoUsage({ foods: before.filter((f) => done.has(f.id)) }))
+                  .then((changed) => changed && notifyDataChanged('foods'));
+              })
               .catch((err) => {
                 toast.error(err);
                 void reload();
@@ -223,10 +237,13 @@ export default function DiaryPage() {
 
   return (
     <Page label="Nhật ký ăn">
-      <ScreenHeader eyebrow="Nhật ký ăn" title={formatDayVi(date)} subtitle={formatDayVi(date, 'long')} />
+      <ScreenHeader eyebrow="Nhật ký ăn" title={formatDayVi(date)} subtitle={formatDayVi(date, 'long')} className="lg:[&_h1]:text-[52px]" />
 
+      {/* Laptop: meals in the main column, day navigation + summary in a sticky side column (box-less on phone). */}
+      <div className="contents lg:mt-8 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-8">
+      <div className="contents lg:sticky lg:top-6 lg:col-start-2 lg:row-start-1 lg:flex lg:flex-col">
       {/* Day navigation */}
-      <nav aria-label="Chọn ngày" className="mt-4 flex items-center gap-2">
+      <nav aria-label="Chọn ngày" className="mt-4 flex items-center gap-2 lg:mt-0">
         <GlassButton label="Ngày trước" onClick={() => setDate(addDays(date, -1))}>
           <ChevronLeft className="h-5 w-5" />
         </GlassButton>
@@ -242,29 +259,8 @@ export default function DiaryPage() {
         </GlassButton>
       </nav>
 
-      {loadFailed ? (
-        <GlassCard as="section" padding="lg" className="mt-4" role="alert" aria-label="Không tải được nhật ký">
-          <EmptyState
-            compact
-            icon={CloudOff}
-            title="Chưa tải được nhật ký"
-            description="Kiểm tra kết nối mạng rồi thử lại. Fitora chưa hiện số liệu ngày này để bạn không ghi trùng món."
-            action={
-              <Button
-                icon={<RefreshCw className="h-4 w-4" />}
-                onClick={() => {
-                  void reload();
-                  void reloadBurn();
-                }}
-              >
-                Thử lại
-              </Button>
-            }
-          />
-        </GlassCard>
-      ) : (
-        <>
-      {/* Day summary */}
+      {!loadFailed && (
+      /* Day summary */
       <GlassCard as="section" padding="lg" className="mt-4" aria-label="Tổng trong ngày">
         {loading ? (
           <Skeleton className="h-28 w-full" />
@@ -293,9 +289,54 @@ export default function DiaryPage() {
           </>
         )}
       </GlassCard>
+      )}
 
+      {/* Laptop only: quick ways to add to the next meal, next to the summary. */}
+      {!loadFailed && (
+        <div className="hidden lg:mt-4 lg:flex lg:flex-col lg:gap-2">
+          <p className="eyebrow pl-1 text-muted">Thêm vào {MEAL_LABELS[nextMeal].toLowerCase()}</p>
+          <div className="grid grid-cols-2 gap-2">
+            <Button size="sm" icon={<Search className="h-4 w-4" />} onClick={() => navigate(`/food/search?meal=${nextMeal}&date=${date}`)}>
+              Tìm món
+            </Button>
+            <Button size="sm" variant="secondary" icon={<ScanLine className="h-4 w-4 text-gold" />} onClick={() => navigate(`/scan?meal=${nextMeal}&date=${date}`)}>
+              Quét món
+            </Button>
+          </div>
+          {tpl.templates.length > 0 && (
+            <Button size="sm" variant="secondary" icon={<Layers className="h-4 w-4 text-gold" />} onClick={() => setTemplatesFor(nextMeal)}>
+              Ghi từ bữa mẫu
+            </Button>
+          )}
+        </div>
+      )}
+      </div>
+
+      <div className="contents lg:col-start-1 lg:row-start-1 lg:block">
+      {loadFailed ? (
+        <GlassCard as="section" padding="lg" className="mt-4 lg:mt-0" role="alert" aria-label="Không tải được nhật ký">
+          <EmptyState
+            compact
+            icon={CloudOff}
+            title="Chưa tải được nhật ký"
+            description="Kiểm tra kết nối mạng rồi thử lại. Fitora chưa hiện số liệu ngày này để bạn không ghi trùng món."
+            action={
+              <Button
+                icon={<RefreshCw className="h-4 w-4" />}
+                onClick={() => {
+                  void reload();
+                  void reloadBurn();
+                }}
+              >
+                Thử lại
+              </Button>
+            }
+          />
+        </GlassCard>
+      ) : (
+        <>
       {/* Meals */}
-      <div className="mt-6 flex flex-col gap-4">
+      <div className="mt-6 flex flex-col gap-4 lg:mt-0">
         {MEAL_TYPES.map((m) => (
           <MealCard
             key={m}
@@ -329,7 +370,7 @@ export default function DiaryPage() {
           description="Chụp ảnh để AI tính calo, hoặc tìm trong hơn 150 món Việt quen thuộc."
           action={
             <Button icon={<ScanLine className="h-4 w-4" />} onClick={() => navigate(`/scan?meal=${nextMeal}&date=${date}`)}>
-              Scan bữa ăn
+              Quét bữa ăn
             </Button>
           }
         />
@@ -337,6 +378,8 @@ export default function DiaryPage() {
 
         </>
       )}
+      </div>
+      </div>
 
       <FoodSheet
         open={!!editing && !manual}
@@ -440,7 +483,7 @@ function MealCard({
         </div>
         <Link
           to={`/scan?meal=${meal}&date=${date}`}
-          aria-label={`Scan món cho ${MEAL_LABELS[meal].toLowerCase()}`}
+          aria-label={`Quét món cho ${MEAL_LABELS[meal].toLowerCase()}`}
           className="glass grid h-11 w-11 place-items-center rounded-full text-text"
         >
           <ScanLine className="h-5 w-5" aria-hidden="true" />
