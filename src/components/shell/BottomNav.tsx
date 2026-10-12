@@ -1,7 +1,8 @@
 import clsx from 'clsx';
 import { BookOpen, Dumbbell, Home, ScanLine, TrendingUp, type LucideIcon } from 'lucide-react';
-import type { MouseEvent } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
+import { INITIAL_NAV_STATE, nextNavState, type NavScrollState } from './navAutoHide';
 import { prefetchHandlers } from './routes';
 
 interface Item {
@@ -66,12 +67,63 @@ function Tab({ item }: { item: Item }) {
   );
 }
 
+/**
+ * Hide while the user reads down a screen, show again on any scroll up. Pages scroll in their
+ * own <main>, so scroll events are caught in the capture phase on the app root.
+ */
+function useAutoHide() {
+  const { pathname, search } = useLocation();
+  const [hidden, setHidden] = useState(false);
+  const states = useRef(new WeakMap<Element, NavScrollState>());
+
+  // A new screen always starts with the nav visible.
+  useEffect(() => setHidden(false), [pathname, search]);
+
+  useEffect(() => {
+    const app = document.getElementById('fitora-app');
+    if (!app) return;
+    let frame = 0;
+    let pending: HTMLElement | null = null;
+    const onScroll = (e: Event) => {
+      const el = e.target;
+      if (!(el instanceof HTMLElement) || el.scrollHeight <= el.clientHeight) return; // horizontal strips etc.
+      pending = el;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const t = pending;
+        if (!t) return;
+        const prev = states.current.get(t) ?? INITIAL_NAV_STATE; // screens open at the top
+        const next = nextNavState(prev, { top: t.scrollTop, scrollHeight: t.scrollHeight, clientHeight: t.clientHeight });
+        states.current.set(t, next);
+        setHidden(next.hidden);
+      });
+    };
+    app.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    return () => {
+      app.removeEventListener('scroll', onScroll, { capture: true });
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  return { hidden, show: () => setHidden(false) };
+}
+
 /** 5-slot bottom navigation with a raised gold "Quét" FAB in the middle. Absolute inside the frame; hidden on laptop (Sidebar). */
 export function BottomNav() {
+  const { hidden, show } = useAutoHide();
   return (
     <nav
       aria-label="Điều hướng"
-      className="pointer-events-none absolute inset-x-0 bottom-0 z-40 lg:hidden pb-[calc(var(--safe-bottom)+8px)] pl-[max(12px,var(--safe-left))] pr-[max(12px,var(--safe-right))]"
+      data-hidden={hidden || undefined}
+      // Keyboard users tabbing into a hidden nav get it back immediately.
+      onFocusCapture={show}
+      className={clsx(
+        'pointer-events-none absolute inset-x-0 bottom-0 z-40 lg:hidden pb-[calc(var(--safe-bottom)+8px)] pl-[max(12px,var(--safe-left))] pr-[max(12px,var(--safe-right))]',
+        'transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+        // Slide fully out, including the raised Quét button above the bar.
+        hidden && 'translate-y-[calc(100%+40px)] opacity-0',
+      )}
     >
       <div className="glass-strong pointer-events-auto relative mx-auto flex h-[var(--bottomnav-h)] max-w-[480px] items-center rounded-[28px] px-2 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.8)]">
         {LEFT.map((i) => (
