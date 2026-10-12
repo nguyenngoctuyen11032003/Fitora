@@ -44,7 +44,9 @@ export function TopBar({ eyebrow, title, right, className }: TopBarProps) {
           <p className="mt-0.5 truncate text-[17px] font-bold tracking-[-0.02em] text-text">{title ?? displayName}</p>
         </div>
         {right}
-        <MenuButton onClick={() => setMenu(true)} open={menu} />
+        <span className="contents lg:hidden">
+          <MenuButton onClick={() => setMenu(true)} open={menu} />
+        </span>
       </div>
       <MenuOverlay open={menu} onClose={() => setMenu(false)} />
     </>

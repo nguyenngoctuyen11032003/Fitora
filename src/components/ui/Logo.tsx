@@ -6,7 +6,7 @@ export const LOGO_URL = `${import.meta.env.BASE_URL}logo.png`;
 export interface LogoProps {
   /** Pixel size of the square mark (default 28). */
   size?: number;
-  /** Soft blue/green halo behind the mark (hero / brand column). */
+  /** Soft blue/green halo behind the mark (hero / splash). */
   glow?: boolean;
   /** Show the "Fitora" wordmark next to the mark. */
   wordmark?: boolean;

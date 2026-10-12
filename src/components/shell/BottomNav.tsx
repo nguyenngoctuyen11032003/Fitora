@@ -66,18 +66,18 @@ function Tab({ item }: { item: Item }) {
   );
 }
 
-/** 5-slot bottom navigation with a raised gold Scan FAB in the middle. Absolute inside the frame. */
+/** 5-slot bottom navigation with a raised gold "Quét" FAB in the middle. Absolute inside the frame; hidden on laptop (Sidebar). */
 export function BottomNav() {
   return (
     <nav
       aria-label="Điều hướng"
-      className="pointer-events-none absolute inset-x-0 bottom-0 z-40 pb-[calc(var(--safe-bottom)+8px)] pl-[max(12px,var(--safe-left))] pr-[max(12px,var(--safe-right))]"
+      className="pointer-events-none absolute inset-x-0 bottom-0 z-40 lg:hidden pb-[calc(var(--safe-bottom)+8px)] pl-[max(12px,var(--safe-left))] pr-[max(12px,var(--safe-right))]"
     >
       <div className="glass-strong pointer-events-auto relative mx-auto flex h-[var(--bottomnav-h)] max-w-[480px] items-center rounded-[28px] px-2 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.8)]">
         {LEFT.map((i) => (
           <Tab key={i.to} item={i} />
         ))}
-        {/* The whole centre slot (FAB + "Scan" label) is one link, so the label is tappable too. */}
+        {/* The whole centre slot (FAB + "Quét" label) is one link, so the label is tappable too. */}
         <NavLink
           to="/scan"
           aria-label="Quét món ăn bằng AI"
@@ -99,7 +99,7 @@ export function BottomNav() {
                 <ScanLine className="h-7 w-7" strokeWidth={2.4} />
               </span>
               <span className="absolute top-[43px] text-[11px] font-semibold text-gold" aria-hidden="true">
-                Scan
+                Quét
               </span>
             </>
           )}

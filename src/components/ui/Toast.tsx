@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { openUndoWindow } from '@/lib/undoWindow';
 import { errorMessage } from '@/services/errors';
 import { Portal } from './Portal';
 import { claimToastAction } from './toastGuard';
@@ -53,21 +54,33 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   // Auto-dismiss timers, pausable while the toast is hovered / focused (WCAG 2.2.1).
   const timers = useRef(new Map<number, { handle?: ReturnType<typeof setTimeout>; remaining: number; startedAt: number }>());
 
+  // A toast with an action ("Hoàn tác") holds an undo window while it is on screen, so
+  // deferred clean-ups (a deleted entry's photo) wait for it however long it is hovered.
+  const holds = useRef(new Map<number, () => void>());
+  const release = useCallback((id: number) => {
+    holds.current.get(id)?.();
+    holds.current.delete(id);
+  }, []);
+
   useEffect(() => {
     const map = timers.current;
+    const held = holds.current;
     return () => {
       map.forEach((t) => clearTimeout(t.handle));
       map.clear();
+      held.forEach((free) => free());
+      held.clear();
     };
   }, []);
 
   const dismiss = useCallback((id: number) => {
+    release(id);
     const t = timers.current.get(id);
     if (t) clearTimeout(t.handle);
     timers.current.delete(id);
     setItems((list) => list.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
     setTimeout(() => setItems((list) => list.filter((t) => t.id !== id)), 220);
-  }, []);
+  }, [release]);
 
   const startTimer = useCallback(
     (id: number, ms: number) => {
@@ -106,11 +119,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       const id = ++seq.current;
       const item: ToastItem = { id, message, kind, duration, action: opts.action };
       live.current = [...live.current, item]; // visible to a second show() in the same tick
+      if (item.action) holds.current.set(id, openUndoWindow());
       setItems((list) => {
         // Max 3 visible (leaving ones excluded): the oldest are evicted and drop their timers.
         const active = list.filter((t) => !t.leaving);
         const evict = new Set(active.slice(0, Math.max(0, active.length - 2)).map((t) => t.id));
         evict.forEach((eid) => {
+          release(eid);
           clearTimeout(timers.current.get(eid)?.handle);
           timers.current.delete(eid);
         });
@@ -119,7 +134,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       if (duration > 0) startTimer(id, duration);
       return id;
     },
-    [startTimer],
+    [startTimer, release],
   );
 
   const api = useMemo<ToastApi>(
@@ -138,7 +153,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <Portal>
         <div
-          className="pointer-events-none absolute inset-x-0 top-0 z-[90] flex flex-col items-center gap-2 px-4"
+          className="pointer-events-none absolute inset-x-0 top-0 z-[90] flex flex-col items-center gap-2 px-4 lg:items-end lg:px-6 lg:!pt-6"
           style={{ paddingTop: 'calc(var(--safe-top) + 10px)' }}
           aria-live="polite"
           aria-relevant="additions"

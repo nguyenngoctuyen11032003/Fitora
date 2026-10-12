@@ -98,14 +98,14 @@ export const Page = forwardRef<HTMLElement, PageProps>(function Page(
       className={clsx('no-scrollbar absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-contain', className)}
     >
       <div
-        className={clsx('mx-auto flex min-h-full w-full max-w-[560px] flex-col', padded && 'px-5', contentClassName)}
+        className={clsx('mx-auto flex min-h-full w-full max-w-[560px] flex-col lg:max-w-[1180px]', padded && 'px-5 lg:px-10', contentClassName)}
         style={{ paddingTop: 'calc(var(--safe-top) + 8px)', paddingBottom: footer ? 0 : bottomPad }}
       >
         {topBar && <TopBar {...(typeof topBar === 'object' ? topBar : {})} className="mb-4" />}
         {children}
         {footer && (
           <div
-            className="sticky bottom-0 z-10 -mx-5 mt-auto bg-gradient-to-t from-bg via-bg/95 to-transparent px-5 pt-6"
+            className="sticky bottom-0 z-10 -mx-5 mt-auto bg-gradient-to-t from-bg via-bg/95 to-transparent px-5 pt-6 lg:-mx-10 lg:px-10"
             style={{ paddingBottom: bottomPad }}
           >
             {footer}

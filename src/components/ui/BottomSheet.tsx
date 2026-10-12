@@ -25,9 +25,13 @@ const CLOSE_MS = 280;
 /** Pointer travel (px) before a press becomes a drag — taps never move the sheet. */
 const DRAG_SLOP = 4;
 
+/** Laptop: the sheet is a centred dialog (no drag handle / swipe). */
+const LAPTOP = '(min-width: 1024px)';
+
 /**
  * Bottom sheet inside the phone frame: drag handle + swipe-down to close,
  * focus trap, Esc, backdrop click. Renders into #fitora-overlay-root.
+ * On laptop (≥1024px) it becomes a centred dialog with the same content.
  */
 export function BottomSheet({ open, onClose, title, description, children, footer, height = 'auto', dismissible = true, initialFocus, className }: BottomSheetProps) {
   const [mounted, setMounted] = useState(open);
@@ -66,7 +70,7 @@ export function BottomSheet({ open, onClose, title, description, children, foote
   useFocusTrap(panel, open && mounted, requestClose, initialFocus);
 
   const onPointerDown = (e: RPointerEvent) => {
-    if (!dismissible || closing || e.button > 0) return;
+    if (!dismissible || closing || e.button > 0 || window.matchMedia?.(LAPTOP).matches) return;
     // Only start a drag from the handle area, or from the body when it is scrolled to top.
     const fromHandle = (e.target as HTMLElement).closest('[data-sheet-handle]');
     if (!fromHandle && (body.current?.scrollTop ?? 0) > 0) return;
@@ -110,7 +114,7 @@ export function BottomSheet({ open, onClose, title, description, children, foote
 
   return (
     <Portal>
-      <div className="pointer-events-auto absolute inset-0 z-[60] flex flex-col justify-end" role="presentation">
+      <div className="pointer-events-auto absolute inset-0 z-[60] flex flex-col justify-end lg:items-center lg:justify-center lg:p-8" role="presentation">
         <div
           aria-hidden="true"
           onClick={requestClose}
@@ -131,23 +135,24 @@ export function BottomSheet({ open, onClose, title, description, children, foote
           onAnimationEnd={onAnimationEnd}
           className={clsx(
             'glass-strong relative flex max-h-[92%] flex-col rounded-t-[28px] border-b-0 bg-[rgba(24,14,10,0.94)] shadow-[0_-20px_60px_rgba(0,0,0,0.5)] outline-none',
-            height === 'full' && 'h-[92%]',
+            'lg:max-h-[min(86vh,860px)] lg:w-full lg:max-w-[600px] lg:rounded-[28px] lg:border-b lg:shadow-[0_30px_80px_rgba(0,0,0,0.6)]',
+            height === 'full' && 'h-[92%] lg:h-[min(86vh,860px)]',
             closing
-              ? 'translate-y-full transition-transform duration-300 ease-in'
+              ? 'translate-y-full transition-transform duration-300 ease-in lg:translate-y-0 lg:scale-95 lg:opacity-0 lg:transition-[opacity,transform] lg:duration-200'
               : dragging
                 ? 'will-change-transform'
                 : entered
                   ? 'transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]'
-                  : 'animate-sheet-up',
+                  : 'animate-sheet-up lg:animate-scale-in',
             className,
           )}
           style={dragging ? { transform: `translateY(${drag}px)` } : undefined}
         >
-          <div data-sheet-handle className="flex shrink-0 cursor-grab touch-none justify-center pb-1 pt-3 active:cursor-grabbing">
+          <div data-sheet-handle className="flex shrink-0 cursor-grab touch-none justify-center pb-1 pt-3 active:cursor-grabbing lg:hidden">
             <span className="h-[5px] w-10 rounded-full bg-white/25" aria-hidden="true" />
           </div>
           {(title || dismissible) && (
-            <div data-sheet-handle className="flex shrink-0 touch-none items-start gap-3 px-5 pb-3 pt-1">
+            <div data-sheet-handle className="flex shrink-0 touch-none items-start gap-3 px-5 pb-3 pt-1 lg:px-6 lg:pt-5">
               <div className="min-w-0 flex-1 pt-1.5">
                 {title && (
                   <h2 id={titleId} className="display text-[24px] text-text">
@@ -167,10 +172,10 @@ export function BottomSheet({ open, onClose, title, description, children, foote
               )}
             </div>
           )}
-          <div ref={body} className="no-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5">
+          <div ref={body} className={clsx('no-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 lg:px-6', !(title || dismissible) && 'lg:pt-6')}>
             {children}
           </div>
-          {footer && <div className="shrink-0 border-t border-line px-5 pb-[calc(16px+var(--safe-bottom))] pt-3">{footer}</div>}
+          {footer && <div className="shrink-0 border-t border-line px-5 pb-[calc(16px+var(--safe-bottom))] pt-3 lg:px-6">{footer}</div>}
           {!footer && <div className="shrink-0" style={{ height: 'var(--safe-bottom)' }} />}
         </div>
       </div>

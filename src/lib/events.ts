@@ -1,5 +1,5 @@
 // Tiny app-wide event: features call notifyDataChanged() after writing meals,
-// workouts, water… so other mounted views (dashboard, brand column) can refetch.
+// workouts, water… so other mounted views (dashboard, laptop sidebar) can refetch.
 
 const EVT = 'fitora:data-changed';
 

@@ -1,6 +1,6 @@
 export { AppFrame } from './AppFrame';
 export { BottomNav } from './BottomNav';
-export { BrandColumn } from './BrandColumn';
+export { Sidebar } from './Sidebar';
 export { MENU_LINKS, MenuOverlay, type MenuOverlayProps } from './MenuOverlay';
 export { Page, type PageProps } from './Page';
 export { ShellContext, useShell, type ShellState } from './ShellContext';

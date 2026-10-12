@@ -392,9 +392,9 @@
 }
 
 /* ===================================================================== */
-/* Phone frame (desktop ≥ 768px) — see AppFrame                           */
+/* Phone frame (tablet 768–1023px) — see AppFrame                        */
 /* ===================================================================== */
-@media (min-width: 768px) {
+@media (min-width: 768px) and (max-width: 1023.98px) {
   .fitora-frame {
     position: relative;
     height: min(92vh, 900px);
@@ -504,6 +504,44 @@
   .skeleton {
     animation: none !important;
     background: rgba(255, 255, 255, 0.07);
+  }
+}
+
+/* ===================================================================== */
+/* Laptop (≥ 1024px): full-window app — sidebar + wide content (no frame)  */
+/* ===================================================================== */
+@media (min-width: 1024px) {
+  :root {
+    /* No bottom nav on laptop: Page keeps only its normal bottom breathing room. */
+    --bottomnav-h: 0px;
+    --sidebar-w: 268px;
+  }
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+  /* Wider, calmer ember glow for a landscape window (the phone one is a tall narrow cone). */
+  .app-bg {
+    background-image:
+      radial-gradient(55% 38% at 62% -10%, rgba(225, 80, 10, 0.24) 0%, rgba(122, 29, 0, 0.1) 45%, transparent 75%),
+      radial-gradient(35% 30% at 100% 0%, rgba(237, 180, 11, 0.07) 0%, transparent 70%),
+      radial-gradient(40% 40% at 0% 100%, rgba(60, 28, 14, 0.35) 0%, transparent 70%);
+  }
+  /* Real scrollbars are expected with a mouse; keep them thin and warm. */
+  #fitora-app main.no-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(237, 228, 216, 0.16) transparent;
+  }
+  #fitora-app main.no-scrollbar::-webkit-scrollbar {
+    display: block;
+    width: 10px;
+  }
+  #fitora-app main.no-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(237, 228, 216, 0.14);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
   }
 }
 

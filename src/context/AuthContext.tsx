@@ -164,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const { tokenHash, type } = r.pending;
             const who = r.session?.user.email;
             toastRef.current.show(
-              `${who ? `Bạn đang đăng nhập bằng ${who}. ` : ''}Mở liên kết trong email sẽ chuyển sang tài khoản khác. Chỉ tiếp tục nếu chính bạn vừa yêu cầu liên kết này.`,
+              `${who ? `Bạn đang đăng nhập bằng ${who}. ` : ''}Mở liên kết này sẽ chuyển sang tài khoản khác. Chỉ tiếp tục nếu chính bạn vừa yêu cầu.`,
               {
                 kind: 'info',
                 duration: 0,

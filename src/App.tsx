@@ -198,8 +198,8 @@ function AppRoutes() {
       <Route path="/reset" element={<ResetGuard />} />
 
       <Route element={<RequireAuth />}>
-        {/* Onboarding: signed-in, no bottom nav */}
-        <Route element={<ShellLayout bottomNav={false} />}>
+        {/* Onboarding: signed-in, no bottom nav / sidebar */}
+        <Route element={<ShellLayout bottomNav={false} sidebar={false} />}>
           <Route path="/onboarding" element={<OnboardingPage />} />
         </Route>
 
@@ -233,7 +233,7 @@ export default function App() {
     // downloading keeps the current screen visible instead of flashing the skeleton fallback.
     <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <ToastProvider>
-        {/* AuthProvider is null-safe when Supabase is not configured (BrandColumn reads it). */}
+        {/* AuthProvider is null-safe when Supabase is not configured. */}
         <AuthProvider>
           <ProfileProvider>
             <AppFrame>

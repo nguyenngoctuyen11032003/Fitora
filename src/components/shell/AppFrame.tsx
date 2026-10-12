@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { OVERLAY_ROOT_ID } from '@/components/ui/Portal';
-import { BrandColumn } from './BrandColumn';
 
 function StatusBar() {
   const fmt = () => new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -10,7 +9,7 @@ function StatusBar() {
     return () => window.clearInterval(id);
   }, []);
   return (
-    <div className="fitora-frame__status hidden text-text md:flex" aria-hidden="true">
+    <div className="fitora-frame__status hidden text-text md:flex lg:hidden" aria-hidden="true">
       <span className="tabular">{time}</span>
       <span className="flex items-center gap-1.5">
         {/* signal */}
@@ -38,33 +37,32 @@ function StatusBar() {
 /**
  * Device shell.
  *  - < 768px: full-bleed app, 100dvh, real safe-area insets.
- *  - ≥ 768px: warm page background + phone frame (54px radius, dynamic island, side buttons),
- *    content rendered at the frame's real size (no transform scaling).
- *  - ≥ 1100px: brand column on the left.
+ *  - 768–1023px (tablet): warm page background + phone frame (54px radius, dynamic island, side
+ *    buttons), content rendered at the frame's real size (no transform scaling).
+ *  - ≥ 1024px (laptop): full-window app; ShellLayout adds the sidebar and pages switch to wide grids.
  * The DOM structure is the same at every width (CSS-only switch), so #fitora-overlay-root
  * never remounts and portals stay valid.
  */
 export function AppFrame({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-[100dvh] w-full items-center justify-center md:gap-[clamp(32px,6vw,120px)] md:px-8 md:py-6">
-      <BrandColumn />
       {/* Phone: pinned to all four edges (not 100dvh) so it also covers the home-indicator strip in iOS standalone. */}
-      <div className="fixed inset-0 h-auto w-full fitora-frame md:relative md:inset-auto md:h-[min(92vh,900px)]">
+      <div className="fixed inset-0 h-auto w-full fitora-frame md:relative md:inset-auto md:h-[min(92vh,900px)] lg:fixed lg:inset-0 lg:h-auto">
         {/* side buttons (desktop only) */}
-        <span className="fitora-frame__btn -left-[5px] top-[120px] hidden h-8 md:block" aria-hidden="true" />
-        <span className="fitora-frame__btn -left-[5px] top-[176px] hidden h-14 md:block" aria-hidden="true" />
-        <span className="fitora-frame__btn -left-[5px] top-[244px] hidden h-14 md:block" aria-hidden="true" />
-        <span className="fitora-frame__btn -right-[5px] top-[200px] hidden h-20 md:block" aria-hidden="true" />
+        <span className="fitora-frame__btn -left-[5px] top-[120px] hidden h-8 md:block lg:hidden" aria-hidden="true" />
+        <span className="fitora-frame__btn -left-[5px] top-[176px] hidden h-14 md:block lg:hidden" aria-hidden="true" />
+        <span className="fitora-frame__btn -left-[5px] top-[244px] hidden h-14 md:block lg:hidden" aria-hidden="true" />
+        <span className="fitora-frame__btn -right-[5px] top-[200px] hidden h-20 md:block lg:hidden" aria-hidden="true" />
 
         <div className="app-bg relative h-full w-full overflow-hidden fitora-frame__screen">
-          <span className="fitora-frame__island hidden md:block" aria-hidden="true" />
+          <span className="fitora-frame__island hidden md:block lg:hidden" aria-hidden="true" />
           <StatusBar />
           <div id="fitora-app" className="relative h-full w-full">
             {children}
           </div>
-          {/* Overlays (sheets, modals, toasts, menu) portal here — inside the frame. */}
+          {/* Overlays (sheets, modals, toasts, menu) portal here — inside the frame (whole window on laptop). */}
           <div id={OVERLAY_ROOT_ID} className="pointer-events-none absolute inset-0 z-50" />
-          <span className="fitora-frame__home hidden md:block" aria-hidden="true" />
+          <span className="fitora-frame__home hidden md:block lg:hidden" aria-hidden="true" />
         </div>
       </div>
     </div>
