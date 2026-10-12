@@ -9,14 +9,14 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Spinner } from '@/components/ui/Spinner';
 import { useToast } from '@/components/ui/Toast';
 import { FoodSheet } from '@/features/food/components/FoodSheet';
-import { fromCustomFood, MEAL_SHORT, servingUnit } from '@/features/food/lib';
+import { fromCustomFood, MEAL_SHORT } from '@/features/food/lib';
 import { notifyDataChanged } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { logCustomFood, markCustomFoodUsed, unmarkCustomFoodUsed, type CustomFoodUsage } from '@/services/foods';
-import { logMealTemplate } from '@/services/mealTemplates';
+import { logMealTemplate, unmarkMealTemplateUsed } from '@/services/mealTemplates';
 import { deleteMeal, mealPhotoUrl } from '@/services/meals';
 import { MEAL_LABELS, MEAL_TYPES, type CustomFood, type MealEntry, type MealTemplate, type MealType } from '@/types/db';
-import { loggedFoodIds, loggedMessage, rankQuickItems, stableOrder, type QuickItem } from '../quickRelog';
+import { loggedFoodIds, loggedMessage, rankQuickItems, stableOrder, usualPortion, type QuickItem } from '../quickRelog';
 import { useQuickRelog } from '../useQuickRelog';
 
 interface Props {
@@ -133,7 +133,7 @@ const Tile = memo(function Tile({ item, state, logged, mealLabel, onTap, onMore 
   const label = `Ghi ${name}, ${item.portion}, ${formatNumber(item.kcal)} kcal vào ${mealLabel.toLowerCase()}`;
 
   return (
-    <li className="w-[152px] shrink-0 snap-start">
+    <li className="w-[152px] shrink-0 snap-start lg:w-auto lg:min-w-0">
       <button
         type="button"
         onClick={onClick}
@@ -302,15 +302,16 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
   }, []);
 
   const undo = useCallback(
-    async (rows: MealEntry[], name: string, usage: CustomFoodUsage[]) => {
+    async (rows: MealEntry[], name: string, usage: CustomFoodUsage[], template?: Pick<MealTemplate, 'id' | 'last_used_at'>) => {
       const res = await Promise.allSettled(rows.map((r) => deleteMeal(r.id)));
       const removed = rows.filter((_, i) => res[i].status === 'fulfilled').map((r) => r.id);
       if (removed.length) onApplied([], removed);
       // Nothing was eaten after all: give the saved foods their usage count / usual meal back
       // (only when every entry is gone, otherwise the log still stands).
-      if (usage.length && removed.length === rows.length) {
-        await unmarkCustomFoodUsed(usage);
-        notifyDataChanged('foods');
+      if (removed.length === rows.length) {
+        if (usage.length) await unmarkCustomFoodUsed(usage);
+        if (template) await unmarkMealTemplateUsed(template);
+        if (usage.length || template) notifyDataChanged('foods');
       }
       notifyDataChanged('meals');
       const err = res.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
@@ -322,7 +323,15 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
 
   /** Shared success path: dashboard + other screens + toast with undo. */
   const afterLog = useCallback(
-    (key: string | null, rows: MealEntry[], name: string, kcal: number, at: MealType, usage: CustomFoodUsage[]) => {
+    (
+      key: string | null,
+      rows: MealEntry[],
+      name: string,
+      kcal: number,
+      at: MealType,
+      usage: CustomFoodUsage[],
+      template?: Pick<MealTemplate, 'id' | 'last_used_at'>,
+    ) => {
       onApplied(rows, []);
       notifyDataChanged('meals');
       if (key) {
@@ -339,7 +348,7 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
           label: 'Hoàn tác',
           onClick: () => {
             toast.dismiss(id);
-            void undo(rows, name, usage);
+            void undo(rows, name, usage, template);
           },
         },
       });
@@ -352,8 +361,9 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
       try {
         // Foods linked from the template get their usage bumped too; undo restores them.
         const usage = usageOf(t.items.map((i) => i?.custom_food_id));
+        const before = { id: t.id, last_used_at: t.last_used_at };
         const rows = await logMealTemplate(t, date, at);
-        afterLog(key, rows, t.name, Math.round(rows.reduce((a, r) => a + (Number(r.kcal) || 0), 0)), at, usage);
+        afterLog(key, rows, t.name, Math.round(rows.reduce((a, r) => a + (Number(r.kcal) || 0), 0)), at, usage, before);
         return true;
       } catch (e) {
         toast.error(e);
@@ -372,7 +382,7 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
       try {
         if (item.kind === 'food') {
           const usage = usageOf([item.food.id]);
-          const row = await logCustomFood(item.food, date, meal, 1);
+          const row = await logCustomFood(item.food, date, meal);
           afterLog(item.key, [row], item.food.name, Math.round(Number(row.kcal) || 0), meal, usage);
         } else if (!(await logTemplate(item.template, meal, item.key))) {
           setState(item.key, 'idle');
@@ -432,11 +442,11 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
             <UtensilsCrossed className="h-[18px] w-[18px]" />
           </span>
           <p className="min-w-0 flex-1 text-[13px] leading-snug text-muted">
-            Món bạn scan hoặc lưu sẽ hiện ở đây — lần sau chỉ cần <span className="font-semibold text-text">một chạm</span> để ghi lại, không phải scan nữa.
+            Món bạn quét hoặc lưu sẽ hiện ở đây — lần sau chỉ cần <span className="font-semibold text-text">một chạm</span> để ghi lại, không phải quét lại nữa.
           </p>
         </div>
       ) : (
-        <ul className="no-scrollbar -mx-5 flex snap-x snap-mandatory scroll-px-5 gap-2.5 overflow-x-auto px-5 pb-1">
+        <ul className="no-scrollbar -mx-5 flex snap-x snap-mandatory scroll-px-5 gap-2.5 overflow-x-auto px-5 pb-1 lg:mx-0 lg:grid lg:snap-none lg:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] lg:gap-3 lg:overflow-visible lg:px-0 lg:pb-0">
           {items.map((it) => (
             <Tile
               key={it.key}
@@ -457,7 +467,7 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
         option={foodOption}
         date={date}
         meal={meal}
-        initial={sheetFood ? { quantity: 1, unit: servingUnit(sheetFood.serving_label) } : null}
+        initial={sheetFood ? usualPortion(sheetFood) : null}
         onSaved={(entry, mode) => {
           if (mode !== 'add') return;
           onApplied([entry], []);

@@ -15,7 +15,7 @@ interface Props {
   className?: string;
 }
 
-/** Prominent "Scan bữa ăn" CTA + 4-meal summary (tap → /diary). */
+/** Prominent "Quét bữa ăn" CTA + 4-meal summary (tap → /diary). */
 export const MealsSection = memo(function MealsSection({ groups, date, suggestedMeal, className }: Props) {
   const diary = `/diary?date=${date}`;
   return (
@@ -34,7 +34,7 @@ export const MealsSection = memo(function MealsSection({ groups, date, suggested
           <ScanLine className="h-6 w-6" aria-hidden="true" />
         </span>
         <span className="relative min-w-0 flex-1">
-          <span className="block text-[18px] font-extrabold leading-tight tracking-[-0.03em]">Scan bữa ăn</span>
+          <span className="block text-[18px] font-extrabold leading-tight tracking-[-0.03em]">Quét bữa ăn</span>
           <span className="mt-0.5 line-clamp-2 text-[13px] font-semibold leading-snug text-[#1a0e02]/75">
             AI tính calo · <span className="whitespace-nowrap">{MEAL_LABELS[suggestedMeal].toLowerCase()}</span>
           </span>

@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
 import { useProfile } from '@/context/ProfileContext';
 import { greetingVi, weekdayLong } from '@/lib/date';
+import { useMediaQuery } from '@/lib/hooks';
 import { MEAL_TYPES } from '@/types/db';
 import { CalorieHero } from './components/CalorieHero';
 import { InsightStrip } from './components/InsightStrip';
@@ -52,6 +53,7 @@ export default function TodayPage() {
   const [stepsOpen, setStepsOpen] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const waterToast = useRef<number | null>(null);
+  const laptop = useMediaQuery('(min-width: 1024px)');
 
   const hour = now.getHours();
   const suggestedMeal = mealForHour(hour, now.getMinutes());
@@ -143,7 +145,7 @@ export default function TodayPage() {
   if (loading) {
     return (
       <Page topBar={topBar} label="Hôm nay">
-        <TodaySkeleton />
+        <TodaySkeleton laptop={laptop} />
       </Page>
     );
   }
@@ -168,6 +170,80 @@ export default function TodayPage() {
   }
 
   const s = data.summary;
+
+  // Laptop dashboard: full-width hero, then a main column (macros, relog, meals, workouts) beside a
+  // sticky side column (quick actions, insight, water & steps). Phone keeps the stacked column below.
+  if (laptop) {
+    return (
+      <Page topBar={topBar} label="Hôm nay">
+        <h1 className="sr-only">Hôm nay</h1>
+        <div className="flex flex-col gap-6 pb-12">
+          <Reveal delay={0}>
+            <CalorieHero energy={energy} activityLevel={fit?.activity_level} />
+          </Reveal>
+          {failed.length > 0 && (
+            <div
+              role="alert"
+              className="glass-card flex items-center gap-3 border border-[rgba(225,80,10,0.35)] px-5 py-3"
+            >
+              <WifiOff className="h-5 w-5 shrink-0 text-ember" aria-hidden="true" />
+              <p className="min-w-0 flex-1 text-[13px] leading-snug text-text">
+                Chưa tải được {failed.map((f) => PART_LABELS[f]).join(', ')}. Số liệu có thể chưa mới nhất.
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={<RefreshCw className={clsx('h-4 w-4', retrying && 'animate-spin')} />}
+                onClick={() => void onRetry()}
+                disabled={retrying}
+              >
+                Thử lại
+              </Button>
+            </div>
+          )}
+          <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-6 min-[1400px]:grid-cols-[minmax(0,1fr)_380px]">
+            <div className="flex min-w-0 flex-col gap-7">
+              <Reveal delay={120}>
+                <MacroCards summary={s} targets={targets} />
+              </Reveal>
+              <Reveal delay={180}>
+                <QuickRelogStrip date={date} meal={suggestedMeal} meals={data.meals} onApplied={applyMeals} />
+              </Reveal>
+              <Reveal delay={260}>
+                <MealsSection groups={groups} date={date} suggestedMeal={suggestedMeal} />
+              </Reveal>
+              <Reveal delay={340}>
+                <WorkoutsSection workouts={data.workouts} onComplete={completeWorkout} />
+              </Reveal>
+            </div>
+            <aside aria-label="Thao tác nhanh & theo dõi" className="flex min-w-0 flex-col gap-4 [@media(min-height:760px)]:sticky [@media(min-height:760px)]:top-6">
+              <Reveal delay={80}>
+                <QuickActions date={date} suggestedMeal={suggestedMeal} onAddWater={quickWater} onLogSteps={openSteps} />
+              </Reveal>
+              <Reveal delay={140}>
+                <InsightStrip insights={insights} />
+              </Reveal>
+              <Reveal delay={220} className="mt-3">
+                <h2 className="display mb-3 text-[26px] text-text">Nước &amp; vận động</h2>
+                <div className="flex flex-col gap-3">
+                  <WaterCard waterMl={s.water_ml} targetMl={targets.water_ml} date={date} onAdd={onWaterAdd} />
+                  <StepsCard
+                    steps={s.steps}
+                    target={targets.steps}
+                    kcal={energy.stepsKcal}
+                    onSave={onStepsSave}
+                    open={stepsOpen}
+                    onOpenChange={setStepsOpen}
+                  />
+                </div>
+              </Reveal>
+            </aside>
+          </div>
+        </div>
+      </Page>
+    );
+  }
+
   return (
     <Page topBar={topBar} label="Hôm nay">
       <h1 className="sr-only">Hôm nay</h1>
@@ -232,7 +308,75 @@ export default function TodayPage() {
   );
 }
 
-function TodaySkeleton() {
+function TodaySkeleton({ laptop }: { laptop?: boolean }) {
+  if (laptop) {
+    // Mirrors the laptop dashboard: hero (gauge + equation), then main column beside the side column.
+    return (
+      <div className="flex flex-col gap-6" role="status" aria-label="Đang tải dữ liệu hôm nay">
+        <div className="glass-card grid grid-cols-[300px_minmax(0,1fr)] items-center gap-x-12 px-10 py-7 min-[1400px]:gap-x-16 min-[1400px]:px-12">
+          <div className="relative aspect-[300/232] w-full">
+            <div className="absolute inset-x-0 top-[22%] flex flex-col items-center">
+              <Skeleton width={96} height={11} />
+              <Skeleton width={180} height={80} className="mt-3" />
+              <Skeleton width={170} height={13} className="mt-2" />
+            </div>
+          </div>
+          <div className="min-w-0">
+            <Skeleton width={130} height={11} />
+            <Skeleton width={280} height={16} className="mt-3" />
+            <div className="mt-5 grid grid-cols-3 gap-6">
+              <Skeleton height={122} className="!rounded-[20px]" />
+              <Skeleton height={122} className="!rounded-[20px]" />
+              <Skeleton height={122} className="!rounded-[20px]" />
+            </div>
+            <Skeleton height={14} className="mt-4" />
+          </div>
+        </div>
+        <div className="grid grid-cols-[minmax(0,1fr)_340px] items-start gap-6 min-[1400px]:grid-cols-[minmax(0,1fr)_380px]">
+          <div className="flex min-w-0 flex-col gap-7">
+            <div>
+              <div className="grid grid-cols-3 gap-2.5">
+                <Skeleton height={124} rounded="card" />
+                <Skeleton height={124} rounded="card" />
+                <Skeleton height={124} rounded="card" />
+              </div>
+              <Skeleton height={16} className="mt-2.5" />
+            </div>
+            <div>
+              <Skeleton width={130} height={18} />
+              <Skeleton width={220} height={12} className="mt-2" />
+              <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
+                <Skeleton height={134} className="!rounded-2xl" />
+                <Skeleton height={134} className="!rounded-2xl" />
+                <Skeleton height={134} className="!rounded-2xl" />
+              </div>
+            </div>
+            <div>
+              <div className="mb-3 flex h-[44px] items-end justify-between">
+                <Skeleton width={110} height={26} />
+                <Skeleton width={70} height={14} />
+              </div>
+              <Skeleton height={76} rounded="card" />
+              <Skeleton height={256} rounded="card" className="mt-3" />
+            </div>
+          </div>
+          <div className="flex min-w-0 flex-col gap-4">
+            <div className="grid grid-cols-3 gap-2.5">
+              <Skeleton height={64} className="!rounded-2xl" />
+              <Skeleton height={64} className="!rounded-2xl" />
+              <Skeleton height={64} className="!rounded-2xl" />
+            </div>
+            <Skeleton height={86} rounded="card" />
+            <div className="mt-3">
+              <Skeleton width={210} height={26} className="mb-3" />
+              <Skeleton height={250} rounded="card" />
+              <Skeleton height={166} rounded="card" className="mt-3" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-4" role="status" aria-label="Đang tải dữ liệu hôm nay">
       {/* hero: same box as the gauge (300×232 viewBox) + equation row, so nothing jumps */}

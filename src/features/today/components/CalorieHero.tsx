@@ -81,13 +81,13 @@ export const CalorieHero = memo(function CalorieHero({ energy, activityLevel }: 
   return (
     <section
       aria-label="Calo hôm nay"
-      className="glass-card relative overflow-hidden px-5 pb-5 pt-4"
+      className="glass-card relative overflow-hidden px-5 pb-5 pt-4 lg:grid lg:grid-cols-[300px_minmax(0,1fr)] lg:items-center lg:gap-x-12 lg:px-10 lg:py-7 min-[1400px]:gap-x-16 min-[1400px]:px-12"
     >
       {/* warm glow behind the gauge */}
       <div
         aria-hidden="true"
         className={clsx(
-          'pointer-events-none absolute left-1/2 top-6 h-56 w-56 -translate-x-1/2 rounded-full blur-3xl transition-colors duration-700',
+          'pointer-events-none absolute left-1/2 top-6 h-56 w-56 -translate-x-1/2 rounded-full blur-3xl transition-colors duration-700 lg:left-[190px] lg:top-10 min-[1400px]:left-[198px]',
           over ? 'bg-danger/25' : 'bg-gold/15',
         )}
       />
@@ -168,8 +168,16 @@ export const CalorieHero = memo(function CalorieHero({ energy, activityLevel }: 
         </div>
       </div>
 
+      {/* Laptop: equation + note sit in a column beside the gauge (box-less on phone). */}
+      <div className="contents lg:relative lg:block lg:min-w-0">
+      <div className="relative mb-5 hidden lg:block" aria-hidden="true">
+        <p className="eyebrow">Ngân sách hôm nay</p>
+        <p className="mt-2 text-[15px] font-semibold text-text">
+          Còn lại = Mục tiêu − Đã ăn + {hasAllowance ? 'Cộng thêm' : 'Tiêu hao'}
+        </p>
+      </div>
       {/* Equation: Mục tiêu − Đã ăn + Tiêu hao (tập luyện + bước chân vượt mức đã tính trong mục tiêu) */}
-      <div className="relative mt-1 flex items-stretch justify-between gap-1" role="group" aria-label="Công thức calo còn lại">
+      <div className="relative mt-1 flex items-stretch justify-between gap-1 lg:mt-0 lg:gap-3" role="group" aria-label="Công thức calo còn lại">
         <EqItem icon={Target} color="var(--text)" label="Mục tiêu" value={energy.target} />
         <Op>−</Op>
         <EqItem icon={Utensils} color="var(--gold)" label="Đã ăn" value={energy.eaten} />
@@ -183,18 +191,19 @@ export const CalorieHero = memo(function CalorieHero({ energy, activityLevel }: 
         />
       </div>
       {hasAllowance && (
-        <p className="relative mt-2.5 text-center text-[11.5px] leading-snug text-muted">
+        <p className="relative mt-2.5 text-center text-[11.5px] leading-snug text-muted lg:mt-4 lg:text-left lg:text-[12.5px]">
           Mục tiêu đã tính sẵn ~{formatNumber(energy.allowance)} kcal vận động/ngày
           {activityLevel ? ` (mức “${ACTIVITY_LABELS[activityLevel]}”)` : ''}. Chỉ phần đốt vượt mức này mới được cộng thêm.
         </p>
       )}
+      </div>
     </section>
   );
 });
 
 function Op({ children }: { children: string }) {
   return (
-    <span aria-hidden="true" className="self-center pt-3 text-lg font-bold text-muted">
+    <span aria-hidden="true" className="self-center pt-3 text-lg font-bold text-muted lg:pt-0 lg:text-2xl lg:font-semibold">
       {children}
     </span>
   );
@@ -214,17 +223,17 @@ function EqItem({
   hint?: string;
 }) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col items-center rounded-2xl border border-white/[0.06] bg-white/[0.035] px-1 py-2.5 text-center">
+    <div className="flex min-w-0 flex-1 flex-col items-center rounded-2xl border border-white/[0.06] bg-white/[0.035] px-1 py-2.5 text-center lg:items-start lg:rounded-[20px] lg:px-5 lg:py-4 lg:text-left">
       {/* One line at 360 px and in the desktop phone frame too ("Cộng thêm" used to wrap and misalign the three boxes). */}
-      <span className="flex max-w-full items-center gap-0.5 whitespace-nowrap text-[10.5px] font-semibold text-muted">
-        <Icon className="h-3.5 w-3.5 shrink-0" style={{ color }} aria-hidden="true" />
+      <span className="flex max-w-full items-center gap-0.5 whitespace-nowrap text-[10.5px] font-semibold text-muted lg:gap-1.5 lg:text-[12.5px]">
+        <Icon className="h-3.5 w-3.5 shrink-0 lg:h-4 lg:w-4" style={{ color }} aria-hidden="true" />
         {label}
       </span>
-      <span className="num mt-1.5 text-[22px] leading-none text-text">{formatNumber(value)}</span>
+      <span className="num mt-1.5 text-[22px] leading-none text-text lg:mt-3 lg:text-[34px]">{formatNumber(value)}</span>
       {hint ? (
-        <span className="mt-1 max-w-full truncate text-[10px] text-muted">{hint}</span>
+        <span className="mt-1 max-w-full truncate text-[10px] text-muted lg:mt-1.5 lg:text-[11.5px]">{hint}</span>
       ) : (
-        <span className="mt-1 text-[10px] text-muted">kcal</span>
+        <span className="mt-1 text-[10px] text-muted lg:mt-1.5 lg:text-[11.5px]">kcal</span>
       )}
     </div>
   );

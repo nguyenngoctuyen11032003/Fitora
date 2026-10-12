@@ -26,10 +26,10 @@ export const QuickActions = memo(function QuickActions({ date, suggestedMeal, on
           <Link
             to={`/scan?meal=${suggestedMeal}&date=${date}`}
             className={ITEM}
-            aria-label={`Scan ${MEAL_LABELS[suggestedMeal].toLowerCase()}`}
+            aria-label={`Quét ${MEAL_LABELS[suggestedMeal].toLowerCase()}`}
           >
             <ScanLine className="h-5 w-5 text-gold" aria-hidden="true" />
-            <span className={LABEL}>Scan món</span>
+            <span className={LABEL}>Quét món</span>
           </Link>
         </li>
         <li className="min-w-0">

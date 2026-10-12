@@ -11,6 +11,7 @@ import {
   recencyScore,
   stableOrder,
   templateScore,
+  usualPortion,
 } from './quickRelog';
 
 const NOW = new Date('2026-10-12T12:00:00+07:00');
@@ -118,6 +119,12 @@ describe('rankQuickItems', () => {
     expect(out[1].usual).toBe(false);
   });
 
+  it('kcal of a tile is what one tap logs: the usual amount, not one unit', () => {
+    const twice = food({ serving_label: '1 cái', serving_grams: 150, kcal_100g: 200, default_servings: 2 });
+    const [t] = rankQuickItems({ foods: [twice], templates: [], meal: 'dinner', date: '2026-10-12', now: NOW });
+    expect(t).toMatchObject({ kcal: 600, portion: '2 cái · 300 g' });
+  });
+
   it('kcal of a tile is exactly what one tap logs (one default serving)', () => {
     const f = food({ serving_label: '1 phần', serving_grams: 333, kcal_100g: 123.4 });
     const [it] = rankQuickItems({ foods: [f], templates: [], meal: 'dinner', date: '2026-10-12', now: NOW });
@@ -168,6 +175,17 @@ describe('helpers', () => {
     expect(foodPortionLabel({ serving_label: '1 bát', serving_grams: 350 })).toBe('1 bát · 350 g');
     expect(foodPortionLabel({ serving_label: '', serving_grams: 0 })).toBe('1 phần');
     expect(foodPortionLabel({ serving_label: '2 lát', serving_grams: 1234.4 })).toBe('2 lát · 1.234 g');
+    // The usual amount (what a tap logs), not one unit.
+    expect(foodPortionLabel({ serving_label: '1 cái', serving_grams: 150, default_servings: 2 })).toBe('2 cái · 300 g');
+    expect(foodPortionLabel({ serving_label: '1 bát', serving_grams: 350, default_servings: 1.5 })).toBe('1,5 bát · 525 g');
+    // Already in grams: no duplicated weight.
+    expect(foodPortionLabel({ serving_label: '200 g', serving_grams: 200 })).toBe('200 g');
+  });
+  it('long-press sheet opens at the usual amount, in the unit the sheet offers', () => {
+    expect(usualPortion(food({ serving_label: '1 cái', serving_grams: 150, default_servings: 2 }))).toEqual({ quantity: 2, unit: 'cái' });
+    expect(usualPortion(food({ serving_label: '2 lát', serving_grams: 60 }))).toEqual({ quantity: 2, unit: 'lát' });
+    // A weight label is expressed in ml / g (never a unit called "250 ml").
+    expect(usualPortion(food({ serving_label: '250 ml', serving_grams: 260 }))).toEqual({ quantity: 260, unit: 'ml' });
   });
   it('logged food ids are per meal', () => {
     const s = loggedFoodIds(

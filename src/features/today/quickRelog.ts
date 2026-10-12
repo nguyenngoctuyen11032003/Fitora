@@ -1,7 +1,8 @@
 // "Ăn lại nhanh": which saved foods / meal templates to offer for the current meal.
 // Pure (tested in quickRelog.test.ts). Data comes from services/foods + services/mealTemplates.
 import { formatNumber } from '@/lib/format';
-import { compareByUse, customFoodEntry, servingUnitOf } from '@/services/foods';
+import { defaultPortion, fromCustomFood } from '@/features/food/lib';
+import { compareByUse, customFoodEntry, parseServingLabel, usualServings } from '@/services/foods';
 import type { CustomFood, MealEntry, MealTemplate, MealType } from '@/types/db';
 
 export const QUICK_LIMIT = 8;
@@ -13,9 +14,9 @@ export interface QuickFoodItem {
   kind: 'food';
   key: string;
   food: CustomFood;
-  /** kcal of one default serving (what a tap logs). */
+  /** kcal of the usual amount (exactly what a tap logs). */
   kcal: number;
-  /** "1 bát · 350 g" */
+  /** The usual amount: "1 bát · 350 g", "2 cái · 300 g" */
   portion: string;
   score: number;
   /** Usually eaten at this meal (default_meal matches). */
@@ -70,13 +71,31 @@ export function templateScore(t: Pick<MealTemplate, 'meal' | 'use_count' | 'last
   return (t.meal === meal ? 4.5 : 0) + frequencyScore(t.use_count) + recencyScore(t.last_used_at, now);
 }
 
-/** "1 bát · 350 g" (grams omitted for a pseudo 100 g "phần" that has no real weight info). */
-export function foodPortionLabel(food: Pick<CustomFood, 'serving_label' | 'serving_grams'>): string {
-  const unit = servingUnitOf(food.serving_label);
-  const g = fin(food.serving_grams);
-  const grams = g > 0 ? ` · ${formatNumber(g, 0)} g` : '';
-  // "2 lát" is already a full serving label; only bare units get the "1 " prefix.
-  return `${/^\d/.test(unit) ? unit : `1 ${unit}`}${grams}`;
+/**
+ * The amount a tap logs (usual servings, see usualServings): "1 bát · 350 g", "2 cái · 300 g",
+ * "1,5 bát · 525 g". Grams are omitted when unknown (0) and for a label already in grams
+ * ("200 g", never "200 g · 200 g").
+ */
+export function foodPortionLabel(
+  food: Pick<CustomFood, 'serving_label' | 'serving_grams' | 'default_servings'>,
+  servings: number = usualServings(food),
+): string {
+  // Same quantity / unit / grams arithmetic as customFoodEntry (what the tap inserts).
+  const q = Number(servings) > 0 && Number.isFinite(Number(servings)) ? Number(servings) : 1;
+  const { count, unit } = parseServingLabel(food.serving_label);
+  const qty = Math.round(q * count * 100) / 100;
+  const g = fin(food.serving_grams) * q;
+  const grams = g > 0 && unit.toLowerCase() !== 'g' ? ` · ${formatNumber(g, 0)} g` : '';
+  return `${formatNumber(qty, 2)} ${unit}${grams}`;
+}
+
+/**
+ * Portion the long-press sheet opens with: the option's default portion, i.e. the unit the
+ * sheet offers (fromCustomFood: "250 ml" → ml, "2 lát" → 2 lát) at the usual amount
+ * (default_servings), so it starts at exactly what a tap would log.
+ */
+export function usualPortion(food: CustomFood): { quantity: number; unit: string } {
+  return defaultPortion(fromCustomFood(food));
 }
 
 export interface RankInput {
@@ -103,7 +122,7 @@ export function rankQuickItems({ foods, templates, meal, date, now, limit = QUIC
       kind: 'food',
       key: `food:${food.id}`,
       food,
-      kcal: Math.round(customFoodEntry(food, date, meal, 1).kcal ?? 0),
+      kcal: Math.round(customFoodEntry(food, date, meal).kcal ?? 0),
       portion: foodPortionLabel(food),
       score: foodScore(food, meal, now),
       usual: food.default_meal === meal,

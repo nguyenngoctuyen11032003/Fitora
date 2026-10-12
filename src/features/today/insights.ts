@@ -130,7 +130,7 @@ export function buildInsights(i: InsightInput): Insight[] {
 
   // Meals logged / not logged
   if (i.mealCount === 0) {
-    if (i.hour >= 10) add('no-meals', 'info', 85, 'Chưa có bữa nào được ghi. Scan bữa gần nhất để AI tính calo giúp bạn.');
+    if (i.hour >= 10) add('no-meals', 'info', 85, 'Chưa có bữa nào được ghi. Quét bữa gần nhất để AI tính calo giúp bạn.');
     else if (i.hour >= 4) add('morning', 'info', 20, 'Ngày mới bắt đầu — uống một cốc nước và ghi bữa sáng nhé.');
   } else if (i.loggedMeals && i.hour >= 19 && !i.loggedMeals.includes('dinner') && i.remaining >= 300) {
     // Evening and dinner not logged yet: say how much room is left for it.
