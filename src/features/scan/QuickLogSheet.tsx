@@ -9,7 +9,7 @@ import { Segmented } from '@/components/ui/Segmented';
 import { useToast } from '@/components/ui/Toast';
 import { formatDayVi } from '@/lib/date';
 import { formatNumber } from '@/lib/format';
-import { logCustomFood } from '@/services/foods';
+import { logCustomFood, usualServings } from '@/services/foods';
 import { CUSTOM_FOOD_SOURCE_LABELS, MEAL_LABELS, MEAL_TYPES, type CustomFood, type MealEntry, type MealType } from '@/types/db';
 import { savedServing, servingNutrients } from './saved';
 import { SavedThumb } from './SavedStrip';
@@ -26,10 +26,10 @@ interface Props {
   onLogged: (entry: MealEntry, food: CustomFood, meal: MealType, servings: number) => void;
 }
 
-/** Re-log a saved food without AI: pick the portion (and meal) → one insert. */
+/** Re-log a saved food without AI: opens with the amount the user usually eats; pick the portion (and meal) → one insert. */
 export function QuickLogSheet({ food, photoUrl, onClose, meal: initialMeal, date, onLogged }: Props) {
   const toast = useToast();
-  const [servings, setServings] = useState<number | null>(1);
+  const [servings, setServings] = useState<number | null>(usualServings(food));
   const [meal, setMeal] = useState<MealType>(initialMeal);
   const [saving, setSaving] = useState(false);
   // Keep the last food while the sheet animates out.
@@ -38,7 +38,7 @@ export function QuickLogSheet({ food, photoUrl, onClose, meal: initialMeal, date
   useEffect(() => {
     if (!food) return;
     setShown(food);
-    setServings(1);
+    setServings(usualServings(food));
     setMeal(initialMeal);
     setSaving(false);
   }, [food, initialMeal]);

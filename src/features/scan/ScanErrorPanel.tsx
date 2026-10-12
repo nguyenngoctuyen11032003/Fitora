@@ -53,10 +53,13 @@ export function ScanErrorPanel({ code, message, photoUrl, manualHref, onRetake, 
   const { icon: Icon, title } = offline ? { icon: WifiOff, title: 'Bạn đang ngoại tuyến' } : (META[code] ?? META.ai_unavailable);
   const canRetrySame = canRetry && (code === 'ai_unavailable' || code === 'network');
   return (
-    <div ref={rootRef} tabIndex={-1} className="absolute inset-0 z-20 flex flex-col overflow-y-auto overscroll-contain bg-black outline-none" role="alertdialog" aria-modal="true" aria-labelledby="scan-err-title" aria-describedby="scan-err-msg">
+    <div ref={rootRef} tabIndex={-1} className="absolute inset-0 z-20 flex flex-col overflow-y-auto overscroll-contain bg-black outline-none lg:top-[88px] lg:bg-bg" role="alertdialog" aria-modal="true" aria-labelledby="scan-err-title" aria-describedby="scan-err-msg">
+      {/* Laptop: the dimmed photo fills one rounded stage, the message is centred on it */}
+      <div className="contents lg:absolute lg:inset-x-6 lg:bottom-6 lg:top-0 lg:block lg:overflow-hidden lg:rounded-[32px] lg:border lg:border-line lg:bg-black">
       {photoUrl && <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-35 blur-[2px]" />}
-      <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/50 to-black/90" aria-hidden="true" />
-      <div className="relative mt-auto px-5 pt-[calc(var(--safe-top)+16px)]" style={{ paddingBottom: 'calc(var(--safe-bottom) + 24px)' }}>
+      <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/50 to-black/90 lg:to-black/70" aria-hidden="true" />
+      </div>
+      <div className="relative mt-auto px-5 pt-[calc(var(--safe-top)+16px)] lg:mx-auto lg:my-auto lg:w-full lg:max-w-[560px] lg:px-8 lg:pt-10 lg:!pb-12" style={{ paddingBottom: 'calc(var(--safe-bottom) + 24px)' }}>
         {extra && <div className="mb-3 animate-fade-slide-up">{extra}</div>}
         <div className="glass-strong animate-fade-slide-up rounded-[28px] p-6">
           <div className="relative mb-4 inline-grid">

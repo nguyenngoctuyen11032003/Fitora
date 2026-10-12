@@ -58,10 +58,18 @@ export function ScanDock({
 }: Props) {
   const usesCamera = mode !== 'upload';
   return (
-    <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col gap-4 px-5" style={{ paddingBottom: 'calc(var(--safe-bottom) + 18px)' }}>
+    <div
+      className="absolute inset-x-0 bottom-0 z-10 flex flex-col gap-4 px-5 lg:glass-strong lg:bottom-6 lg:left-auto lg:right-6 lg:top-[88px] lg:w-[360px] lg:gap-5 lg:rounded-[32px] lg:!pb-5 lg:pt-5"
+      style={{ paddingBottom: 'calc(var(--safe-bottom) + 18px)' }}
+    >
+      {/* Laptop side panel heading */}
+      <div className="hidden lg:block">
+        <p className="eyebrow">Chế độ quét</p>
+      </div>
+
       {/* Live result card */}
       {mode === 'live' && liveResult && (
-        <div className="glass-strong animate-fade-slide-up flex items-center gap-3 rounded-[24px] p-2.5 pr-3">
+        <div className="glass-strong animate-fade-slide-up flex items-center gap-3 rounded-[24px] p-2.5 pr-3 lg:order-3 lg:bg-white/[0.04]">
           <img src={liveResult.shot.url} alt="" className="h-14 w-14 shrink-0 rounded-[16px] object-cover" />
           <div className="min-w-0 flex-1">
             <p className="truncate text-[15px] font-bold">{liveResult.dishes.map((d) => d.name).join(', ')}</p>
@@ -78,7 +86,7 @@ export function ScanDock({
 
       {/* Pending (closed) review */}
       {pending && (
-        <button type="button" onClick={onOpenPending} className="glass-strong flex min-h-[56px] items-center gap-3 rounded-[24px] p-2 pr-4 text-left">
+        <button type="button" onClick={onOpenPending} className="glass-strong flex min-h-[56px] items-center gap-3 rounded-[24px] p-2 pr-4 text-left lg:order-3 lg:bg-white/[0.04]">
           <img src={pending.photoUrl} alt="" className="h-10 w-10 shrink-0 rounded-[12px] object-cover" />
           <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">
             Kết quả chưa lưu · <span className="text-gold">{formatNumber(pending.kcal)} kcal</span>
@@ -94,7 +102,7 @@ export function ScanDock({
         size="sm"
         value={mode}
         onChange={onModeChange}
-        className="!bg-black/40 backdrop-blur-md"
+        className="!bg-black/40 backdrop-blur-md lg:order-1"
         options={[
           { value: 'camera', label: 'Chụp ảnh', disabled: cameraUnsupported },
           { value: 'upload', label: 'Tải ảnh' },
@@ -102,7 +110,7 @@ export function ScanDock({
         ]}
       />
 
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center lg:order-2 lg:py-1">
         {/* left: gallery */}
         <div className="flex justify-start">
           {usesCamera ? (

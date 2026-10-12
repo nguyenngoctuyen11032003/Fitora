@@ -11,7 +11,7 @@ export function UploadDropzone({ busy, dragOver, onPick }: { busy: boolean; drag
       disabled={busy}
       aria-busy={busy || undefined}
       className={clsx(
-        'group flex aspect-[4/5] max-h-full w-full max-w-[300px] flex-col items-center justify-center gap-4 rounded-[32px] border-2 border-dashed p-6 text-center transition-colors',
+        'group flex aspect-[4/5] max-h-full w-full max-w-[300px] flex-col items-center justify-center gap-4 rounded-[32px] border-2 border-dashed p-6 text-center transition-colors lg:aspect-[16/10] lg:max-w-[560px]',
         dragOver ? 'border-gold bg-[rgba(237,180,11,0.1)]' : 'border-white/20 bg-white/[0.03] hover:border-[rgba(237,180,11,0.6)]',
       )}
     >
@@ -22,7 +22,8 @@ export function UploadDropzone({ busy, dragOver, onPick }: { busy: boolean; drag
         </span>
       </span>
       <span className="display text-[28px]">{busy ? 'Đang xử lý ảnh' : 'Chọn ảnh món ăn'}</span>
-      <span className="max-w-[220px] text-[14px] leading-relaxed text-muted">Ảnh rõ, đủ sáng, thấy trọn món cho kết quả chính xác nhất.</span>
+      <span className="max-w-[220px] text-[14px] leading-relaxed text-muted lg:max-w-[320px]">Ảnh rõ, đủ sáng, thấy trọn món cho kết quả chính xác nhất.</span>
+      {!busy && <span className="hidden rounded-full bg-white/[0.06] px-3 py-1.5 text-[12px] font-semibold text-text/80 lg:inline">hoặc kéo & thả ảnh vào đây</span>}
     </button>
   );
 }

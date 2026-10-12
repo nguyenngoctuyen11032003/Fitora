@@ -26,15 +26,18 @@ export function Analysing({ photoUrl, onCancel }: { photoUrl: string | null; onC
   const p = useCreep(true);
   const step = Math.min(STEPS.length - 1, Math.floor(p / 24));
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-black" role="status" aria-live="polite" aria-busy="true">
+    <div className="absolute inset-0 z-20 flex flex-col bg-black lg:top-[88px] lg:bg-bg" role="status" aria-live="polite" aria-busy="true">
+      {/* Laptop: the photo stays in the camera stage, progress sits in the side-panel slot */}
+      <div className="contents lg:absolute lg:bottom-6 lg:left-6 lg:right-[408px] lg:top-0 lg:block lg:overflow-hidden lg:rounded-[32px] lg:border lg:border-line lg:bg-black">
       {photoUrl && <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full scale-105 object-cover opacity-70 blur-[1px]" />}
-      <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/10 to-black/85" aria-hidden="true" />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/10 to-black/85 lg:to-black/50" aria-hidden="true" />
 
-      <div className="relative flex flex-1 items-center justify-center">
-        <Viewfinder scanning />
+      <div className="relative flex flex-1 items-center justify-center lg:absolute lg:inset-0">
+        <Viewfinder scanning className="lg:max-w-[380px]" />
+      </div>
       </div>
 
-      <div className="relative px-5" style={{ paddingBottom: 'calc(var(--safe-bottom) + 24px)' }}>
+      <div className="relative px-5 lg:absolute lg:right-6 lg:top-0 lg:w-[360px] lg:px-0 lg:!pb-0" style={{ paddingBottom: 'calc(var(--safe-bottom) + 24px)' }}>
         <div className="glass-strong animate-fade-slide-up rounded-[28px] p-5">
           <div className="flex items-center gap-3">
             <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[rgba(237,180,11,0.15)] text-gold">

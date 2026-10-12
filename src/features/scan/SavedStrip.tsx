@@ -13,6 +13,8 @@ interface Props {
   allHref?: string;
   title?: string;
   className?: string;
+  /** Laptop: a vertical, scrollable list (fills the scan side panel) instead of the horizontal strip. */
+  stackLg?: boolean;
 }
 
 /** Thumbnail of a saved food: its scan photo, or a neutral icon. */
@@ -30,7 +32,7 @@ export function SavedThumb({ food, url, size = 44 }: { food: Pick<CustomFood, 's
 }
 
 /** "Ăn lại món đã lưu": horizontal strip, one tap opens the quick portion sheet. */
-export function SavedStrip({ foods, urls, onPick, allHref, title = 'Ăn lại món đã lưu', className }: Props) {
+export function SavedStrip({ foods, urls, onPick, allHref, title = 'Ăn lại món đã lưu', className, stackLg }: Props) {
   if (!foods.length) return null;
   return (
     <section className={clsx('flex min-w-0 flex-col gap-2', className)} aria-label={title}>
@@ -45,16 +47,25 @@ export function SavedStrip({ foods, urls, onPick, allHref, title = 'Ăn lại m�
           </Link>
         )}
       </div>
-      <ul className="no-scrollbar -mx-5 flex snap-x scroll-px-5 gap-2 overflow-x-auto px-5 pb-0.5" role="list">
+      <ul
+        className={clsx(
+          'no-scrollbar -mx-5 flex snap-x scroll-px-5 gap-2 overflow-x-auto px-5 pb-0.5',
+          stackLg && 'lg:mx-0 lg:min-h-0 lg:flex-1 lg:snap-none lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden lg:px-0',
+        )}
+        role="list"
+      >
         {foods.map((f) => {
           const kcal = servingNutrients(f).kcal;
           const { unit, grams } = savedServing(f);
           return (
-            <li key={f.id} className="snap-start">
+            <li key={f.id} className={clsx('snap-start', stackLg && 'lg:shrink-0')}>
               <button
                 type="button"
                 onClick={() => onPick(f)}
-                className="glass-strong flex min-h-[56px] w-[164px] items-center gap-2.5 rounded-[18px] p-1.5 pr-3 text-left transition-transform active:scale-[0.97] motion-reduce:transition-none"
+                className={clsx(
+                  'glass-strong flex min-h-[56px] w-[164px] items-center gap-2.5 rounded-[18px] p-1.5 pr-3 text-left transition-transform active:scale-[0.97] motion-reduce:transition-none',
+                  stackLg && 'lg:w-full lg:transition-colors lg:hover:border-[rgba(237,180,11,0.45)]',
+                )}
                 aria-label={`Ăn lại ${f.name}, ${formatNumber(kcal)} kcal mỗi ${unit === 'g' ? `${Math.round(grams)} g` : unit}`}
               >
                 <SavedThumb food={f} url={f.photo_path ? urls[f.photo_path] : undefined} />

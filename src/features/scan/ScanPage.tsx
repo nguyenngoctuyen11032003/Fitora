@@ -357,13 +357,15 @@ export default function ScanPage() {
   const liveTotal = useMemo(() => (live.result ? totals(live.result.dishes).kcal : 0), [live.result]);
   const pendingKcal = useMemo(() => totals(dishes).kcal, [dishes]);
   const showStrip = phase === 'capture' && mode !== 'live' && !hasPending && ranked.length > 0;
-  const strip = (title?: string) => <SavedStrip foods={ranked} urls={foodPhotos} onPick={setQuickFood} allHref={savedHref} title={title} />;
+  const strip = (title?: string, inDock?: boolean) => (
+    <SavedStrip foods={ranked} urls={foodPhotos} onPick={setQuickFood} allHref={savedHref} title={title} stackLg={inDock} className={inDock ? 'lg:order-4 lg:min-h-0 lg:flex-1 lg:border-t lg:border-line lg:pt-3' : undefined} />
+  );
   const subtitle = `${MEAL_LABELS[meal]} · ${date === todayISO() ? 'Hôm nay' : formatDayVi(date, 'short')}`;
 
   return (
     <Page topBar={false} padded={false} className="!bg-black" contentClassName="!pt-0 !pb-0 h-full" label="Quét món ăn bằng AI">
       <div
-        className="relative h-full min-h-[560px] w-full overflow-hidden bg-black text-text"
+        className="relative h-full min-h-[560px] w-full overflow-hidden bg-black text-text lg:bg-bg"
         onDragOver={(e) => {
           if (mode !== 'upload' || phase !== 'capture') return;
           e.preventDefault();
@@ -372,6 +374,8 @@ export default function ScanPage() {
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
       >
+        {/* Laptop: the feed lives in a rounded landscape stage left of the control panel */}
+        <div className="contents lg:absolute lg:bottom-6 lg:left-6 lg:right-[408px] lg:top-[88px] lg:block lg:overflow-hidden lg:rounded-[32px] lg:border lg:border-line lg:bg-black lg:shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
         {/* ---- Camera feed ---- */}
         {usesCamera && (
           <video
@@ -394,18 +398,20 @@ export default function ScanPage() {
             <div className="absolute inset-x-0 top-1/3 mx-auto h-64 w-64 rounded-full bg-[rgba(225,80,10,0.2)] blur-[80px]" />
           </div>
         )}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-1/3 bg-gradient-to-t from-black/60 to-transparent lg:block" aria-hidden="true" />
+        </div>
         {/* Legibility scrims */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/70 to-transparent" aria-hidden="true" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[52%] bg-gradient-to-t from-black via-black/75 to-transparent" aria-hidden="true" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/70 to-transparent lg:hidden" aria-hidden="true" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[52%] bg-gradient-to-t from-black via-black/75 to-transparent lg:hidden" aria-hidden="true" />
 
         {/* ---- Top bar ---- */}
-        <header className="absolute inset-x-0 top-0 z-10 flex items-center gap-3 px-4" style={{ paddingTop: 'calc(var(--safe-top) + 8px)' }}>
+        <header className="absolute inset-x-0 top-0 z-10 flex items-center gap-3 px-4 lg:gap-4 lg:px-6 lg:!pt-[22px]" style={{ paddingTop: 'calc(var(--safe-top) + 8px)' }}>
           <GlassButton label="Đóng" onClick={close} className="bg-black/30">
             <X className="h-5 w-5" />
           </GlassButton>
-          <div className="min-w-0 flex-1 text-center">
+          <div className="min-w-0 flex-1 text-center lg:text-left">
             <p className="eyebrow !text-gold">Quét món AI</p>
-            <p className="mt-0.5 truncate text-[15px] font-bold">{subtitle}</p>
+            <p className="mt-0.5 truncate text-[15px] font-bold lg:text-[17px]">{subtitle}</p>
           </div>
           {usesCamera && cam.torchSupported ? (
             <GlassButton label={cam.torchOn ? 'Tắt đèn' : 'Bật đèn'} active={cam.torchOn} onClick={() => void cam.toggleTorch()} className="bg-black/30">
@@ -418,13 +424,13 @@ export default function ScanPage() {
 
         {/* ---- Stage ---- */}
         <div
-          className="absolute inset-x-0 flex flex-col items-center justify-center px-6"
+          className="absolute inset-x-0 flex flex-col items-center justify-center px-6 lg:left-6 lg:right-[408px] lg:!bottom-6 lg:!top-[88px] lg:px-10"
           style={{ top: 'calc(var(--safe-top) + 64px)', bottom: `calc(var(--safe-bottom) + ${(showLiveCard || hasPending ? 280 : 196) + (showStrip ? STRIP_H : 0)}px)` }}
         >
           {usesCamera && cam.status === 'ready' && (
             <>
-              <Viewfinder scanning={mode === 'live' && (live.busy || !live.paused)} tone={mode === 'live' && live.paused && live.result ? 'ok' : 'gold'} />
-              <p className="mt-5 max-w-[280px] rounded-full bg-black/45 px-4 py-2 text-center text-[13px] font-semibold text-text/90 backdrop-blur-sm" aria-live="polite">
+              <Viewfinder scanning={mode === 'live' && (live.busy || !live.paused)} tone={mode === 'live' && live.paused && live.result ? 'ok' : 'gold'} className="lg:max-w-[380px]" />
+              <p className="mt-5 max-w-[280px] lg:max-w-[440px] rounded-full bg-black/45 px-4 py-2 text-center text-[13px] font-semibold text-text/90 backdrop-blur-sm" aria-live="polite">
                 {mode === 'live' ? (
                   <span className="inline-flex items-center gap-2">
                     {live.busy ? <Spinner size={14} /> : <Radar className="h-4 w-4 text-gold" aria-hidden="true" />}
@@ -475,7 +481,7 @@ export default function ScanPage() {
           onOpenLiveResult={openLiveResult}
           pending={hasPending && shot ? { photoUrl: shot.url, kcal: pendingKcal } : null}
           onOpenPending={() => setPhase('review')}
-          savedStrip={showStrip ? strip() : null}
+          savedStrip={showStrip ? strip(undefined, true) : null}
         />
 
         <input ref={galleryInput} type="file" accept="image/*" className="sr-only" tabIndex={-1} aria-hidden="true" onChange={onPick} />
