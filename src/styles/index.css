@@ -558,3 +558,21 @@
     background-image: none;
   }
 }
+
+/* ===================================================================== */
+/* iOS home-screen app: layout viewport one status bar too short          */
+/* (measured in src/lib/iosViewport.ts, which sets html[data-ios-gap])    */
+/* ===================================================================== */
+@media (max-width: 767.98px), (min-width: 1024px) {
+  html[data-ios-gap] .fitora-frame {
+    bottom: auto;
+    height: var(--app-h);
+  }
+}
+html[data-ios-gap] .fitora-root {
+  min-height: var(--app-h);
+}
+.fitora-status-scrim {
+  height: var(--safe-top);
+  background: linear-gradient(to bottom, rgba(18, 9, 6, 0.92) 0%, rgba(18, 9, 6, 0.6) 60%, rgba(18, 9, 6, 0) 100%);
+}

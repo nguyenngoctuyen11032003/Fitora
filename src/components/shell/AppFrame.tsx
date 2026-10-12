@@ -45,8 +45,9 @@ function StatusBar() {
  */
 export function AppFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-[100dvh] w-full items-center justify-center md:gap-[clamp(32px,6vw,120px)] md:px-8 md:py-6">
-      {/* Phone: pinned to all four edges (not 100dvh) so it also covers the home-indicator strip in iOS standalone. */}
+    <div className="fitora-root flex min-h-[100dvh] w-full items-center justify-center md:gap-[clamp(32px,6vw,120px)] md:px-8 md:py-6">
+      {/* Phone: pinned to all four edges. iOS home-screen apps get a layout viewport one status bar
+          too short; src/lib/iosViewport.ts then stretches this box to the real screen height. */}
       <div className="fixed inset-0 h-auto w-full fitora-frame md:relative md:inset-auto md:h-[min(92vh,900px)] lg:fixed lg:inset-0 lg:h-auto">
         {/* side buttons (desktop only) */}
         <span className="fitora-frame__btn -left-[5px] top-[120px] hidden h-8 md:block lg:hidden" aria-hidden="true" />
@@ -60,6 +61,8 @@ export function AppFrame({ children }: { children: ReactNode }) {
           <div id="fitora-app" className="relative h-full w-full">
             {children}
           </div>
+          {/* Content scrolling under the translucent status bar stays readable behind the clock. */}
+          <div className="fitora-status-scrim pointer-events-none absolute inset-x-0 top-0 z-40 md:hidden lg:block" aria-hidden="true" />
           {/* Overlays (sheets, modals, toasts, menu) portal here — inside the frame (whole window on laptop). */}
           <div id={OVERLAY_ROOT_ID} className="pointer-events-none absolute inset-0 z-50" />
           <span className="fitora-frame__home hidden md:block lg:hidden" aria-hidden="true" />

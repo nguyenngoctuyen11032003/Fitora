@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { ErrorBoundary, reloadOnce } from './components/ErrorBoundary';
+import { installIosViewportFix } from './lib/iosViewport';
 import './styles/index.css';
 
 // Auth links (?code=… PKCE, ?token_hash=…&type=…, ?flow=recovery|signup) are handled
@@ -13,6 +14,8 @@ import './styles/index.css';
 window.addEventListener('vite:preloadError', (event) => {
   if (reloadOnce()) event.preventDefault();
 });
+
+installIosViewportFix();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
