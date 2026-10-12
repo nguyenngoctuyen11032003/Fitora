@@ -62,9 +62,9 @@ export function AppFrame({ children }: { children: ReactNode }) {
             {children}
           </div>
           {/* Content scrolling under the translucent status bar stays readable behind the clock. */}
-          <div className="fitora-status-scrim pointer-events-none absolute inset-x-0 top-0 z-40 md:hidden lg:block" aria-hidden="true" />
+          <div className="fitora-status-scrim pointer-events-none fixed inset-x-0 top-0 z-40 md:hidden lg:block" aria-hidden="true" />
           {/* Overlays (sheets, modals, toasts, menu) portal here — inside the frame (whole window on laptop). */}
-          <div id={OVERLAY_ROOT_ID} className="pointer-events-none absolute inset-0 z-50" />
+          <div id={OVERLAY_ROOT_ID} className="pointer-events-none fixed inset-0 z-50 md:absolute" />
           <span className="fitora-frame__home hidden md:block lg:hidden" aria-hidden="true" />
         </div>
       </div>

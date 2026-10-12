@@ -545,12 +545,15 @@
   }
 }
 
-/* Mobile: the app owns the viewport; each Page scrolls inside it. */
+/* Mobile: the app owns the viewport; each Page scrolls inside it.
+   html/body are NOT locked with height:100% + overflow:hidden: in an iOS home-screen app
+   (black-translucent status bar) the root box is one status bar shorter than the screen, and that
+   lock clipped the whole app to it, leaving an empty strip under the bottom nav. Fixed elements
+   reach the real bottom as long as the root is not clipped (same as Note_mytasks). */
 @media (max-width: 767px) {
   html,
   body {
-    height: 100%;
-    overflow: hidden;
+    overscroll-behavior: none;
   }
   /* The darker desktop-surround backdrop must never show on a phone (iOS PWA bottom strip). */
   body {

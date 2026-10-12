@@ -119,7 +119,7 @@ export function BottomNav() {
       // Keyboard users tabbing into a hidden nav get it back immediately.
       onFocusCapture={show}
       className={clsx(
-        'pointer-events-none absolute inset-x-0 bottom-0 z-40 lg:hidden pb-[calc(var(--safe-bottom)+8px)] pl-[max(12px,var(--safe-left))] pr-[max(12px,var(--safe-right))]',
+        'pointer-events-none fixed inset-x-0 bottom-0 z-40 md:absolute lg:hidden pb-[calc(var(--safe-bottom)+8px)] pl-[max(12px,var(--safe-left))] pr-[max(12px,var(--safe-right))]',
         'transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
         // Slide fully out, including the raised Quét button above the bar.
         hidden && 'translate-y-[calc(100%+40px)] opacity-0',
