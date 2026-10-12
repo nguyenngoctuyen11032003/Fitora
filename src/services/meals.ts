@@ -1,4 +1,5 @@
 import { db } from '@/lib/supabase';
+import { undoWindowOpen } from '@/lib/undoWindow';
 import type { MealEntry, MealEntryPatch, NewMealEntry } from '@/types/db';
 import { MEAL_TYPES } from '@/types/db';
 import { invalid, run, runRead, vDate } from './errors';
@@ -27,6 +28,12 @@ function clean<T extends Partial<NewMealEntry>>(e: T): T {
   if ('quantity' in e) {
     const q = Number(e.quantity);
     if (!(q > 0) || !Number.isFinite(q)) invalid('Số lượng phải lớn hơn 0.');
+  }
+  if ('created_at' in e) {
+    // Only an undo passes this (keeps the entry's original position); anything unparsable falls back to the DB default.
+    const t = typeof e.created_at === 'string' ? Date.parse(e.created_at) : NaN;
+    if (Number.isFinite(t)) out.created_at = new Date(t).toISOString();
+    else delete out.created_at;
   }
   if ('eaten_on' in e) vDate(e.eaten_on, 'Ngày ăn không hợp lệ.');
   if ('meal' in e && !(MEAL_TYPES as string[]).includes(String(e.meal))) invalid('Bữa ăn không hợp lệ.');
@@ -70,6 +77,8 @@ export async function listMealsRange(from: string, to: string): Promise<MealEntr
 
 export async function addMealEntries(entries: NewMealEntry[]): Promise<MealEntry[]> {
   if (!entries.length) return [];
+  // An undo (or a new scan dish) re-uses this photo: it must not be cleaned up meanwhile.
+  for (const e of entries) cancelPhotoCleanup(e.photo_path);
   const rows = await run(
     db().from('fit_meal_entries').insert(entries.map((e) => clean(e))).select(MEAL_COLS).returns<MealEntry[]>(),
     'Không lưu được món ăn.',
@@ -90,6 +99,8 @@ export async function updateMeal(id: string, patch: MealEntryPatch): Promise<Mea
  * to still exist then.
  */
 export const PHOTO_CLEANUP_DELAY_MS = 15_000;
+/** While an undo toast is still open, how often a due photo clean-up checks again. */
+export const PHOTO_CLEANUP_RECHECK_MS = 5_000;
 
 /** Tables whose `photo_path` may point at a meal photo (a saved scanned dish keeps the scan photo). */
 const PHOTO_TABLES = ['fit_meal_entries', 'fit_custom_foods'] as const;
@@ -108,15 +119,36 @@ export async function photoInUse(path: string): Promise<boolean> {
 /**
  * Removes a meal photo after PHOTO_CLEANUP_DELAY_MS, only if nothing references it by then
  * (multi-dish scans share one photo, a saved food may keep it, an undo restores the row).
- * If the app closes before then the file stays as a harmless orphan.
+ * While a "Hoàn tác" toast is still on screen (hovered / focused toasts stay as long as the
+ * user wants) the clean-up waits, re-checking every PHOTO_CLEANUP_RECHECK_MS. Re-inserting
+ * an entry with the photo (addMealEntries) cancels it. If the app closes before then the
+ * file stays as a harmless orphan.
  */
-export function schedulePhotoCleanup(path: string | null | undefined): void {
+export function schedulePhotoCleanup(path: string | null | undefined, delay = PHOTO_CLEANUP_DELAY_MS): void {
   if (!path) return;
-  setTimeout(() => {
+  cancelPhotoCleanup(path);
+  const timer = setTimeout(() => {
+    pendingCleanups.delete(path);
+    if (undoWindowOpen()) {
+      schedulePhotoCleanup(path, PHOTO_CLEANUP_RECHECK_MS);
+      return;
+    }
     photoInUse(path)
       .then((used) => (used ? undefined : removeImages([path])))
       .catch(() => {});
-  }, PHOTO_CLEANUP_DELAY_MS);
+  }, delay);
+  pendingCleanups.set(path, timer);
+}
+
+/** Pending cleanups by photo path, so an undo can cancel them however long its toast stayed open. */
+const pendingCleanups = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** Cancels a scheduled cleanup (call before re-inserting an entry that uses `path`). */
+export function cancelPhotoCleanup(path: string | null | undefined): void {
+  if (!path) return;
+  const t = pendingCleanups.get(path);
+  if (t !== undefined) clearTimeout(t);
+  pendingCleanups.delete(path);
 }
 
 /** Deletes the entry; its photo is cleaned up later by schedulePhotoCleanup. */

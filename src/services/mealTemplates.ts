@@ -203,3 +203,28 @@ export async function logMealTemplate(template: MealTemplate, date: string, meal
   ]);
   return created;
 }
+
+/** What unmarkMealTemplateUsed needs: the template as it was BEFORE the logMealTemplate bump. */
+export type MealTemplateUsage = Pick<MealTemplate, 'id' | 'last_used_at'>;
+
+/**
+ * Undo of ONE logMealTemplate usage bump ("Hoàn tác" right after logging a "Bữa mẫu"):
+ * pass the template as it was before the log. use_count −1 (never below 0), last_used_at
+ * back to the snapshot (never moved forward; null when the count returns to 0).
+ * BEST-EFFORT like the bump itself: never throws, returns the updated template or null.
+ * The linked foods are restored separately with unmarkCustomFoodUsed.
+ */
+export async function unmarkMealTemplateUsed(before: MealTemplateUsage | null | undefined): Promise<MealTemplate | null> {
+  if (!before || typeof before.id !== 'string' || !before.id) return null;
+  try {
+    const { data, error } = await db().rpc('fit_unmark_meal_template_used', {
+      p_id: before.id,
+      p_prev_last_used_at: before.last_used_at ?? null,
+    });
+    if (error) return null;
+    const rows = (Array.isArray(data) ? data : data ? [data] : []) as MealTemplate[];
+    return rows[0] ?? null;
+  } catch {
+    return null;
+  }
+}

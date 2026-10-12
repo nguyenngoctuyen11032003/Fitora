@@ -28,6 +28,7 @@ import {
   servingUnitOf,
   unmarkCustomFoodUsed,
   updateCustomFood,
+  usualServings,
 } from './foods';
 import { PHOTO_CLEANUP_DELAY_MS } from './meals';
 
@@ -108,6 +109,16 @@ describe('per100FromTotals', () => {
     expect(Math.round((tooDense.kcal_100g * tooDense.serving_grams) / 100)).toBe(400);
   });
 
+  it('keeps 2 decimals (numeric(7,2)) so a large serving re-logs to the same macros', async () => {
+    // 450 g with 35 g protein: 1 decimal would store 7.8 g/100 g and re-log 35.1 g.
+    const v = per100FromTotals({ name: 'Cơm gà', quantity: 1, unit: 'đĩa', grams: 450, kcal: 700, protein_g: 35 });
+    expect(v.protein_100g).toBe(7.78);
+    expect(v.kcal_100g).toBe(155.56);
+    const f = await createCustomFood({ name: 'Cơm gà', ...v, carbs_100g: 0, fat_100g: 0 });
+    expect(f.protein_100g).toBe(7.78); // the service does not re-round to 1 decimal
+    expect(customFoodEntry(f, '2026-10-12', 'lunch', 1)).toMatchObject({ grams: 450, kcal: 700, protein_g: 35 });
+  });
+
   it('never produces NaN / negative values', () => {
     const v = per100FromTotals({ name: 'x', quantity: NaN, unit: '', grams: -5, kcal: -1, protein_g: Infinity });
     for (const n of Object.values(v)) if (typeof n === 'number') expect(Number.isFinite(n) && n >= 0).toBe(true);
@@ -180,7 +191,7 @@ describe('CRUD', () => {
     await expect(createCustomFood({ name: 'x', serving_grams: 100, kcal_100g: 1200, protein_100g: 0, carbs_100g: 0, fat_100g: 0 })).rejects.toThrow(/1000 kcal/);
     await expect(createCustomFood({ name: 'x', serving_grams: 100, kcal_100g: 10, protein_100g: 0, carbs_100g: 0, fat_100g: 0, default_meal: 'brunch' as never })).rejects.toThrow('Bữa ăn không hợp lệ.');
     const f = await createCustomFood({ name: ' Bánh  mì ', serving_grams: 120, kcal_100g: 260.04, protein_100g: 9, carbs_100g: 50, fat_100g: 3, source: 'bogus' as never });
-    expect(f).toMatchObject({ name: 'Bánh mì', kcal_100g: 260, source: 'manual' });
+    expect(f).toMatchObject({ name: 'Bánh mì', kcal_100g: 260.04, source: 'manual' });
     const u = await updateCustomFood(f.id, { use_count: 99, name: 'Bánh mì que' } as never);
     expect(u.use_count).toBe(0);
     expect(u.name).toBe('Bánh mì que');
@@ -296,6 +307,153 @@ describe('saveScannedDishes', () => {
   });
 });
 
+describe("saved foods: never overwrite the user's numbers, remember the usual amount, no duplicates", () => {
+  /** A query-builder stand-in that fails with a Postgres error whatever is chained on it. */
+  const failing = (code: string) => {
+    const chain: Record<string, unknown> = {};
+    for (const m of ['select', 'eq', 'single', 'returns', 'abortSignal']) chain[m] = () => chain;
+    chain.then = (ok: (v: unknown) => unknown) => Promise.resolve({ data: null, error: { code } }).then(ok);
+    return chain;
+  };
+  const banh = { name: 'Bánh mì ốp la', quantity: 1, unit: 'đĩa', grams: 350, kcal: 700 };
+
+  it('a rescan does NOT replace a hand-entered (manual) food with AI numbers, but still links, counts and fills the photo', async () => {
+    fake.tables.fit_custom_foods = [
+      food({ id: 'm', name: 'Bánh mì ốp la', source: 'manual', serving_label: '1 ổ', serving_grams: 200, kcal_100g: 200 }),
+    ];
+    const [f] = await saveScannedDishes([{ ...banh, name: 'banh mi op la' }], { photoPath: 'me/meals/n.webp', meal: 'breakfast' });
+    expect(f).toMatchObject({
+      id: 'm', source: 'manual', serving_label: '1 ổ', serving_grams: 200, kcal_100g: 200,
+      photo_path: 'me/meals/n.webp', default_meal: 'breakfast', use_count: 1,
+    });
+    expect(fake.tables.fit_custom_foods).toHaveLength(1);
+  });
+
+  it('a food saved from the diary (source "meal") keeps its numbers too; an AI food is refreshed', async () => {
+    fake.tables.fit_custom_foods = [
+      food({ id: 'a', name: 'Cơm gà', source: 'meal', serving_label: '1 phần', serving_grams: 400, kcal_100g: 150 }),
+      food({ id: 'b', name: 'Bún riêu', source: 'ai', serving_grams: 400, kcal_100g: 90 }),
+    ];
+    const [a, b] = await saveScannedDishes([
+      { name: 'Cơm gà', quantity: 1, unit: 'phần', grams: 500, kcal: 1000 },
+      { name: 'Bún riêu', quantity: 1, unit: 'tô', grams: 500, kcal: 450 },
+    ]);
+    expect(a).toMatchObject({ id: 'a', serving_grams: 400, kcal_100g: 150 });
+    expect(b).toMatchObject({ id: 'b', serving_label: '1 tô', serving_grams: 500, kcal_100g: 90 });
+  });
+
+  it('saveEntryAsFood on an entry whose name is a hand-made food keeps the food and links the entry', async () => {
+    fake.tables.fit_custom_foods = [food({ id: 'm', name: 'Sữa chua', source: 'manual', serving_grams: 100, kcal_100g: 60 })];
+    fake.tables.fit_meal_entries = [{ id: 'e1', custom_food_id: null }];
+    const entry = { id: 'e1', name: 'Sữa chua', quantity: 1, unit: 'hộp', grams: 120, kcal: 500, meal: 'snack', photo_path: null, custom_food_id: null } as never;
+    const saved = await saveEntryAsFood(entry);
+    expect(saved).toMatchObject({ id: 'm', serving_grams: 100, kcal_100g: 60 });
+    expect(fake.tables.fit_meal_entries[0].custom_food_id).toBe('m');
+  });
+
+  it('remembers how much was eaten: "2 cái, 600 kcal" → serving "1 cái" + default_servings 2, and a one-tap re-log logs 600 kcal', async () => {
+    const [f] = await saveScannedDishes([{ name: 'Bánh bao nhân thịt', quantity: 2, unit: 'cái', grams: 300, kcal: 600 }]);
+    expect(f).toMatchObject({ serving_label: '1 cái', serving_grams: 150, default_servings: 2 });
+    expect(usualServings(f)).toBe(2);
+    expect(customFoodEntry(f, '2026-10-12', 'snack')).toMatchObject({ quantity: 2, unit: 'cái', grams: 300, kcal: 600 });
+    expect(customFoodEntry(f, '2026-10-12', 'snack', 1)).toMatchObject({ quantity: 1, unit: 'cái', kcal: 300 }); // explicit amount wins
+    fake.tables.fit_meal_entries = [];
+    const e = await logCustomFood(f, '2026-10-12', 'snack');
+    expect(e).toMatchObject({ quantity: 2, kcal: 600, custom_food_id: f.id });
+  });
+
+  it('one unit is stored as null (= 1); a weight dish has no usual amount', async () => {
+    const [a, b] = await saveScannedDishes([
+      { name: 'Phở bò', quantity: 1, unit: 'bát', grams: 500, kcal: 450 },
+      { name: 'Khoai lang', quantity: 200, unit: 'g', grams: 200, kcal: 180 },
+    ]);
+    expect(a.default_servings ?? null).toBeNull();
+    expect(b.default_servings ?? null).toBeNull();
+    expect(usualServings(a)).toBe(1);
+    expect(usualServings(null)).toBe(1);
+    expect(usualServings({ default_servings: 0 })).toBe(1);
+  });
+
+  it('a rescan of the same unit updates the usual amount, also for a manual food (counted in ITS serving)', async () => {
+    fake.tables.fit_custom_foods = [
+      food({ id: 'm', name: 'Trứng ốp', source: 'manual', serving_label: '2 quả', serving_grams: 100, kcal_100g: 150 }),
+      food({ id: 'x', name: 'Bánh bao', source: 'manual', serving_label: '1 cái', serving_grams: 150 }),
+    ];
+    const [m, x] = await saveScannedDishes([
+      { name: 'Trứng ốp', quantity: 3, unit: 'quả', grams: 150, kcal: 225 },
+      { name: 'Bánh bao', quantity: 2, unit: 'chiếc', grams: 300, kcal: 600 }, // other unit: cannot tell, left alone
+    ]);
+    expect(m).toMatchObject({ serving_label: '2 quả', serving_grams: 100, default_servings: 1.5 });
+    expect(x.default_servings ?? null).toBeNull();
+  });
+
+  it('logging a different amount (QuickLogSheet) becomes the new usual amount; the same amount writes nothing', async () => {
+    const f = food({ id: 'f1', name: 'Bánh bao', serving_label: '1 cái', serving_grams: 150, default_servings: 2 });
+    fake.tables.fit_custom_foods = [{ ...f }];
+    fake.tables.fit_meal_entries = [];
+    await logCustomFood(f, '2026-10-12', 'snack', 2);
+    expect(fake.calls.some((c) => c.table === 'fit_custom_foods' && c.op === 'update')).toBe(false);
+    await logCustomFood(f, '2026-10-12', 'snack', 3);
+    expect(fake.tables.fit_custom_foods[0].default_servings).toBe(3);
+    await logCustomFood({ ...f, default_servings: 3 }, '2026-10-12', 'snack', 1);
+    expect(fake.tables.fit_custom_foods[0].default_servings).toBeNull();
+  });
+
+  it('new foods get a name_key; renaming releases it; manual create has none', async () => {
+    const [f] = await saveScannedDishes([{ name: 'Phở Bò', quantity: 1, unit: 'bát', grams: 500, kcal: 450 }]);
+    expect(fake.tables.fit_custom_foods.find((r) => r.id === f.id)?.name_key).toBe('pho bo');
+    await updateCustomFood(f.id, { name: 'Phở tái' });
+    expect(fake.tables.fit_custom_foods.find((r) => r.id === f.id)?.name_key).toBeNull();
+    await updateCustomFood(f.id, { kcal_100g: 80 });
+    expect(fake.tables.fit_custom_foods.find((r) => r.id === f.id)?.kcal_100g).toBe(80);
+    const m = await createCustomFood({ name: 'Cơm', serving_grams: 100, kcal_100g: 100, protein_100g: 0, carbs_100g: 0, fat_100g: 0 });
+    expect(fake.tables.fit_custom_foods.find((r) => r.id === m.id)?.name_key).toBeNull();
+  });
+
+  it('a concurrent save of the same new dish (unique name_key violated) retries and updates the winner instead of failing or duplicating', async () => {
+    const winner = food({ id: 'w', name: 'Cơm tấm', source: 'ai', serving_grams: 400, kcal_100g: 100 });
+    const realFrom = fake.from.bind(fake);
+    let raced = false;
+    fake.from = (table: string) => {
+      const b = realFrom(table);
+      if (table !== 'fit_custom_foods') return b;
+      const realInsert = b.insert.bind(b);
+      b.insert = ((p: never) => {
+        if (raced) return realInsert(p);
+        raced = true;
+        fake.tables.fit_custom_foods.push({ ...winner, name_key: 'com tam' }); // the other tab got there first
+        return failing('23505');
+      }) as never;
+      return b;
+    };
+    const [f] = await saveScannedDishes([{ name: 'Cơm tấm', quantity: 1, unit: 'đĩa', grams: 450, kcal: 765 }]);
+    expect(raced).toBe(true);
+    expect(fake.tables.fit_custom_foods.filter((r) => r.name === 'Cơm tấm')).toHaveLength(1);
+    expect(f).toMatchObject({ id: 'w', serving_label: '1 đĩa', serving_grams: 450, use_count: 1 });
+  });
+
+  it('a name_key already taken by an older duplicate does not fail the update', async () => {
+    fake.tables.fit_custom_foods = [food({ id: 'o', name: 'Chè', source: 'ai', kcal_100g: 100 })];
+    const realFrom = fake.from.bind(fake);
+    let failed = false;
+    fake.from = (table: string) => {
+      const b = realFrom(table);
+      const realUpdate = b.update.bind(b);
+      b.update = ((patch: Record<string, unknown>) => {
+        if (!failed && patch.name_key) {
+          failed = true;
+          return failing('23505');
+        }
+        return realUpdate(patch);
+      }) as never;
+      return b;
+    };
+    const [f] = await saveScannedDishes([{ name: 'Chè', quantity: 1, unit: 'cốc', grams: 200, kcal: 300 }]);
+    expect(failed).toBe(true);
+    expect(f).toMatchObject({ id: 'o', serving_label: '1 cốc', kcal_100g: 150 });
+  });
+});
+
 describe('saveEntryAsFood', () => {
   it('saves a diary entry as source "meal" and links the entry', async () => {
     fake.tables.fit_meal_entries = [{ id: 'e1', custom_food_id: null }];
@@ -307,5 +465,25 @@ describe('saveEntryAsFood', () => {
     const f = await saveEntryAsFood(entry);
     expect(f).toMatchObject({ name: 'Canh chua', source: 'meal', default_meal: 'dinner', serving_label: '1 bát', kcal_100g: 40 });
     expect(fake.tables.fit_meal_entries[0].custom_food_id).toBe(f.id);
+  });
+
+  it('a new food starts at one use; saving it again (or onto an existing food) never bumps the count', async () => {
+    fake.tables.fit_meal_entries = [{ id: 'e1', custom_food_id: null }, { id: 'e2', custom_food_id: null }];
+    const entry = {
+      id: 'e1', user_id: 'me', eaten_on: '2026-10-12', meal: 'dinner' as const, name: 'Canh chua', quantity: 1, unit: 'bát',
+      grams: 300, kcal: 120, protein_g: 8, carbs_g: 10, fat_g: 4, fiber_g: 2, source: 'manual' as const,
+      custom_food_id: null, photo_path: null, ai_meta: null, created_at: '', updated_at: '',
+    };
+    const first = await saveEntryAsFood(entry);
+    expect(first.use_count).toBe(1);
+    const again = await saveEntryAsFood({ ...entry, custom_food_id: first.id });
+    expect(again.id).toBe(first.id);
+    await saveEntryAsFood({ ...entry, id: 'e2' });
+    expect(fake.tables.fit_custom_foods).toHaveLength(1);
+    expect(fake.tables.fit_custom_foods[0].use_count).toBe(1);
+    expect(fake.tables.fit_meal_entries[1].custom_food_id).toBe(first.id);
+    // a rescan is a real use and still bumps
+    await saveScannedDishes([{ name: 'Canh chua', quantity: 1, unit: 'bát', grams: 300, kcal: 120 }]);
+    expect(fake.tables.fit_custom_foods[0].use_count).toBe(2);
   });
 });

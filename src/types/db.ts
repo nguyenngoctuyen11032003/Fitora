@@ -159,9 +159,9 @@ export interface MealEntry {
   created_at: string;
   updated_at: string;
 }
-/** Insert shape: eaten_on, meal, name required; everything else has a DB default. */
+/** Insert shape: eaten_on, meal, name required; everything else has a DB default. `created_at` is optional (an undo keeps the entry's place in its meal). */
 export type NewMealEntry = Pick<MealEntry, 'eaten_on' | 'meal' | 'name'> &
-  Partial<Omit<MealEntry, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'eaten_on' | 'meal' | 'name'>>;
+  Partial<Omit<MealEntry, 'id' | 'user_id' | 'updated_at' | 'eaten_on' | 'meal' | 'name'>>;
 export type MealEntryPatch = Partial<Omit<MealEntry, 'id' | 'user_id' | 'created_at' | 'updated_at'>>;
 
 export interface WorkoutTemplate {

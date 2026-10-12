@@ -13,16 +13,18 @@ import type {
   NewMealEntry,
 } from '@/types/db';
 import { MEAL_TYPES } from '@/types/db';
-import { invalid, run, runRead, vDate } from './errors';
+import { FitError, invalid, run, runRead, vDate } from './errors';
 import { addMealEntries, schedulePhotoCleanup, updateMeal } from './meals';
 
 export const FOOD_COLS =
   'id, user_id, name, brand, serving_label, serving_grams, kcal_100g, protein_100g, carbs_100g, fat_100g, fiber_100g, ' +
-  'source, photo_path, use_count, last_used_at, default_meal, created_at, updated_at';
+  'source, photo_path, use_count, last_used_at, default_meal, default_servings, created_at, updated_at';
 
 const SOURCES: CustomFoodSource[] = ['manual', 'ai', 'meal'];
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
+/** Per-100 g columns are numeric(7,2): keep 2 decimals so re-logging a large serving doesn't drift. */
+const r2 = (v: number) => Math.round(v * 100) / 100;
 const fin = (v: unknown) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -76,6 +78,16 @@ function clean<T extends CustomFoodPatch>(f: T): T {
     if (!name) invalid('Hãy nhập tên món.');
     out.name = name;
   }
+  // name_key identifies a dish for the "remember" path only; a rename releases it (the next
+  // name match re-keys the food), so renaming never collides with another saved food.
+  if ('name_key' in f) {
+    const k = typeof f.name_key === 'string' ? f.name_key.trim().slice(0, 120) : '';
+    out.name_key = k || null;
+  } else if ('name' in f) out.name_key = null;
+  if ('default_servings' in f) {
+    const n = f.default_servings == null ? null : Number(f.default_servings);
+    out.default_servings = n !== null && Number.isFinite(n) && n >= 0.01 && n <= 1000 ? Math.round(n * 100) / 100 : null;
+  }
   if ('brand' in f) out.brand = String(f.brand ?? '').trim().slice(0, 80) || null;
   if ('serving_label' in f) out.serving_label = String(f.serving_label ?? '').trim().slice(0, 40) || '1 phần';
   if ('serving_grams' in f) {
@@ -90,7 +102,7 @@ function clean<T extends CustomFoodPatch>(f: T): T {
       if (!(v >= 0) || !Number.isFinite(v)) invalid('Giá trị dinh dưỡng không được âm.');
       const max = k === 'kcal_100g' ? 1000 : 100;
       if (v > max) invalid(k === 'kcal_100g' ? 'Năng lượng tối đa 1000 kcal / 100 g.' : 'Mỗi chất tối đa 100 g / 100 g.');
-      out[k] = r1(v);
+      out[k] = r2(v);
     }
   }
   if ('source' in f) out.source = SOURCES.includes(f.source as CustomFoodSource) ? f.source : 'manual';
@@ -254,7 +266,7 @@ export function per100FromTotals(t: FoodTotals): Pick<
   if (!(g > 0)) g = 100; // no weight: one serving is a pseudo 100 g portion
   g = Math.max(g, kcal / 10, p, c, f, fi); // ≤ 1000 kcal and ≤ 100 g of each nutrient per 100 g
   g = Math.min(10000, Math.max(0.1, Math.ceil(g * 10) / 10));
-  const per = (v: number, max: number) => Math.min(max, r1((v / g) * 100));
+  const per = (v: number, max: number) => Math.min(max, r2((v / g) * 100));
   return {
     serving_label: (perUnit ? `1 ${unit}` : '1 phần').slice(0, 40),
     serving_grams: g,
@@ -293,12 +305,18 @@ export function parseServingLabel(label: string | null | undefined): { count: nu
   return { count, unit: (unit || 'phần').slice(0, 20) };
 }
 
+/** Servings the user usually eats of a saved food (1 when unknown): what a one-tap re-log should log. */
+export function usualServings(food: Pick<CustomFood, 'default_servings'> | null | undefined): number {
+  const n = Number(food?.default_servings);
+  return Number.isFinite(n) && n >= 0.01 && n <= 1000 ? n : 1;
+}
+
 /**
- * The meal entry for `servings` servings of a saved food (source 'custom', linked by
+ * The meal entry for `servings` servings (default: the usual amount, see usualServings) of a saved food (source 'custom', linked by
  * custom_food_id, sharing the food's photo). A counted label is kept readable: 1 serving
  * of "2 lát" is logged as quantity 2, unit "lát" (never "1 2 lát"). Pure — no request.
  */
-export function customFoodEntry(food: CustomFood, date: string, meal: MealType, servings = 1): NewMealEntry {
+export function customFoodEntry(food: CustomFood, date: string, meal: MealType, servings: number = usualServings(food)): NewMealEntry {
   const q = Number(servings) > 0 && Number.isFinite(Number(servings)) ? Number(servings) : 1;
   const grams = food.serving_grams * q;
   const v = (per100: number) => r1((per100 * grams) / 100);
@@ -323,13 +341,19 @@ export function customFoodEntry(food: CustomFood, date: string, meal: MealType, 
 
 /**
  * One-tap re-log: inserts the entry, then (best-effort) bumps the food's usage and
- * remembers `meal` as its default meal. Returns the new entry.
+ * remembers `meal` as its default meal. `servings` defaults to the usual amount; a
+ * different amount becomes the new usual one. Returns the new entry.
  */
-export async function logCustomFood(food: CustomFood, date: string, meal: MealType, servings = 1): Promise<MealEntry> {
+export async function logCustomFood(food: CustomFood, date: string, meal: MealType, servings: number = usualServings(food)): Promise<MealEntry> {
   vDate(date, 'Ngày ăn không hợp lệ.');
   if (!MEAL_TYPES.includes(meal)) invalid('Hãy chọn bữa ăn.');
   const [row] = await addMealEntries([customFoodEntry(food, date, meal, servings)]);
   await markCustomFoodUsed(food.id, meal);
+  const q = Number(servings);
+  if (Number.isFinite(q) && q >= 0.01 && q <= 1000 && Math.abs(q - usualServings(food)) > 0.004) {
+    // Best-effort, like the usage bump: the meal is already logged.
+    await updateCustomFood(food.id, { default_servings: q === 1 ? null : q }).catch(() => undefined);
+  }
   return row;
 }
 
@@ -342,11 +366,31 @@ export interface SaveFoodsOptions {
   photoPath?: string | null;
   /** Meal the dishes were logged at → default_meal. */
   meal?: MealType | null;
-  /** Count this save as a use (default true: the dishes were just logged). */
-  markUsed?: boolean;
+  /**
+   * Count this save as a use. true (default): the dishes were just logged. 'new': only the
+   * foods this call creates start at one use; a food that was already saved is not bumped
+   * (re-saving the same diary entry is not eating it again).
+   */
+  markUsed?: boolean | 'new';
 }
 
-async function upsertFoodsByName(items: FoodTotals[], source: CustomFoodSource, opts: SaveFoodsOptions): Promise<CustomFood[]> {
+/**
+ * How many servings of a saved food (`label` = its serving_label) the dish amounts to:
+ * "2 cái" against "1 cái" → 2, "3 lát" against "2 lát" → 1.5. null when it cannot be told
+ * (no count, weight units, or another unit than the food's).
+ */
+function servingsOf(t: FoodTotals, label: string): number | null {
+  const q = fin(t.quantity);
+  const unit = String(t.unit ?? '').trim().replace(/\s+/g, ' ');
+  if (!(q > 0) || !unit || MASS_UNITS.test(unit)) return null;
+  const s = parseServingLabel(label);
+  if (normalizeFoodName(s.unit) !== normalizeFoodName(unit)) return null;
+  const n = Math.round((q / s.count) * 100) / 100;
+  return n >= 0.01 && n <= 1000 ? n : null;
+}
+const servingsColumn = (n: number | null): number | null => (n === null || Math.abs(n - 1) < 0.005 ? null : n);
+
+async function upsertFoodsByName(items: FoodTotals[], source: CustomFoodSource, opts: SaveFoodsOptions, retry = true): Promise<CustomFood[]> {
   if (!items.length) return [];
   const names = items.map((d) => String(d?.name ?? '').trim().replace(/\s+/g, ' ').slice(0, 120));
   if (names.some((n) => !n)) invalid('Hãy nhập tên món.');
@@ -361,34 +405,69 @@ async function upsertFoodsByName(items: FoodTotals[], source: CustomFoodSource, 
   }
 
   // Last occurrence of a name in the batch wins (two "Phở bò" in one scan → one saved food).
-  const plan = new Map<string, { name: string; values: ReturnType<typeof per100FromTotals> }>();
-  names.forEach((name, i) => plan.set(normalizeFoodName(name), { name, values: per100FromTotals(items[i]) }));
+  const plan = new Map<string, { name: string; item: FoodTotals; values: ReturnType<typeof per100FromTotals> }>();
+  names.forEach((name, i) => plan.set(normalizeFoodName(name), { name, item: items[i], values: per100FromTotals(items[i]) }));
 
   const saved = new Map<string, CustomFood>();
+  const created = new Set<string>();
   const inserts: Array<{ key: string; row: NewCustomFood }> = [];
-  const updates: Array<Promise<void>> = [];
-  for (const [key, { name, values }] of plan) {
+  const updates: Array<[string, CustomFood, CustomFoodPatch]> = [];
+  for (const [key, { name, item, values }] of plan) {
     const cur = byKey.get(key);
     if (cur) {
-      const patch: CustomFoodPatch = { ...values };
+      // Only an AI estimate is refreshed by a new scan. A food the user typed in (manual) or saved
+      // from their own diary (meal) keeps its numbers: a rough estimate must never silently replace
+      // them. Either way the entry links to the saved food and counts as a use.
+      const patch: CustomFoodPatch = { name_key: key };
+      if (cur.source === 'ai') {
+        Object.assign(patch, values, { default_servings: servingsColumn(servingsOf(item, values.serving_label)) });
+      } else {
+        const n = servingsOf(item, cur.serving_label);
+        if (n !== null) patch.default_servings = servingsColumn(n);
+      }
       if (meal) patch.default_meal = meal;
       if (!cur.photo_path && photo) patch.photo_path = photo;
-      updates.push(updateCustomFood(cur.id, patch).then((row) => void saved.set(key, row)));
+      updates.push([key, cur, patch]);
     } else {
-      inserts.push({ key, row: { name, ...values, source, photo_path: photo, default_meal: meal } });
+      inserts.push({
+        key,
+        row: { name, ...values, source, photo_path: photo, default_meal: meal, name_key: key, default_servings: servingsColumn(servingsOf(item, values.serving_label)) },
+      });
     }
   }
   if (inserts.length) {
-    const rows = await run(
-      db().from('fit_custom_foods').insert(inserts.map((x) => clean(x.row))).select(FOOD_COLS).returns<CustomFood[]>(),
-      'Không lưu được món.',
-    );
-    (rows ?? []).forEach((row) => saved.set(normalizeFoodName(row.name), row));
+    try {
+      const rows = await run(
+        db().from('fit_custom_foods').insert(inserts.map((x) => clean(x.row))).select(FOOD_COLS).returns<CustomFood[]>(),
+        'Không lưu được món.',
+      );
+      (rows ?? []).forEach((row) => {
+        saved.set(normalizeFoodName(row.name), row);
+        created.add(row.id);
+      });
+    } catch (e) {
+      // Another tab / device saved the same new dish a moment ago (unique name_key): start over,
+      // the list now contains it and it is updated instead of duplicated. Nothing was written yet.
+      if (retry && e instanceof FitError && e.code === 'duplicate') return upsertFoodsByName(items, source, opts, false);
+      throw e;
+    }
   }
-  await Promise.all(updates);
+  await Promise.all(
+    updates.map(async ([key, cur, patch]) => {
+      try {
+        saved.set(key, await updateCustomFood(cur.id, patch));
+      } catch (e) {
+        // The key is already taken by another saved food (older duplicates): update without it.
+        if (!(e instanceof FitError && e.code === 'duplicate')) throw e;
+        const { name_key: _k, ...rest } = patch;
+        saved.set(key, await updateCustomFood(cur.id, rest));
+      }
+    }),
+  );
 
-  if (opts.markUsed !== false && saved.size) {
-    const bumped = await markCustomFoodUsed([...saved.values()].map((f) => f.id), meal);
+  const toMark = opts.markUsed === false ? [] : [...saved.values()].map((f) => f.id).filter((id) => opts.markUsed !== 'new' || created.has(id));
+  if (toMark.length) {
+    const bumped = await markCustomFoodUsed(toMark, meal);
     for (const row of bumped) saved.set(normalizeFoodName(row.name), row);
   }
   return names.map((n) => {
@@ -400,8 +479,10 @@ async function upsertFoodsByName(items: FoodTotals[], source: CustomFoodSource, 
 
 /**
  * Remembers the dishes of a confirmed AI scan as saved foods (source 'ai'), matched by
- * normalised name: a dish saved before is UPDATED with the new values (photo kept if it
- * already has one), a new one is inserted. Counts as one use each (do not call
+ * normalised name: a dish saved before is matched, not duplicated (an AI-saved one is
+ * UPDATED with the new values; one the user typed in or saved from the diary keeps its
+ * numbers; the photo is kept if it already has one) and a new one is inserted. A serving
+ * is ONE unit ("1 cái"); what was eaten (2 cái) is remembered in default_servings. Counts as one use each (do not call
  * markCustomFoodUsed again). Returns the saved foods in the order of `dishes`, so the
  * caller can set custom_food_id on the entries it logs.
  */
@@ -411,10 +492,12 @@ export function saveScannedDishes(dishes: FoodTotals[], opts: SaveFoodsOptions =
 
 /**
  * "Lưu món này": remembers a logged entry as a saved food (source 'meal', same name-based
- * upsert) and links the entry to it. Returns the saved food.
+ * upsert) and links the entry to it. Returns the saved food. A NEW food starts at one use
+ * (this entry); a food that was already saved is not bumped again, so tapping "Lưu món này"
+ * twice never inflates "đã ăn N lần".
  */
 export async function saveEntryAsFood(entry: MealEntry): Promise<CustomFood> {
-  const [food] = await upsertFoodsByName([entry], 'meal', { photoPath: entry.photo_path, meal: entry.meal });
+  const [food] = await upsertFoodsByName([entry], 'meal', { photoPath: entry.photo_path, meal: entry.meal, markUsed: 'new' });
   if (entry.custom_food_id !== food.id) {
     await updateMeal(entry.id, { custom_food_id: food.id }).catch(() => undefined); // the food is saved; the link is a nicety
   }

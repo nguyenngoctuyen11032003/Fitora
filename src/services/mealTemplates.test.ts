@@ -16,6 +16,7 @@ import {
   templateEntries,
   templateItemsFromEntries,
   templateTotalKcal,
+  unmarkMealTemplateUsed,
   updateMealTemplate,
 } from './mealTemplates';
 
@@ -102,5 +103,45 @@ describe('logMealTemplate', () => {
   it('a failing usage bump does not fail the log', async () => {
     fake.failNext = { rpc: 'fit_mark_meal_template_used', error: { message: 'x' } };
     expect(await logMealTemplate(tpl(), '2026-10-12')).toHaveLength(1);
+  });
+});
+
+describe('unmarkMealTemplateUsed', () => {
+  // Same semantics as fit_unmark_meal_template_used (20261012000400).
+  beforeEach(() => {
+    fake.rpcs.fit_mark_meal_template_used = (args, d) => {
+      const r = (d.tables.fit_meal_templates ?? []).find((x) => x.id === args.p_id);
+      if (r) {
+        r.use_count = Number(r.use_count ?? 0) + 1;
+        r.last_used_at = '2026-10-12T05:00:00.000Z';
+      }
+      return { data: null, error: null };
+    };
+    fake.rpcs.fit_unmark_meal_template_used = (args, d) => {
+      const r = (d.tables.fit_meal_templates ?? []).find((x) => x.id === args.p_id && Number(x.use_count) > 0);
+      if (!r) return { data: [], error: null };
+      r.last_used_at = Number(r.use_count) <= 1 ? null : args.p_prev_last_used_at;
+      r.use_count = Number(r.use_count) - 1;
+      return { data: [{ ...r }], error: null };
+    };
+  });
+
+  it('gives back the use_count and last_used_at of one template log', async () => {
+    const before = tpl({ use_count: 4, last_used_at: '2026-10-01T00:00:00.000Z' });
+    fake.tables.fit_meal_templates = [{ ...before }];
+    await logMealTemplate(before, '2026-10-12');
+    expect(fake.tables.fit_meal_templates[0]).toMatchObject({ use_count: 5, last_used_at: '2026-10-12T05:00:00.000Z' });
+    const back = await unmarkMealTemplateUsed(before);
+    expect(back).toMatchObject({ id: 't1', use_count: 4, last_used_at: '2026-10-01T00:00:00.000Z' });
+    expect(fake.calls.at(-1)).toMatchObject({ rpc: 'fit_unmark_meal_template_used', args: { p_id: 't1', p_prev_last_used_at: '2026-10-01T00:00:00.000Z' } });
+  });
+
+  it('is best-effort: bad input, RPC errors and a missing function never throw', async () => {
+    expect(await unmarkMealTemplateUsed(null)).toBeNull();
+    expect(await unmarkMealTemplateUsed({ id: '', last_used_at: null })).toBeNull();
+    fake.failNext = { rpc: 'fit_unmark_meal_template_used', error: { message: 'x' } };
+    expect(await unmarkMealTemplateUsed(tpl())).toBeNull();
+    delete fake.rpcs.fit_unmark_meal_template_used;
+    expect(await unmarkMealTemplateUsed(tpl())).toBeNull();
   });
 });
