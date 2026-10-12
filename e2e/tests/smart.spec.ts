@@ -87,7 +87,7 @@ test.describe('Nhớ món đã quét, ghi lại không cần AI', () => {
     expect(errors).toEqual([]);
   });
 
-  test('lần sau: "Ăn lại món đã lưu" trong màn Scan, 1½ đĩa, không gọi AI', async ({ page }) => {
+  test('lần sau: "Ăn lại món đã lưu" trong màn Quét, 1½ đĩa, không gọi AI', async ({ page }) => {
     const errors = trackErrors(page);
     const ai = await mockFoodAi(page, { error: 'ai_unavailable', message: 'không được gọi' });
     const date = todayVN(-1);

@@ -1,7 +1,7 @@
 // Edge cases of the "remember, don't repeat" features, played as a real user:
 // AI errors (quota / not food / AI busy → retry), double taps, losing the network,
-// an account that has not saved anything yet, and known defects kept as `fixme`
-// (flip them to `test` once the owning area ships the fix).
+// an account that has not saved anything yet, and defects fixed before release (kept as
+// regression guards; a still-open defect is kept as `fixme` until its owner ships the fix).
 // Mutates ONLY the dedicated "edge" and "empty" accounts (recreated + seeded by global setup).
 import { expect, test, type Page } from '@playwright/test';
 import { aiResponse, foodPhoto, mockFoodAi, overflowX, storageStatePath, todayVN, userId, wipeFood, withDb } from '../support/env';
@@ -120,10 +120,10 @@ test.describe('Tài khoản chưa lưu món nào', () => {
     await wipeFood('empty');
   });
 
-  test('Hôm nay, Scan và Món của tôi giải thích cách món được ghi nhớ, không hiện ô trống', async ({ page }) => {
+  test('Hôm nay, Quét và Món của tôi giải thích cách món được ghi nhớ, không hiện ô trống', async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto('#/');
-    await expect(page.getByRole('region', { name: 'Ăn lại nhanh' })).toContainText('Món bạn scan hoặc lưu sẽ hiện ở đây');
+    await expect(page.getByRole('region', { name: 'Ăn lại nhanh' })).toContainText('Món bạn quét hoặc lưu sẽ hiện ở đây');
 
     await page.goto('#/scan?meal=lunch');
     await expect(page.getByRole('radiogroup', { name: 'Chế độ quét' })).toBeVisible();
@@ -137,16 +137,16 @@ test.describe('Tài khoản chưa lưu món nào', () => {
 });
 
 /* ------------------------------------------------------------------------------------------ */
-/* Known defects (reported to the owning areas). Flip `test.fixme` → `test` when fixed.        */
+/* Defects reported before release, now fixed: regression guards (all flipped from fixme).   */
 /* ------------------------------------------------------------------------------------------ */
 
-test.describe('Lỗi đã báo (chờ sửa)', () => {
+test.describe('Lỗi đã sửa (giữ để không tái phát)', () => {
   test.use({ storageState: storageStatePath('edge') });
 
-  // scan: Android/browser Back while "Kết quả quét" is open leaves the Scan screen and throws
-  // away a result that already cost one AI scan. Back should close the sheet (or ask first).
-  test.fixme('nút Back khi đang xem kết quả quét chỉ đóng bảng kết quả, không mất lượt quét', async ({ page }) => {
-    await mockFoodAi(page, aiResponse([BANH_XEO]));
+  // scan: Android/browser Back while "Kết quả quét" is open used to leave the Scan screen and throw
+  // away a result that already cost one AI scan. Back now closes the sheet; a second Back asks first.
+  test('nút Back khi đang xem kết quả quét chỉ đóng bảng kết quả, không mất lượt quét', async ({ page }) => {
+    const ai = await mockFoodAi(page, aiResponse([BANH_XEO]));
     await page.goto('#/');
     await page.getByRole('navigation', { name: 'Điều hướng' }).getByRole('link', { name: 'Quét món ăn bằng AI' }).click();
     await uploadPhoto(page);
@@ -154,12 +154,22 @@ test.describe('Lỗi đã báo (chờ sửa)', () => {
     await expect(review).toBeVisible({ timeout: 20_000 });
     await page.goBack();
     await expect(page).toHaveURL(/#\/scan/);
+    await expect(review).toBeHidden();
+    // The dishes are kept: a second Back asks before throwing the scan away (no new AI call).
+    await page.goBack();
+    await expect(page).toHaveURL(/#\/scan/);
+    const ask = page.getByRole('dialog', { name: 'Bỏ kết quả quét?' });
+    await expect(ask).toBeVisible();
+    await ask.getByRole('button', { name: 'Ở lại' }).click();
+    await expect(ask).toBeHidden();
+    await expect(page).toHaveURL(/#\/scan/);
+    expect(ai.calls()).toBe(1);
   });
 
   // scan + contract: an AI result over the DB limits (e.g. 99 999 g, 999 999 kcal) can be submitted;
   // the diary insert fails with a generic error but the dish was already saved to "Món của tôi"
   // (use_count 1, clamped to 1 000 kcal/100 g) although nothing was logged.
-  test.fixme('kết quả AI vô lý: báo lỗi ngay ở ô sai và không để lại món đã lưu "ma"', async ({ page }) => {
+  test('kết quả AI vô lý: báo lỗi ngay ở ô sai và không để lại món đã lưu "ma"', async ({ page }) => {
     const name = 'Lẩu hải sản e2e khổng lồ';
     await mockFoodAi(page, aiResponse([{ ...BANH_XEO, name, unit: 'nồi', grams: 99_999, kcal: 999_999, protein_g: 9_999, carbs_g: 9_999, fat_g: 9_999, fiber_g: 999 }]));
     await page.goto('#/scan?meal=lunch');
@@ -174,7 +184,7 @@ test.describe('Lỗi đã báo (chờ sửa)', () => {
 
   // foundation (NumberField clamps silently on blur) → body: typing 999 kg saves 300 kg with
   // "Đã cập nhật số đo". Same for quick-add 99 999 kcal → 5 000 kcal, steps 9 999 999 → 200 000.
-  test.fixme('cân nặng 999 kg bị chặn bằng lỗi, không âm thầm lưu thành 300 kg', async ({ page }) => {
+  test('cân nặng 999 kg bị chặn bằng lỗi, không âm thầm lưu thành 300 kg', async ({ page }) => {
     await page.goto('#/body');
     await page.getByRole('button', { name: /Cập nhật số đo/ }).first().click();
     const sheet = page.getByRole('dialog').last();

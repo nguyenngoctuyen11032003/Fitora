@@ -26,6 +26,8 @@ export const USERS = {
   edge: { email: 'edge@fitora.test', name: 'Người Thử Giới Hạn' },
   /** Onboarded account whose food data smart-edge.spec wipes (empty states of the smart features). */
   empty: { email: 'empty@fitora.test', name: 'Người Chưa Lưu Món' },
+  /** Seeded account used ONLY by regressions.spec (undo double taps, scan units, load errors, clock parity). */
+  qa: { email: 'qa@fitora.test', name: 'Người Kiểm Thử' },
 } as const;
 export type UserKey = keyof typeof USERS;
 

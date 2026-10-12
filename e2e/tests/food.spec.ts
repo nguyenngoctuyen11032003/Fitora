@@ -66,7 +66,7 @@ test.describe('Nhật ký ăn', () => {
   test('không tìm thấy thì nhập nhanh bằng calo', async ({ page }) => {
     await page.goto(`#/food/search?meal=snack&date=${todayVN()}`);
     await page.getByRole('searchbox', { name: 'Tìm món ăn' }).fill('Bánh kem e2e');
-    await expect(page.getByText('Không thấy “Bánh kem e2e”')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Không thấy “Bánh kem e2e”' })).toBeVisible();
     await page.getByRole('button', { name: 'Nhập nhanh', exact: true }).click();
     const sheet = page.getByRole('dialog', { name: 'Nhập nhanh' });
     await expect(sheet.getByLabel('Tên món')).toHaveValue('Bánh kem e2e');
