@@ -104,8 +104,8 @@ export default function OnboardingPage() {
 
   if (!initial || !uid) {
     return (
-      <Page topBar={false} label="Thiết lập hồ sơ">
-        <div className="flex flex-col gap-4 pt-6" aria-busy="true" aria-label="Đang tải">
+      <Page topBar={false} label="Thiết lập hồ sơ" contentClassName="lg:!max-w-[680px]">
+        <div className="flex flex-col gap-4 pt-6 lg:pt-12" aria-busy="true" aria-label="Đang tải">
           <Skeleton width="40%" height={14} />
           <Skeleton width="80%" height={84} />
           <Skeleton height={132} rounded="card" />
@@ -314,9 +314,9 @@ function OnboardingFlow({
   );
 
   return (
-    <Page ref={pageRef} topBar={false} footer={footer} label="Thiết lập hồ sơ">
+    <Page ref={pageRef} topBar={false} footer={footer} label="Thiết lập hồ sơ" contentClassName="lg:!max-w-[680px]">
       {/* Progress header */}
-      <div className="pb-4 pt-1">
+      <div className="pb-4 pt-1 lg:pt-8">
         <div className="flex min-h-[44px] items-center gap-3">
           <div
             className="flex flex-1 gap-1.5"
@@ -345,11 +345,11 @@ function OnboardingFlow({
       </div>
 
       {/* Step heading — keyed so the speed-reveal replays */}
-      <header key={`h${step}`} className="mb-7 mt-2">
+      <header key={`h${step}`} className="mb-7 mt-2 lg:mb-9 lg:mt-6">
         <p className="eyebrow mb-3 animate-fade-in text-[rgba(237,180,11,0.9)]">
           <span className="tabular">0{step + 1}</span> · {meta.eyebrow}
         </p>
-        <h1 ref={headingRef} tabIndex={-1} className="display animate-speed-reveal break-words text-[42px] text-text outline-none [overflow-wrap:anywhere]">
+        <h1 ref={headingRef} tabIndex={-1} className="display animate-speed-reveal break-words text-[42px] text-text outline-none [overflow-wrap:anywhere] lg:text-[52px]">
           {step === 0 && displayName !== 'bạn' ? (
             <>
               Chào {displayName.split(' ').slice(-1)[0]},<br />

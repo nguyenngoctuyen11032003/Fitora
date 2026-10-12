@@ -85,8 +85,8 @@ export function WeightChart({ rows, target }: { rows: BodyMeasurement[]; target?
   const last = data[data.length - 1];
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 lg:flex-1 lg:gap-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-5">
         <div className="min-w-0">
           <p className="eyebrow !text-[10px]">Xu hướng cân nặng</p>
           {first && last && first !== last ? (
@@ -108,20 +108,21 @@ export function WeightChart({ rows, target }: { rows: BodyMeasurement[]; target?
             </p>
           )}
         </div>
-        <Segmented options={RANGES} value={range} onChange={setRange} size="sm" ariaLabel="Khoảng thời gian" />
+        <Segmented options={RANGES} value={range} onChange={setRange} size="sm" ariaLabel="Khoảng thời gian" className="lg:!w-[264px] lg:shrink-0" />
       </div>
 
-      <div className="relative -mx-2 h-[150px]" role="img" aria-label={
+      {/* Laptop: the plot fills the card (children are absolutely sized against it). */}
+      <div className="relative -mx-2 h-[150px] lg:h-auto lg:min-h-[220px] lg:flex-1" role="img" aria-label={
           last
             ? `Biểu đồ cân nặng ${data.length} điểm, gần nhất ${formatKg(last.weight)}${showAvg ? `, trung bình 7 ngày ${formatKg(last.avg)}` : ''}`
             : 'Biểu đồ cân nặng trống'
         }>
         {data.length === 0 ? (
-          <div className="grid h-full place-items-center rounded-2xl border border-dashed border-line text-[13px] text-muted">
+          <div className="grid h-full place-items-center rounded-2xl border border-dashed border-line text-[13px] text-muted lg:absolute lg:inset-0">
             Không có lần cân nào
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" className="lg:!absolute lg:inset-0">
             <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
               <defs>
                 <linearGradient id={`wg-${gid}`} x1="0" y1="0" x2="0" y2="1">

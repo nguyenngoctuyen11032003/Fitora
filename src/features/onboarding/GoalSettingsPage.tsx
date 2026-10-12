@@ -201,7 +201,7 @@ export default function GoalSettingsPage() {
 
   const footer =
     draft && dirty ? (
-      <div className="glass-strong flex items-center gap-3 rounded-[22px] p-2 pl-4 animate-fade-slide-up">
+      <div className="glass-strong flex items-center gap-3 rounded-[22px] p-2 pl-4 animate-fade-slide-up lg:ml-auto lg:w-[420px]">
         <div className="flex min-w-0 flex-1 flex-col" aria-live="polite">
           <span className="text-[11px] font-semibold text-muted">Mục tiêu mới</span>
           {plan ? (
@@ -244,7 +244,9 @@ export default function GoalSettingsPage() {
           }
         />
       ) : (
-        <div className={clsx('flex flex-col gap-8', !dirty && 'pb-2')}>
+        <div className={clsx('flex flex-col gap-8 lg:grid lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start lg:gap-10', !dirty && 'pb-2')}>
+          {/* Laptop: live plan in a sticky side column, edit sections in the main column. */}
+          <div className={clsx('contents lg:no-scrollbar lg:sticky lg:top-4 lg:col-start-2 lg:row-start-1 lg:flex lg:max-h-[calc(100dvh-32px)] lg:flex-col lg:gap-8 lg:overflow-y-auto lg:overscroll-contain', dirty ? 'lg:pb-28' : 'lg:pb-2')}>
           {refreshed && (
             <p role="status" className="-mb-4 rounded-2xl border border-[rgba(237,180,11,0.35)] bg-[rgba(237,180,11,0.08)] px-4 py-3 text-[13px] leading-snug text-[rgba(237,228,216,0.9)]">
               Kế hoạch đã được tính lại theo số liệu mới nhất ({formatNumber(draft.weight_kg ?? 0, 1)} kg · {shownPlan.age} tuổi)
@@ -257,7 +259,9 @@ export default function GoalSettingsPage() {
             </p>
           )}
           <PlanStep draft={draft} plan={shownPlan} onChange={update} compact error={errors.plan} />
+          </div>
 
+          <div className="contents lg:col-start-1 lg:row-start-1 lg:flex lg:min-w-0 lg:flex-col lg:gap-8 lg:[&>section:first-child]:border-t-0 lg:[&>section:first-child]:pt-0">
           <Section title="Mục tiêu chính">
             <GoalStep draft={draft} onChange={update} errors={shownErrors} plan={plan} compact />
           </Section>
@@ -276,6 +280,7 @@ export default function GoalSettingsPage() {
           <Section title="Về bạn">
             <BasicsStep draft={draft} onChange={update} errors={errors} compact />
           </Section>
+          </div>
         </div>
       )}
     </Page>

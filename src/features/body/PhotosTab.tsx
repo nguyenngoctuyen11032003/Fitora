@@ -52,7 +52,7 @@ export function PhotosTab({ photos, urls, rows, loading, error, compare, selecte
     return (
       <div className="flex flex-col gap-4" role="status" aria-label="Đang tải ảnh">
         <Skeleton height={56} rounded="card" />
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-2 lg:grid-cols-5 lg:gap-3">
           {Array.from({ length: 6 }, (_, i) => (
             <Skeleton key={i} rounded="md" className="aspect-[3/4] !h-auto" />
           ))}
@@ -140,7 +140,7 @@ export function PhotosTab({ photos, urls, rows, loading, error, compare, selecte
             <h3 className="eyebrow !text-[11px]">{g.label}</h3>
             <span className="text-[12px] text-muted">{g.items.length} ảnh</span>
           </div>
-          <ul className="grid grid-cols-3 gap-2">
+          <ul className="grid grid-cols-3 gap-2 lg:grid-cols-5 lg:gap-3">
             {g.items.map((p) => {
               const order = selected.indexOf(p.id);
               const sel = order >= 0;

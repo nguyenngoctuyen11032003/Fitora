@@ -139,9 +139,10 @@ export default function ReportsPage() {
 
   return (
     <Page label="Tiến trình">
-      <ScreenHeader eyebrow="Tiến trình" title="Báo cáo" subtitle={goalLabel ? `Mục tiêu: ${goalLabel}` : undefined} />
+      <div className="contents lg:flex lg:items-end lg:justify-between lg:gap-10">
+      <ScreenHeader eyebrow="Tiến trình" title="Báo cáo" subtitle={goalLabel ? `Mục tiêu: ${goalLabel}` : undefined} className="lg:min-w-0" />
 
-      <div className="mt-6">
+      <div className="mt-6 lg:mt-0 lg:w-[420px] lg:shrink-0">
         <PeriodNav
           period={period}
           onPeriod={changePeriod}
@@ -154,12 +155,17 @@ export default function ReportsPage() {
           isCurrent={isCurrent}
         />
       </div>
+      </div>
 
-      <div className="mt-5 flex flex-col gap-4" aria-busy={loading}>
-        {!summary && loading && <ReportSkeleton />}
+      <div className="mt-5 flex flex-col gap-4 lg:mt-8 lg:grid lg:grid-cols-2 lg:gap-5" aria-busy={loading}>
+        {!summary && loading && (
+          <div className="contents lg:col-span-2 lg:block">
+            <ReportSkeleton />
+          </div>
+        )}
 
         {!summary && !loading && error != null && (
-          <GlassCard>
+          <GlassCard className="lg:col-span-2">
             <EmptyState
               icon={BarChart3}
               title="Không tải được báo cáo"
@@ -174,7 +180,7 @@ export default function ReportsPage() {
         )}
 
         {summary && empty && (
-          <GlassCard className="animate-fade-slide-up">
+          <GlassCard className="animate-fade-slide-up lg:col-span-2">
             <EmptyState
               icon={BarChart3}
               title={isCurrent ? 'Chưa có gì để báo cáo' : 'Kỳ này trống'}
@@ -187,7 +193,7 @@ export default function ReportsPage() {
                 isCurrent ? (
                   <div className="flex flex-wrap justify-center gap-2">
                     <Button icon={<ScanLine className="h-4 w-4" />} onClick={() => navigate('/scan')}>
-                      Scan món ăn
+                      Quét món ăn
                     </Button>
                     <Button variant="secondary" icon={<NotebookPen className="h-4 w-4" />} onClick={() => navigate('/diary')}>
                       Mở nhật ký
@@ -206,21 +212,21 @@ export default function ReportsPage() {
         {summary && !empty && (
           <>
             <Headline s={summary} goalLabel={goalLabel} />
-            <div className="animate-fade-slide-up animate-delay-100">
+            <div className="animate-fade-slide-up animate-delay-100 lg:[&>*]:h-full">
               <InsightsSection s={summary} prev={prevSummary} period={period} goal={fit?.goal ?? null} proteinTarget={fit?.protein_g ?? null} />
             </div>
-            <div className="animate-fade-slide-up animate-delay-100">
+            <div className="animate-fade-slide-up animate-delay-100 lg:col-span-2">
               <CalorieSection s={summary} animate={animate} monthly={monthly} />
             </div>
-            <div className="animate-fade-slide-up animate-delay-200">
+            <div className="animate-fade-slide-up animate-delay-200 lg:[&>*]:h-full">
               <MacroSection s={summary} fit={fit} />
             </div>
             {foodReport && (
-              <div className="animate-fade-slide-up animate-delay-200">
+              <div className="animate-fade-slide-up animate-delay-200 lg:[&>*]:h-full">
                 <FoodSection report={foodReport} period={period} onSave={(f) => void saveFood(f)} savingKey={savingKey} />
               </div>
             )}
-            <div className="animate-fade-slide-up animate-delay-300">
+            <div className="animate-fade-slide-up animate-delay-300 lg:col-span-2">
               <WeightSection
                 s={summary}
                 goal={fit?.goal ?? null}
@@ -230,13 +236,13 @@ export default function ReportsPage() {
                 latestKnown={fresh?.latest?.weight_kg ? { kg: fresh.latest.weight_kg, on: fresh.latest.measured_on } : null}
               />
             </div>
-            <div className="mt-2 animate-fade-slide-up animate-delay-400">
+            <div className="mt-2 animate-fade-slide-up animate-delay-400 lg:col-span-2 lg:mt-3">
               <CompletionSection s={summary} />
             </div>
           </>
         )}
 
-        <div className="mt-2">
+        <div className="mt-2 lg:col-span-2">
           <LinkCards />
         </div>
       </div>

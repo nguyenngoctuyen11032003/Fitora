@@ -63,7 +63,7 @@ export function ActivityPicker({ query, onQuery, category, onCategory, selected,
         }
       />
 
-      <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5" role="group" aria-label="Nhóm hoạt động">
+      <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5 lg:flex-wrap lg:overflow-x-visible" role="group" aria-label="Nhóm hoạt động">
         <Chip selected={category === 'all'} onClick={() => onCategory('all')}>
           Tất cả
         </Chip>
@@ -79,7 +79,7 @@ export function ActivityPicker({ query, onQuery, category, onCategory, selected,
           <p className="eyebrow mb-2 flex items-center gap-1.5">
             <History className="h-3.5 w-3.5" aria-hidden="true" /> Ghi lại nhanh
           </p>
-          <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5">
+          <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5 lg:flex-wrap lg:overflow-x-visible">
             {recent.map((w) => (
               <button
                 key={w.id}

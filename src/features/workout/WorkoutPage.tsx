@@ -402,17 +402,19 @@ export default function WorkoutPage() {
   return (
     <Page label="Tập luyện">
       {/* Hero ------------------------------------------------------------- */}
-      <section aria-labelledby="burn-h" className="relative">
+      <section aria-labelledby="burn-h" className="relative lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:items-end lg:gap-x-14">
         <div aria-hidden="true" className="pointer-events-none absolute -left-10 -top-10 h-48 w-48 rounded-full bg-ember/25 blur-3xl" />
-        <h1 id="burn-h" className="eyebrow relative flex items-center gap-1.5 text-gold/90">
+        <h1 id="burn-h" className="eyebrow relative flex items-center gap-1.5 text-gold/90 lg:col-start-1 lg:row-start-1">
           <Flame className="h-3.5 w-3.5" aria-hidden="true" /> Tập luyện · {isFuture ? 'Dự kiến đốt' : 'Đã đốt'} {dayLabel.toLowerCase()}
         </h1>
         {firstLoad ? (
-          <Skeleton width={220} height={88} className="mt-4" />
+          <Skeleton width={220} height={88} className="mt-4 lg:col-start-1 lg:row-start-2" />
         ) : (
-          <BigNumber key={selected} value={isFuture ? burn.plannedKcal : burn.total} unit="kcal" tone="ember" size="lg" className="relative mt-3" />
+          <BigNumber key={selected} value={isFuture ? burn.plannedKcal : burn.total} unit="kcal" tone="ember" size="lg" className="relative mt-3 lg:col-start-1 lg:row-start-2" />
         )}
-        <div className="relative mt-5 grid grid-cols-3 gap-2">
+        {/* Size container: Stat sizing follows the card width (phone frame), not the browser viewport. */}
+        <div className="relative mt-5 [container-type:inline-size] lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:mt-0 lg:self-end lg:pb-1">
+        <div className="grid grid-cols-3 gap-2 lg:gap-3">
           <Stat icon={<Dumbbell className="h-3.5 w-3.5" />} label="Tập luyện" value={`${formatNumber(burn.workoutKcal)}`} sub={burn.doneCount ? `${burn.doneCount} buổi · ${burn.doneMinutes}′` : 'Chưa có'}
             title={burn.doneCount ? `${burn.doneCount} buổi · ${formatMinutes(burn.doneMinutes)}` : undefined} />
           <Stat icon={<Footprints className="h-3.5 w-3.5" />} label="Bước chân" value={`${formatNumber(burn.stepsKcal)}`} sub={`${formatNumber(steps ?? 0)} bước`} />
@@ -424,7 +426,8 @@ export default function WorkoutPage() {
             dim={!burn.plannedCount}
           />
         </div>
-        <p className="relative mt-3 text-[12.5px] text-muted">
+        </div>
+        <p className="relative mt-3 text-[12.5px] text-muted lg:col-span-2 lg:mt-4 lg:text-[13.5px]">
           {weekLabel}: <b className="font-semibold text-text">{weekDoneCount} buổi đã tập</b> · {formatNumber(weekKcal)} kcal từ tập luyện
         </p>
       </section>
@@ -443,8 +446,10 @@ export default function WorkoutPage() {
         />
       </div>
 
+      {/* Laptop: day sessions + templates (main) · sticky steps card (side). Box-less on phone. */}
+      <div className="contents lg:mt-9 lg:grid lg:grid-cols-[minmax(0,1fr)_400px] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-8">
       {/* Day sessions ----------------------------------------------------- */}
-      <section aria-labelledby="day-h" className="mt-7 flex flex-col gap-3">
+      <section aria-labelledby="day-h" className="mt-7 flex flex-col gap-3 lg:col-start-1 lg:row-start-1 lg:mt-0">
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
             <p className="eyebrow">{sessions.length ? `${sessions.length} buổi` : 'Lịch ngày'}</p>
@@ -523,7 +528,7 @@ export default function WorkoutPage() {
       </section>
 
       {/* Steps ------------------------------------------------------------ */}
-      <div className="mt-7">
+      <div className="mt-7 lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:mt-0">
         <StepsCard
           date={selected}
           steps={steps}
@@ -548,7 +553,7 @@ export default function WorkoutPage() {
       </div>
 
       {/* Templates -------------------------------------------------------- */}
-      <div className="mt-7">
+      <div className="mt-7 lg:col-start-1 lg:row-start-2 lg:mt-0">
         <TemplatesCard
           templates={templates}
           loading={tpl.loading}
@@ -559,6 +564,7 @@ export default function WorkoutPage() {
           onCustomize={customizeTemplate}
           onDelete={removeTemplate}
         />
+      </div>
       </div>
 
       <WorkoutSheet
@@ -592,15 +598,15 @@ export default function WorkoutPage() {
 
 function Stat({ icon, label, value, sub, dim, title }: { icon: ReactNode; label: string; value: string; sub: string; dim?: boolean; title?: string }) {
   return (
-    <div className="glass-card min-w-0 !rounded-[18px] px-2.5 py-3 min-[400px]:px-3" title={title}>
-      <p className="flex items-center gap-1 whitespace-nowrap text-[11.5px] font-semibold leading-tight text-muted min-[400px]:text-[12px]">
+    <div className="glass-card min-w-0 !rounded-[18px] px-2.5 py-3 [@container(min-width:340px)]:px-3 lg:!rounded-[22px] lg:!px-4 lg:py-4" title={title}>
+      <p className="flex items-center gap-1 whitespace-nowrap text-[11.5px] font-semibold leading-tight text-muted [@container(min-width:340px)]:text-[12px]">
         <span className="shrink-0 text-gold" aria-hidden="true">
           {icon}
         </span>
         <span className="min-w-0">{label}</span>
       </p>
-      <p className={dim ? 'num mt-2 text-[24px] text-text/40' : 'num mt-2 text-[24px] text-text'}>{value}</p>
-      <p className="mt-1 truncate text-[11.5px] text-muted">{sub}</p>
+      <p className={dim ? 'num mt-2 text-[24px] text-text/40 lg:mt-3 lg:text-[30px]' : 'num mt-2 text-[24px] text-text lg:mt-3 lg:text-[30px]'}>{value}</p>
+      <p className="mt-1 truncate text-[11.5px] text-muted lg:text-[12.5px]">{sub}</p>
     </div>
   );
 }

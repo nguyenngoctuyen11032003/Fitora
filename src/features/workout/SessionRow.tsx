@@ -21,7 +21,7 @@ export function SessionRow({ workout: w, pending, onToggle, onOpen, index = 0 }:
   const { km } = splitDistanceNote(w.notes);
   return (
     <li
-      className={clsx('glass-card flex items-stretch gap-1 p-1.5 pr-2 animate-fade-slide-up motion-reduce:animate-none', pending && 'opacity-60')}
+      className={clsx('glass-card flex items-stretch gap-1 p-1.5 pr-2 [container-type:inline-size] animate-fade-slide-up motion-reduce:animate-none', pending && 'opacity-60')}
       style={{ animationDelay: `${Math.min(index, 6) * 60}ms` }}
     >
       <button
@@ -75,7 +75,7 @@ export function SessionRow({ workout: w, pending, onToggle, onOpen, index = 0 }:
           </span>
           <span className="mt-1 text-[10.5px] font-bold uppercase tracking-[0.12em] text-muted">kcal</span>
         </span>
-        <ChevronRight className="hidden h-4 w-4 shrink-0 text-muted min-[380px]:block" aria-hidden="true" />
+        <ChevronRight className="hidden h-4 w-4 shrink-0 text-muted [@container(min-width:330px)]:block" aria-hidden="true" />
       </button>
     </li>
   );

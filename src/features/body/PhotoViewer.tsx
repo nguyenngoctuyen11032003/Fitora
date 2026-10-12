@@ -174,7 +174,7 @@ export function PhotoViewer({ photos, index, urls, rows, onIndex, onDelete, onCo
           </button>
         </div>
 
-        <div className="px-5" style={{ paddingBottom: 'calc(var(--safe-bottom) + 18px)' }}>
+        <div className="px-5 lg:mx-auto lg:w-full lg:max-w-[640px]" style={{ paddingBottom: 'calc(var(--safe-bottom) + 18px)' }}>
           <p className="eyebrow !text-[10px] text-gold">{POSE_LABELS[p.pose]}</p>
           <div className="mt-1.5 flex items-end justify-between gap-3">
             <h2 className="display text-[28px] text-text">{formatDayVi(p.taken_on)}</h2>

@@ -116,9 +116,9 @@ export function MeasurementsTab({ rows, loading, error, fit, onAdd, onEdit, onRe
   const { bmi, cat, whtr, waistDate, toTarget, refresh } = derived;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 lg:grid lg:grid-cols-12 lg:gap-6">
       {/* Hero: latest weight */}
-      <GlassCard padding="lg" className="overflow-hidden animate-fade-slide-up">
+      <GlassCard padding="lg" className="overflow-hidden animate-fade-slide-up lg:col-span-5 lg:col-start-1">
         <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(225,80,10,0.32),transparent_65%)]" />
         {stats.current !== null ? (
           <>
@@ -191,7 +191,7 @@ export function MeasurementsTab({ rows, loading, error, fit, onAdd, onEdit, onRe
       {refresh && (
         <Link
           to="/goals"
-          className="glass-card flex items-center gap-3 p-3.5 transition-colors hover:bg-white/[0.08] animate-fade-slide-up"
+          className="glass-card flex items-center gap-3 p-3.5 transition-colors hover:bg-white/[0.08] animate-fade-slide-up lg:col-span-5 lg:col-start-1"
         >
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-white/[0.06] text-gold">
             <Flame className="h-5 w-5" aria-hidden="true" />
@@ -208,7 +208,12 @@ export function MeasurementsTab({ rows, loading, error, fit, onAdd, onEdit, onRe
       )}
 
       {stats.count > 0 && (
-        <GlassCard className="animate-fade-slide-up animate-delay-100">
+        <GlassCard
+          className={clsx(
+            'animate-fade-slide-up animate-delay-100 lg:col-span-7 lg:col-start-6 lg:row-start-1 lg:flex lg:flex-col',
+            refresh && 'lg:row-span-2',
+          )}
+        >
           <Suspense fallback={<WeightChartSkeleton />}>
             <WeightChart rows={asc} target={target} />
           </Suspense>
@@ -216,7 +221,7 @@ export function MeasurementsTab({ rows, loading, error, fit, onAdd, onEdit, onRe
       )}
 
       {/* History by month */}
-      <section aria-label="Lịch sử số đo" className="flex flex-col gap-5 pt-2">
+      <section aria-label="Lịch sử số đo" className="flex flex-col gap-5 pt-2 lg:col-span-12">
         <div className="flex items-end justify-between">
           <h2 className="display text-[26px] text-text">Lịch sử</h2>
           <span className="pb-1 text-[13px] text-muted">{rows.length} lần ghi</span>
@@ -224,7 +229,7 @@ export function MeasurementsTab({ rows, loading, error, fit, onAdd, onEdit, onRe
         {groups.map((g) => (
           <div key={g.key} className="flex flex-col gap-2.5">
             <h3 className="eyebrow pl-1 !text-[11px]">{g.label}</h3>
-            <ul className="flex flex-col gap-2.5">
+            <ul className="flex flex-col gap-2.5 lg:grid lg:grid-cols-2 lg:gap-3">
               {g.items.map((r) => (
                 <HistoryRow key={r.id} row={r} idx={indexOf.get(r.id) ?? 0} rows={asc} goal={goal} onEdit={onEdit} />
               ))}
@@ -270,7 +275,7 @@ function HistoryRow({
         type="button"
         onClick={() => onEdit(row)}
         aria-label={`Sửa số đo ${formatDayVi(row.measured_on, 'long')}`}
-        className="glass-card flex w-full items-stretch gap-3.5 p-3.5 text-left transition-transform duration-150 hover:bg-white/[0.08] active:scale-[0.985]"
+        className="glass-card flex w-full items-stretch gap-3.5 p-3.5 text-left transition-transform duration-150 hover:bg-white/[0.08] active:scale-[0.985] lg:h-full"
       >
         <div className="flex w-11 shrink-0 flex-col items-center justify-center rounded-2xl bg-white/[0.05] py-1.5">
           <span className="text-[10px] font-bold uppercase text-muted">{weekdayShort(row.measured_on)}</span>

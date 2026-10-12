@@ -8,7 +8,6 @@ import {
   Droplets,
   Footprints,
   Info,
-  Link2,
   ListChecks,
   LogOut,
   Mail,
@@ -90,32 +89,27 @@ export default function ProfilePage() {
     <Page label="Hồ sơ">
       <ScreenHeader eyebrow="Tài khoản" title="Hồ sơ" />
 
-      {/* Shared account card */}
-      <GlassCard padding="lg" className="mt-6 overflow-hidden animate-fade-slide-up">
+      <div className="contents lg:mt-6 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] lg:grid-rows-[auto_auto_1fr] lg:items-start lg:gap-x-8">
+      {/* Account card */}
+      <GlassCard padding="lg" className="mt-6 overflow-hidden animate-fade-slide-up lg:col-start-1 lg:row-start-1 lg:mt-[27px]">
         <div aria-hidden="true" className="pointer-events-none absolute -left-20 -top-24 h-60 w-60 rounded-full bg-[radial-gradient(circle,rgba(237,180,11,0.22),transparent_65%)]" />
-        <div className="relative flex items-center gap-4">
+        <div className="relative flex items-center gap-4 lg:flex-col lg:py-2 lg:text-center">
           <Avatar src={shared?.avatar_url} name={displayName} size={72} className="ring-2 !ring-[rgba(237,180,11,0.5)]" />
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 lg:w-full">
             {loading && !shared ? (
-              <Skeleton width="70%" height={26} />
+              <Skeleton width="70%" height={26} className="lg:mx-auto" />
             ) : (
               <h2 className="display line-clamp-2 break-words text-[28px] text-text">{displayName}</h2>
             )}
-            <p className="mt-1.5 flex items-center gap-1.5 truncate text-[14px] text-muted">
+            <p className="mt-1.5 flex items-center gap-1.5 truncate text-[14px] text-muted lg:justify-center">
               <Mail className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span className="truncate">{user?.email ?? '—'}</span>
             </p>
           </div>
         </div>
-        <div className="relative mt-4 flex items-start gap-2.5 rounded-2xl border border-line bg-white/[0.03] px-3.5 py-3 text-[13px] leading-relaxed text-muted">
-          <Link2 className="mt-0.5 h-4 w-4 shrink-0 text-gold" aria-hidden="true" />
-          <p>
-            Tài khoản dùng chung với <b className="font-semibold text-text/90">Note_mytasks</b>. Tên hiển thị và ảnh đại diện chỉ đọc ở đây —{' '}
-            <span className="text-text/90">Chỉnh sửa trong Note_mytasks</span>.
-          </p>
-        </div>
       </GlassCard>
 
+      <div className="contents lg:col-start-2 lg:row-span-3 lg:row-start-1 lg:block lg:min-w-0 lg:[&>h2:first-child]:mt-0">
       {/* Goal summary */}
       <SectionTitle>Mục tiêu hiện tại</SectionTitle>
       <GlassCard className="animate-fade-slide-up animate-delay-100">
@@ -223,13 +217,14 @@ export default function ProfilePage() {
         <NavRow to="/progress" icon={BarChart3} label="Báo cáo tiến trình" hint="Tuần / tháng: calo, cân nặng, BMI" />
         <NavRow to="/goals" icon={Target} label="Mục tiêu & macro" hint="Tính lại TDEE, chỉnh macro" />
       </GlassCard>
+      </div>
 
-      <Button variant="secondary" block size="lg" className="mt-8" icon={<LogOut className="h-5 w-5 text-[var(--danger-text)]" />} onClick={() => setAskOut(true)}>
+      <Button variant="secondary" block size="lg" className="mt-8 lg:col-start-1 lg:row-start-2 lg:mt-4" icon={<LogOut className="h-5 w-5 text-[var(--danger-text)]" />} onClick={() => setAskOut(true)}>
         Đăng xuất
       </Button>
 
       {/* About */}
-      <footer className="mt-10 flex flex-col items-center gap-2 text-center">
+      <footer className="mt-10 flex flex-col items-center gap-2 text-center lg:col-start-1 lg:row-start-3 lg:mt-8">
         <p className="display text-[22px] text-text">Fitora</p>
         <p className="text-[13px] text-muted">Huấn luyện viên dinh dưỡng & thể hình AI</p>
         <p className="tabular flex items-center gap-1.5 text-[12px] text-muted">
@@ -240,11 +235,12 @@ export default function ProfilePage() {
           Ước tính calo & dinh dưỡng chỉ mang tính tham khảo, không thay thế tư vấn y tế.
         </p>
       </footer>
+      </div>
 
       <ConfirmDialog
         open={askOut}
         title="Đăng xuất khỏi Fitora?"
-        message="Bạn vẫn đăng nhập ở Note_mytasks. Dữ liệu được lưu an toàn trên máy chủ."
+        message="Dữ liệu của bạn được lưu an toàn trên máy chủ — đăng nhập lại bất cứ lúc nào."
         confirmLabel="Đăng xuất"
         danger
         loading={leaving}
@@ -356,7 +352,7 @@ function MemoryCard() {
         <NavRow
           to="/food/search?tab=mine"
           icon={BookmarkCheck}
-          label="Món đã lưu"
+          label="Món của tôi"
           hint={namesHint(s.topFoods, s.foodCount)}
           count={s.foodCount}
         />

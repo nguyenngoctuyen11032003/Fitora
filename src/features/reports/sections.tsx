@@ -541,7 +541,7 @@ export function CompletionSection({ s }: { s: ReportSummary }) {
   return (
     <section aria-labelledby="rp-done">
       <SectionTitle eyebrow="Hoàn thành mục tiêu" title={<span id="rp-done">Kỷ luật</span>} />
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
         <Tile
           icon={Target}
           color="var(--gold)"
@@ -782,7 +782,7 @@ export function LinkCards() {
     { to: '/goals', icon: Target, title: 'Mục tiêu', desc: 'Điều chỉnh calo, macro, nước và bước' },
   ];
   return (
-    <nav aria-label="Liên kết nhanh" className="grid grid-cols-1 gap-3">
+    <nav aria-label="Liên kết nhanh" className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-5">
       {items.map(({ to, icon: Icon, title, desc }) => (
         <Link
           key={to}

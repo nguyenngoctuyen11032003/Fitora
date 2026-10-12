@@ -152,6 +152,7 @@ export default function BodyPage() {
       <Button
         block
         size="lg"
+        className="lg:ml-auto lg:flex lg:w-[340px]"
         icon={measuredToday ? <Pencil className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
         onClick={() => setSheet({ open: true, editing: null })}
       >
@@ -160,19 +161,19 @@ export default function BodyPage() {
     ) : undefined;
   } else if (compare) {
     footer = (
-      <div className="flex gap-2.5">
+      <div className="flex gap-2.5 lg:justify-end">
         <Button variant="secondary" size="lg" onClick={() => (setCompare(false), setSelected([]))}>
           Hủy
         </Button>
-        <Button block size="lg" icon={<Columns2 className="h-5 w-5" />} disabled={selected.length !== 2} onClick={startCompare}>
+        <Button block size="lg" className="lg:w-[300px]" icon={<Columns2 className="h-5 w-5" />} disabled={selected.length !== 2} onClick={startCompare}>
           So sánh {selected.length}/2
         </Button>
       </div>
     );
   } else {
     footer = (
-      <div className="flex gap-2.5">
-        <Button block size="lg" icon={<Camera className="h-5 w-5" />} loading={compressing} onClick={() => camRef.current?.click()}>
+      <div className="flex gap-2.5 lg:justify-end">
+        <Button block size="lg" className="lg:w-[260px]" icon={<Camera className="h-5 w-5" />} loading={compressing} onClick={() => camRef.current?.click()}>
           Chụp ảnh
         </Button>
         <Button variant="secondary" size="lg" icon={<ImagePlus className="h-5 w-5" />} disabled={compressing} onClick={() => libRef.current?.click()}>
@@ -187,7 +188,7 @@ export default function BodyPage() {
       <ScreenHeader eyebrow="Theo dõi cơ thể" title="Cơ thể" />
 
       <Segmented
-        className="mb-5 mt-5"
+        className="mb-5 mt-5 lg:mb-7 lg:max-w-[440px]"
         ariaLabel="Mục"
         value={tab}
         onChange={setTab}

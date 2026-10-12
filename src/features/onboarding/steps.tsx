@@ -184,6 +184,7 @@ function Measure({
       </SectionTitle>
       <NumberField
         label={<span className="sr-only">{label}</span>}
+        ariaLabel={label}
         value={value}
         onChange={onChange}
         unit={unit}
@@ -407,6 +408,7 @@ export function GoalStep({ draft, onChange, errors = {}, compact, plan }: StepPr
           </SectionTitle>
           <NumberField
             label={<span className="sr-only">Cân nặng mục tiêu</span>}
+            ariaLabel="Cân nặng mục tiêu"
             value={draft.target_weight_kg}
             onChange={(v) => onChange({ target_weight_kg: v })}
             unit="kg"
@@ -678,6 +680,7 @@ function PlanEditorSheet({
         {MACROS.map((m) => (
           <NumberField
             key={m.key}
+            ariaLabel={m.label}
             label={
               <span className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: m.color }} aria-hidden="true" />

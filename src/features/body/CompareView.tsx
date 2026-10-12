@@ -97,7 +97,7 @@ export function CompareView({ pair, urls, rows, goal, onClose }: CompareViewProp
             onChange={setMode}
             size="sm"
             ariaLabel="Kiểu so sánh"
-            className="flex-1"
+            className="flex-1 lg:mx-auto lg:max-w-[420px] lg:-translate-x-[28px]"
           />
         </div>
 
@@ -135,7 +135,7 @@ export function CompareView({ pair, urls, rows, goal, onClose }: CompareViewProp
               </div>
             </div>
           ) : (
-            <div className="grid w-full max-w-[460px] grid-cols-2 gap-2.5">
+            <div className="grid w-full max-w-[460px] grid-cols-2 gap-2.5 lg:max-w-[700px] lg:gap-4">
               {[
                 [before, 'Trước'],
                 [after, 'Sau'],
@@ -153,7 +153,7 @@ export function CompareView({ pair, urls, rows, goal, onClose }: CompareViewProp
         </div>
 
         {/* Stats */}
-        <div className="px-4" style={{ paddingBottom: 'calc(var(--safe-bottom) + 16px)' }}>
+        <div className="px-4 lg:mx-auto lg:w-full lg:max-w-[720px]" style={{ paddingBottom: 'calc(var(--safe-bottom) + 16px)' }}>
           <div className="glass-card grid grid-cols-[1fr_auto_1fr] items-center gap-2 !rounded-[22px] p-4">
             <Side tag="Trước" p={before} w={wB?.weight ?? null} approx={wB ? !wB.exact : false} />
             <div className="flex flex-col items-center gap-1 px-1 text-center">
