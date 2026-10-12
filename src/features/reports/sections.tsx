@@ -30,7 +30,7 @@ import { formatKcal, formatKg, formatMl, formatNumber, formatSigned } from '@/li
 import { formatDayVi } from '@/lib/date';
 import type { FitProfile, Goal } from '@/types/db';
 import { MIN_ENTRIES_FOR_FOODS, type FoodReport, type FoodStat } from './foodStats';
-import { buildInsights, comparePeriods, type Insight, type InsightKind } from './insights';
+import { buildInsights, comparePeriods, prevPeriodName, type Insight, type InsightKind } from './insights';
 import { ddmm, type DayPoint, type Period, type ReportSummary, type VerdictTone } from './lib';
 
 // recharts is heavy → its own chunk; the headline and stats paint before it arrives.
@@ -522,9 +522,9 @@ function Tile({
 }) {
   return (
     <div className="flex min-w-0 flex-col rounded-[20px] border border-line bg-white/[0.03] p-3.5">
-      <span className="flex items-center gap-1.5 text-[12px] font-semibold text-muted">
+      <span className="flex items-start gap-1.5 text-[12px] font-semibold leading-tight text-muted">
         <Icon className="h-4 w-4 shrink-0" style={{ color }} aria-hidden="true" />
-        <span className="truncate">{label}</span>
+        <span className="min-w-0 break-words">{label}</span>
       </span>
       <p className="mt-2 flex items-baseline gap-1">
         <span className="num text-[34px] text-text">{value}</span>
@@ -595,10 +595,10 @@ const INSIGHT_ICON: Record<InsightKind, LucideIcon> = {
 function Delta({ label, value, unit, digits = 0 }: { label: string; value: number | null; unit: string; digits?: 0 | 1 }) {
   return (
     <div className="min-w-0 rounded-2xl border border-line bg-white/[0.03] px-3 py-2.5">
-      <p className="truncate text-[11.5px] font-semibold text-muted">{label}</p>
-      <p className="tabular mt-0.5 text-[16px] font-extrabold tracking-[-0.02em] text-text">
-        {value == null ? '—' : value === 0 ? '±0' : formatSigned(value, digits)}
-        {value != null && <span className="ml-1 text-[11px] font-bold text-muted">{unit}</span>}
+      <p className="text-[11.5px] font-semibold leading-tight text-muted">{label}</p>
+      <p className="tabular mt-1 flex flex-wrap items-baseline gap-x-1 text-[16px] font-extrabold tracking-[-0.02em] text-text">
+        <span className="whitespace-nowrap">{value == null ? '—' : value === 0 ? '±0' : formatSigned(value, digits)}</span>
+        {value != null && <span className="text-[11px] font-bold text-muted">{unit}</span>}
       </p>
     </div>
   );
@@ -622,7 +622,7 @@ export function InsightsSection({
   const cmp = useMemo(() => comparePeriods(s, prev), [s, prev]);
   const hasCmp = cmp.avgIn != null || cmp.loggingPts != null || cmp.weight != null || cmp.protein != null;
   if (!insights.length && !hasCmp) return null;
-  const prevName = period === 'week' ? 'tuần trước' : 'tháng trước';
+  const prevName = prevPeriodName(s, prev, period);
   return (
     <GlassCard padding="md" as="section" aria-labelledby="rp-insights">
       <SectionTitle eyebrow="Tóm tắt kỳ" title={<span id="rp-insights">Điểm nổi bật</span>} />
@@ -650,7 +650,7 @@ export function InsightsSection({
       {hasCmp && (
         <div className={clsx(insights.length > 0 && 'mt-4 border-t border-line pt-4')}>
           <p className="mb-2 text-[12px] font-semibold text-muted">So với {prevName}</p>
-          <div className="grid grid-cols-2 gap-2 min-[400px]:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2">
             <Delta label="Nạp TB/ngày" value={cmp.avgIn} unit="kcal" />
             <Delta label="Đạm TB/ngày" value={cmp.protein} unit="g" digits={1} />
             <Delta label="Tỉ lệ ngày ghi" value={cmp.loggingPts} unit="%" />
@@ -782,7 +782,7 @@ export function LinkCards() {
     { to: '/goals', icon: Target, title: 'Mục tiêu', desc: 'Điều chỉnh calo, macro, nước và bước' },
   ];
   return (
-    <nav aria-label="Liên kết nhanh" className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2">
+    <nav aria-label="Liên kết nhanh" className="grid grid-cols-1 gap-3">
       {items.map(({ to, icon: Icon, title, desc }) => (
         <Link
           key={to}

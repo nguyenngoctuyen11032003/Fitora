@@ -76,7 +76,7 @@ export async function requestPasswordReset(email: string) {
   return run(db().auth.resetPasswordForEmail(vEmail(email), { redirectTo: `${appBaseUrl()}?flow=recovery` }));
 }
 
-const EMAIL_LINK_TYPES = ['recovery', 'email', 'signup', 'email_change', 'magiclink', 'invite'] as const;
+const EMAIL_LINK_TYPES = ['recovery', 'email', 'signup', 'email_change'] as const;
 export type EmailLinkType = (typeof EMAIL_LINK_TYPES)[number];
 
 /** Spend a token_hash e-mail link in this browser. */

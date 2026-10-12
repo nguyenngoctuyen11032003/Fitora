@@ -7,7 +7,7 @@ import { listMeals } from '@/services/meals';
 import { getDaySummary, getRangeSummary } from '@/services/summary';
 import { listWorkouts, updateWorkout } from '@/services/workouts';
 import type { DaySummary, MealEntry, RangeSummaryRow, Workout } from '@/types/db';
-import { applyMealDelta, clockKey, summaryFromParts } from './metrics';
+import { applyMealDelta, clockKey, restoreConfirmed, summaryFromParts, type ConfirmedDaily } from './metrics';
 
 export interface TodayData {
   summary: DaySummary;
@@ -67,6 +67,10 @@ export function useTodayData(onError: (err: unknown) => void) {
   const lastSelfNotify = useRef(0);
   const writeChain = useRef<Promise<unknown>>(Promise.resolve());
   const needsResync = useRef(false);
+  /** A water / steps write failed: roll the optimistic values back once the queue drains. */
+  const writeFailed = useRef(false);
+  /** Water / steps as the server last confirmed them (a clean load or a successful write). */
+  const confirmed = useRef<ConfirmedDaily | null>(null);
   const loadInFlight = useRef(false);
   /** Last load failed: further silent failures are not toasted again (no spam while offline). */
   const failing = useRef(false);
@@ -106,6 +110,7 @@ export function useTodayData(onError: (err: unknown) => void) {
       }
     }
     loadInFlight.current = false;
+    if (summary && pending.current === 0) confirmed.current = { date, water_ml: summary.water_ml, steps: summary.steps };
     if (hist.status === 'fulfilled' && hist.value) historyFor.current = date;
 
     const failed: TodayPart[] = [];
@@ -182,7 +187,15 @@ export function useTodayData(onError: (err: unknown) => void) {
       void load(true);
     };
     const onVis = () => document.visibilityState === 'visible' && refresh();
+    // Back online after a failed load / write: resync right away instead of waiting for a focus.
+    const onOnline = () => {
+      if (failing.current && pending.current === 0) {
+        last = Date.now();
+        void load(true);
+      }
+    };
     window.addEventListener('focus', refresh);
+    window.addEventListener('online', onOnline);
     document.addEventListener('visibilitychange', onVis);
     const off = onDataChanged((kind) => {
       if (IGNORED_KINDS.has(kind)) return;
@@ -201,6 +214,7 @@ export function useTodayData(onError: (err: unknown) => void) {
     return () => {
       window.clearTimeout(debounce);
       window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', onOnline);
       document.removeEventListener('visibilitychange', onVis);
       off();
     };
@@ -228,12 +242,13 @@ export function useTodayData(onError: (err: unknown) => void) {
 
   /** Serialises writes so rapid taps land in order; refetches on failure. */
   const enqueue = useCallback(
-    (job: () => Promise<unknown>, kind: 'daily' | 'workouts') => {
+    (job: () => Promise<unknown>, kind: 'daily' | 'workouts', onSaved?: () => void) => {
       pending.current++;
       const p: Promise<boolean> = writeChain.current
         .then(job)
         .then(
           () => {
+            onSaved?.();
             lastSelfNotify.current = Date.now();
             notifyDataChanged(kind);
             return true;
@@ -241,15 +256,33 @@ export function useTodayData(onError: (err: unknown) => void) {
           (err) => {
             if (alive.current) onErrorRef.current(err);
             needsResync.current = true;
+            writeFailed.current = true;
             return false;
           },
         )
         .finally(() => {
           pending.current = Math.max(0, pending.current - 1);
-          // Roll back optimistic values to the server truth once the queue drains.
-          if (pending.current === 0 && needsResync.current && alive.current) {
-            needsResync.current = false;
-            void load(true);
+          // Roll back optimistic values to the server truth once the queue drains. The
+          // rollback to the last confirmed values is immediate: the refetch below may fail too
+          // (offline) and would otherwise keep the unsaved value on screen.
+          if (pending.current === 0 && alive.current) {
+            if (writeFailed.current) {
+              writeFailed.current = false;
+              const date = stateRef.current.date;
+              const conf = confirmed.current;
+              setState((s) => {
+                if (!s.data) return s;
+                const summary = restoreConfirmed(s.data.summary, conf, date);
+                if (summary === s.data.summary) return s;
+                const next = { ...s, data: { ...s.data, summary } };
+                stateRef.current = next;
+                return next;
+              });
+            }
+            if (needsResync.current) {
+              needsResync.current = false;
+              void load(true);
+            }
           }
         });
       writeChain.current = p;
@@ -265,7 +298,9 @@ export function useTodayData(onError: (err: unknown) => void) {
       const v = Math.max(0, Math.min(20000, Math.round(Number(ml) || 0)));
       invalidateInFlightLoad();
       patchSummary({ water_ml: v });
-      return enqueue(() => saveWater(date, v), 'daily');
+      return enqueue(() => saveWater(date, v), 'daily', () => {
+        if (confirmed.current?.date === date) confirmed.current = { ...confirmed.current, water_ml: v };
+      });
     },
     [enqueue, invalidateInFlightLoad, patchSummary],
   );
@@ -288,7 +323,9 @@ export function useTodayData(onError: (err: unknown) => void) {
       const v = Math.max(0, Math.min(200000, Math.round(Number(steps) || 0)));
       invalidateInFlightLoad();
       patchSummary({ steps: v });
-      return enqueue(() => saveSteps(date, v), 'daily');
+      return enqueue(() => saveSteps(date, v), 'daily', () => {
+        if (confirmed.current?.date === date) confirmed.current = { ...confirmed.current, steps: v };
+      });
     },
     [enqueue, invalidateInFlightLoad, patchSummary],
   );

@@ -1,4 +1,4 @@
-import { BookmarkCheck, ChevronLeft, ChevronRight, CopyPlus, Layers, Plus, ScanLine, Utensils } from 'lucide-react';
+import { BookmarkCheck, ChevronLeft, ChevronRight, CloudOff, CopyPlus, Layers, Plus, RefreshCw, ScanLine, Utensils } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
@@ -16,7 +16,7 @@ import { getDaySummary } from '@/services/summary';
 import { MEAL_LABELS, MEAL_TYPES, type MealEntry, type MealTemplate, type MealType } from '@/types/db';
 import { FoodSheet } from './components/FoodSheet';
 import { EntryThumb, MacroInline, MEAL_ICONS, portionLabel, useMealPhotoUrls } from './components/parts';
-import { MealTemplatesSheet } from './components/MealTemplatesSheet';
+import { MealTemplatesSheet, TemplateDupDialog } from './components/MealTemplatesSheet';
 import { QuickAddSheet } from './components/QuickAddSheet';
 import { SaveTemplateSheet } from './components/SaveTemplateSheet';
 import {
@@ -45,6 +45,8 @@ export default function DiaryPage() {
   const setDate = (d: string) => setParams(d === today ? {} : { date: d }, { replace: true });
 
   const meals = useAsync(async () => ({ date, rows: await listMeals(date) }), [date]);
+  // The day could not be loaded (offline…): never show it as an empty day (0 kcal, "Chưa có món"), that invites logging twice.
+  const loadFailed = !!meals.error && !meals.loading && meals.data?.date !== date;
   const customs = useAsync(() => listCustomFoods(), []);
   const reloadCustoms = customs.reload;
   useEffect(() => onDataChanged((k) => (k === 'foods' || k === 'any') && void reloadCustoms()), [reloadCustoms]);
@@ -92,6 +94,16 @@ export default function DiaryPage() {
   // Logged order, so an edited entry keeps its place instead of jumping to the end of its meal.
   const rows = useMemo(() => (meals.data?.date === date ? sortByLogged(meals.data.rows) : []), [meals.data, date]);
   const loading = meals.loading && meals.data?.date !== date;
+  // Back online → try again by itself while the error card is showing.
+  useEffect(() => {
+    if (!loadFailed) return;
+    const retry = () => {
+      void reload();
+      void reloadBurn();
+    };
+    window.addEventListener('online', retry);
+    return () => window.removeEventListener('online', retry);
+  }, [loadFailed, reload, reloadBurn]);
   const groups = useMemo(() => groupByMeal(rows), [rows]);
   const total = useMemo(() => sumNutrients(rows), [rows]);
   const photos = useMealPhotoUrls(rows);
@@ -184,7 +196,12 @@ export default function DiaryPage() {
 
   // ---- meal templates ("Bữa mẫu") -------------------------------------------
   const [saveFor, setSaveFor] = useState<MealType | null>(null);
-  const [templatesFor, setTemplatesFor] = useState<MealType | null>(null);
+  // Deep link (Profile → "Bữa mẫu"): /diary?templates=1 opens the template sheet.
+  const [templatesFor, setTemplatesFor] = useState<MealType | null>(() => (params.get('templates') ? nextMeal : null));
+  const closeTemplates = () => {
+    setTemplatesFor(null);
+    if (params.get('templates')) setParams(date === today ? {} : { date }, { replace: true });
+  };
   const [templateBusy, setTemplateBusy] = useState<string | null>(null);
   const logCb: LogCallbacks = useMemo(
     () => ({
@@ -225,6 +242,28 @@ export default function DiaryPage() {
         </GlassButton>
       </nav>
 
+      {loadFailed ? (
+        <GlassCard as="section" padding="lg" className="mt-4" role="alert" aria-label="Không tải được nhật ký">
+          <EmptyState
+            compact
+            icon={CloudOff}
+            title="Chưa tải được nhật ký"
+            description="Kiểm tra kết nối mạng rồi thử lại. Fitora chưa hiện số liệu ngày này để bạn không ghi trùng món."
+            action={
+              <Button
+                icon={<RefreshCw className="h-4 w-4" />}
+                onClick={() => {
+                  void reload();
+                  void reloadBurn();
+                }}
+              >
+                Thử lại
+              </Button>
+            }
+          />
+        </GlassCard>
+      ) : (
+        <>
       {/* Day summary */}
       <GlassCard as="section" padding="lg" className="mt-4" aria-label="Tổng trong ngày">
         {loading ? (
@@ -296,6 +335,9 @@ export default function DiaryPage() {
         />
       )}
 
+        </>
+      )}
+
       <FoodSheet
         open={!!editing && !manual}
         onClose={() => setEditing(null)}
@@ -325,13 +367,14 @@ export default function DiaryPage() {
       />
       <MealTemplatesSheet
         open={!!templatesFor}
-        onClose={() => setTemplatesFor(null)}
+        onClose={closeTemplates}
         templates={tpl.templates}
         meal={templatesFor ?? nextMeal}
         onLog={logTemplate}
         onRename={tpl.rename}
         onDelete={tpl.remove}
       />
+      <TemplateDupDialog prompt={tpl.dupPrompt} />
     </Page>
   );
 }
@@ -428,7 +471,7 @@ function MealCard({
         </button>
       )}
 
-      {!loading && entries.length === 0 && templates.length > 0 && (
+      {!loading && entries.length === 0 && allTemplates > 0 && (
         <div className="mt-3 flex flex-col gap-2">
           {templates.map((t) => {
             const busy = templateBusy === t.id;
@@ -453,7 +496,7 @@ function MealCard({
           })}
           {allTemplates > templates.length && (
             <button type="button" onClick={onOpenTemplates} className="min-h-[44px] self-start rounded-full px-1 text-[13px] font-semibold text-gold">
-              Bữa mẫu khác…
+              {templates.length ? 'Bữa mẫu khác…' : 'Ghi từ bữa mẫu…'}
             </button>
           )}
         </div>
@@ -473,7 +516,7 @@ function MealCard({
                 >
                   <EntryThumb entry={e} url={e.photo_path ? photos[e.photo_path] : undefined} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[15px] font-semibold text-text">{e.name}</span>
+                    <span className="line-clamp-2 break-words text-[15px] font-semibold leading-snug text-text">{e.name}</span>
                     <span className="block truncate text-[12px] text-muted">{portionLabel(e.quantity, e.unit, e.grams)}</span>
                     <MacroInline p={e.protein_g} c={e.carbs_g} f={e.fat_g} className="mt-0.5" />
                   </span>

@@ -65,8 +65,9 @@ export const CUSTOM_FOOD_SOURCE_LABELS: Record<CustomFoodSource, string> = {
 
 /**
  * public.fit_custom_foods = "Món của tôi / món đã lưu" (nutrition per 100 g + one default serving).
- * Migrations 001400 + 20261012000100. Usage columns are written only by the
- * `fit_mark_food_used` RPC (services: markCustomFoodUsed / logCustomFood / saveScannedDishes).
+ * Migrations 001400 + 20261012000100 + 20261012000300. Usage columns are written only by the
+ * `fit_mark_food_used` RPC (services: markCustomFoodUsed / logCustomFood / saveScannedDishes;
+ * undo: unmarkCustomFoodUsed → `fit_unmark_food_used`).
  */
 export interface CustomFood {
   id: string;
@@ -88,15 +89,23 @@ export interface CustomFood {
   last_used_at: string | null;
   /** Meal it is usually eaten at (pre-selects the meal when re-logging). */
   default_meal: MealType | null;
+  /**
+   * How many servings the user usually eats (scanned "2 cái" → serving "1 cái" + 2); null = 1.
+   * Optional so rows loaded before migration 20261012000300 stay valid. Use usualServings().
+   */
+  default_servings?: number | null;
   created_at: string;
   updated_at: string;
 }
 export type NewCustomFood = Pick<CustomFood, 'name' | 'serving_grams' | 'kcal_100g' | 'protein_100g' | 'carbs_100g' | 'fat_100g'> &
-  Partial<Pick<CustomFood, 'brand' | 'serving_label' | 'fiber_100g' | 'source' | 'photo_path' | 'default_meal'>>;
+  Partial<Pick<CustomFood, 'brand' | 'serving_label' | 'fiber_100g' | 'source' | 'photo_path' | 'default_meal' | 'default_servings'>> & {
+    /** normalizeFoodName(name); only the "remember a dish" path sets it (unique per user in the DB). */
+    name_key?: string | null;
+  };
 /** Editable fields. use_count / last_used_at are bumped only through markCustomFoodUsed(). */
 export type CustomFoodPatch = Partial<
   Omit<CustomFood, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'use_count' | 'last_used_at'>
->;
+> & { name_key?: string | null };
 
 /** One item of a meal template (values are the TOTAL for the item, like a MealEntry). */
 export interface MealTemplateItem {

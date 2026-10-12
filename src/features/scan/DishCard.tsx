@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { BookmarkCheck, ChevronDown, Pencil, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, BookmarkCheck, ChevronDown, Pencil, Sparkles, Trash2 } from 'lucide-react';
 import { useId } from 'react';
 import { Chip } from '@/components/ui/Chip';
 import { GlassButton } from '@/components/ui/GlassButton';
@@ -8,7 +8,7 @@ import { NumberField } from '@/components/ui/NumberField';
 import { formatGrams, formatNumber } from '@/lib/format';
 import type { CustomFood } from '@/types/db';
 import { remembers, servingNutrients, servingText } from './saved';
-import { confidenceLevel, macroShares, SCAN_UNITS, setGrams, setQuantity, setUnit, type ScanDish } from './scale';
+import { confidenceLevel, dishIssues, dishWarning, macroShares, quantityBounds, SCAN_UNITS, setGrams, setQuantity, setUnit, unitOptions, type ScanDish } from './scale';
 
 const CONF = {
   high: { label: 'Chắc chắn', cls: 'border-[rgba(127,209,139,0.4)] bg-[rgba(127,209,139,0.1)] text-ok' },
@@ -54,10 +54,11 @@ export function MacroMini({ dish }: { dish: Pick<ScanDish, 'protein_g' | 'carbs_
   );
 }
 
-export function UnitSelect({ value, onChange, id, label = 'Đơn vị' }: { value: string; onChange: (u: string) => void; id?: string; label?: string }) {
+export function UnitSelect({ value, onChange, id, label = 'Đơn vị', units }: { value: string; onChange: (u: string) => void; id?: string; label?: string; units?: readonly string[] }) {
   const auto = useId();
   const fid = id ?? auto;
-  const options = (SCAN_UNITS as readonly string[]).includes(value) ? SCAN_UNITS : [value, ...SCAN_UNITS];
+  const base = units ?? SCAN_UNITS;
+  const options = base.includes(value) ? base : [value, ...base];
   return (
     <div className="flex flex-col gap-1.5">
       <label htmlFor={fid} className="pl-1 text-[13px] font-semibold text-muted">
@@ -123,11 +124,19 @@ export function RememberSwitch({ checked, onChange, title, hint }: { checked: bo
 export function DishCard({ dish, index, onChange, onRemove, saved, onApplySaved, onRevertSaved }: DishCardProps) {
   const nameId = useId();
   const isGrams = dish.unit === 'g';
-  const nameMissing = !dish.name.trim();
+  const bounds = quantityBounds(dish);
+  const issues = dishIssues(dish);
+  const warning = dishWarning(dish);
+  const nameMissing = !!issues.name;
+  const kcalMsgId = useId();
+  // In grams mode the count IS the weight: show a weight error on the one field there is.
+  const qtyError = isGrams ? (issues.quantity ?? issues.grams) : issues.quantity;
+  const gramsError = issues.quantity ? undefined : issues.grams;
   const extra = dish.ingredients.length - 6;
 
   return (
     <article
+      data-dish-key={dish.key}
       className="glass-card animate-fade-slide-up p-4"
       style={{ animationDelay: `${Math.min(index, 5) * 80}ms` }}
       aria-label={dish.name || `Món ${index + 1}`}
@@ -208,14 +217,14 @@ export function DishCard({ dish, index, onChange, onRemove, saved, onApplySaved,
           label={isGrams ? 'Khối lượng' : 'Số lượng'}
           value={dish.quantity}
           onChange={(v) => onChange(setQuantity(dish, v ?? 0))}
-          min={isGrams ? 1 : 0.25}
-          max={isGrams ? 5000 : 50}
-          step={isGrams ? 10 : 0.5}
-          decimals={isGrams ? 0 : 2}
+          min={bounds.min}
+          max={bounds.max}
+          step={bounds.step}
+          decimals={bounds.decimals}
           stepper
-          error={dish.quantity > 0 ? undefined : 'Phải lớn hơn 0'}
+          error={qtyError}
         />
-        <UnitSelect value={dish.unit} onChange={(u) => onChange(setUnit(dish, u))} />
+        <UnitSelect value={dish.unit} units={unitOptions(dish)} onChange={(u) => onChange(setUnit(dish, u))} />
       </div>
 
       <div className="mt-3 flex items-end gap-3">
@@ -228,7 +237,7 @@ export function DishCard({ dish, index, onChange, onRemove, saved, onApplySaved,
             max={5000}
             decimals={0}
             unit="g"
-            error={dish.grams > 0 || !(dish.quantity > 0) ? undefined : 'Phải lớn hơn 0'}
+            error={gramsError}
             wrapperClassName="w-[132px] shrink-0"
           />
         ) : (
@@ -237,14 +246,35 @@ export function DishCard({ dish, index, onChange, onRemove, saved, onApplySaved,
         <div className="ml-auto flex min-w-0 flex-col items-end pb-1" aria-live="polite">
           <span className="eyebrow !text-[10px]">Năng lượng</span>
           <span className="mt-1 flex items-baseline gap-1">
-            <span className="num text-[40px] text-gradient-gold">{formatNumber(dish.kcal)}</span>
+            <span className={clsx('num text-[40px]', issues.kcal ? 'text-[var(--danger-text)]' : 'text-gradient-gold')} aria-describedby={issues.kcal || warning ? kcalMsgId : undefined}>
+              {formatNumber(dish.kcal)}
+            </span>
             <span className="text-sm font-semibold text-muted">kcal</span>
           </span>
         </div>
       </div>
 
+      {(issues.kcal || warning) && (
+        <p
+          id={kcalMsgId}
+          role={issues.kcal ? 'alert' : 'status'}
+          className={clsx(
+            'mt-2 flex items-start gap-2 rounded-xl px-3 py-2 text-[13px] font-semibold leading-snug',
+            issues.kcal ? 'bg-[rgba(225,6,0,0.12)] text-[var(--danger-text)]' : 'bg-[rgba(237,180,11,0.1)] text-gold',
+          )}
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0">{issues.kcal ?? warning}</span>
+        </p>
+      )}
+
       <div className="mt-4 border-t border-line pt-3.5">
         <MacroMini dish={dish} />
+        {issues.macros && (
+          <p role="alert" className="mt-2 text-[13px] font-semibold text-[var(--danger-text)]">
+            {issues.macros}
+          </p>
+        )}
       </div>
 
       <div className="mt-3 border-t border-line pt-2">

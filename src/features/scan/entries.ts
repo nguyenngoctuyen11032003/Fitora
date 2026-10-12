@@ -39,3 +39,20 @@ export function buildMealEntries(dishes: ScanDish[], { date, meal, photoPath, fo
     };
   });
 }
+
+/**
+ * After the diary rows are in, the dishes remembered in "Món của tôi" get their ids:
+ * which inserted rows (same order as `dishes`) must be re-linked to a saved food.
+ */
+export function entryLinks(
+  dishes: Pick<ScanDish, 'key'>[],
+  inserted: { id: string; custom_food_id: string | null }[],
+  foodIds: Record<string, string | null | undefined>,
+): { id: string; custom_food_id: string }[] {
+  if (inserted.length !== dishes.length) return [];
+  return dishes.flatMap((d, i) => {
+    const want = foodIds[d.key];
+    const row = inserted[i];
+    return want && row && row.custom_food_id !== want ? [{ id: row.id, custom_food_id: want }] : [];
+  });
+}

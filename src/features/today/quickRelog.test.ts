@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { savedFoodScore } from '@/features/scan/saved';
 import type { CustomFood, MealTemplate } from '@/types/db';
 import {
   foodPortionLabel,
@@ -61,20 +62,38 @@ function tpl(p: Partial<MealTemplate> = {}): MealTemplate {
 }
 
 describe('scores', () => {
-  it('recency fades with time and is 0 when never used / invalid', () => {
+  it('recency is stepped by age and 0 when never used / invalid', () => {
     expect(recencyScore(null, NOW)).toBe(0);
     expect(recencyScore('nope', NOW)).toBe(0);
-    expect(recencyScore(daysAgo(0), NOW)).toBeCloseTo(2);
-    expect(recencyScore(daysAgo(1), NOW)).toBeGreaterThan(recencyScore(daysAgo(30), NOW));
+    expect(recencyScore(daysAgo(0), NOW)).toBe(3);
+    expect(recencyScore(daysAgo(2), NOW)).toBe(2);
+    expect(recencyScore(daysAgo(5), NOW)).toBe(1.5);
+    expect(recencyScore(daysAgo(20), NOW)).toBe(0.5);
+    expect(recencyScore(daysAgo(60), NOW)).toBe(0);
     // a timestamp slightly in the future (clock skew) is treated as "now"
-    expect(recencyScore(new Date(NOW.getTime() + 60_000).toISOString(), NOW)).toBeCloseTo(2);
+    expect(recencyScore(new Date(NOW.getTime() + 60_000).toISOString(), NOW)).toBe(3);
   });
-  it('frequency has diminishing returns and ignores junk', () => {
+  it('frequency has diminishing returns, is capped and ignores junk', () => {
     expect(frequencyScore(0)).toBe(0);
     expect(frequencyScore(-3)).toBe(0);
     expect(frequencyScore(Number.NaN)).toBe(0);
     expect(frequencyScore(3)).toBe(2);
-    expect(frequencyScore(31)).toBe(5);
+    expect(frequencyScore(31)).toBe(3);
+  });
+  it('Today scores a saved food exactly like Scan (same best dish for the same meal)', () => {
+    const cases: Array<Pick<CustomFood, 'default_meal' | 'use_count' | 'last_used_at'>> = [
+      { default_meal: null, use_count: 3, last_used_at: daysAgo(10) },
+      { default_meal: 'dinner', use_count: 1, last_used_at: daysAgo(0.04) },
+      { default_meal: 'lunch', use_count: 40, last_used_at: daysAgo(2) },
+      { default_meal: null, use_count: 0, last_used_at: null },
+    ];
+    for (const c of cases) for (const m of ['breakfast', 'lunch', 'dinner', 'snack'] as const) expect(foodScore(c, m, NOW)).toBeCloseTo(savedFoodScore(c, m, NOW.getTime()), 10);
+  });
+  it('at lunch an unset food used 10 days ago ranks below a dinner food used 1 h ago, as in Scan', () => {
+    const a = food({ name: 'Cơm gà', default_meal: null, use_count: 3, last_used_at: daysAgo(10) });
+    const b = food({ name: 'Bún chả', default_meal: 'dinner', use_count: 1, last_used_at: new Date(NOW.getTime() - 3_600_000).toISOString() });
+    const out = rankQuickItems({ foods: [a, b], templates: [], meal: 'lunch', date: '2026-10-12', now: NOW });
+    expect(out.map((x) => (x.kind === 'food' ? x.food.name : ''))).toEqual(['Bún chả', 'Cơm gà']);
   });
   it('a food usually eaten at this meal beats one usually eaten at another meal', () => {
     const lunch = foodScore({ default_meal: 'lunch', use_count: 1, last_used_at: daysAgo(3) }, 'lunch', NOW);
@@ -83,8 +102,8 @@ describe('scores', () => {
   });
   it('templates for another meal are not offered', () => {
     expect(templateScore({ meal: 'breakfast', use_count: 9, last_used_at: daysAgo(0) }, 'dinner', NOW)).toBeNull();
-    expect(templateScore({ meal: null, use_count: 0, last_used_at: null }, 'dinner', NOW)).toBe(1);
-    expect(templateScore({ meal: 'dinner', use_count: 0, last_used_at: null }, 'dinner', NOW)).toBe(3.5);
+    expect(templateScore({ meal: null, use_count: 0, last_used_at: null }, 'dinner', NOW)).toBe(0);
+    expect(templateScore({ meal: 'dinner', use_count: 0, last_used_at: null }, 'dinner', NOW)).toBe(4.5);
   });
 });
 

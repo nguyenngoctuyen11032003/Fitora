@@ -255,15 +255,24 @@ export function firstInvalidStep(d: GoalDraft, today: Date = new Date()): number
   return checks.findIndex(hasErrors);
 }
 
-/** Share of kcal from each macro, in whole % (sums to ~100). */
+/**
+ * Share of kcal from each macro, in whole %. Largest-remainder rounding so the three
+ * labels always total exactly 100 (same rule as reports' macroSplit).
+ */
 export function macroPercents(m: Macros): Macros {
-  const total = macroKcal(m);
-  if (!total) return { protein_g: 0, carbs_g: 0, fat_g: 0 };
-  return {
-    protein_g: Math.round(((m.protein_g * 4) / total) * 100),
-    carbs_g: Math.round(((m.carbs_g * 4) / total) * 100),
-    fat_g: Math.round(((m.fat_g * 9) / total) * 100),
-  };
+  const kc = [Math.max(0, m.protein_g) * 4, Math.max(0, m.carbs_g) * 4, Math.max(0, m.fat_g) * 9];
+  const total = kc[0] + kc[1] + kc[2];
+  if (!(total > 0)) return { protein_g: 0, carbs_g: 0, fat_g: 0 };
+  const raw = kc.map((k) => (k / total) * 100);
+  const out = raw.map(Math.floor);
+  let left = 100 - out.reduce((x, y) => x + y, 0);
+  const order = raw.map((v, i) => [v - Math.floor(v), i] as const).sort((x, y) => y[0] - x[0]);
+  for (const [, i] of order) {
+    if (left <= 0) break;
+    out[i] += 1;
+    left -= 1;
+  }
+  return { protein_g: out[0], carbs_g: out[1], fat_g: out[2] };
 }
 
 /**

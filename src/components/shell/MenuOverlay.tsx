@@ -67,7 +67,7 @@ export function MenuOverlay({ open, onClose }: MenuOverlayProps) {
         )}
       >
         {/* glow + grain */}
-        <div className="pointer-events-none absolute -right-24 top-1/3 h-80 w-80 rounded-full bg-gold/25 blur-[90px]" aria-hidden="true" />
+        <div className="pointer-events-none absolute -right-24 top-1/3 h-80 w-80 rounded-full bg-[rgba(237,180,11,0.25)] blur-[90px]" aria-hidden="true" />
         <div className="pointer-events-none absolute -bottom-32 -left-20 h-80 w-80 rounded-full bg-black/40 blur-[80px]" aria-hidden="true" />
 
         <div className="relative flex items-center justify-between px-5 pt-[calc(var(--safe-top)+12px)]">
@@ -103,7 +103,7 @@ export function MenuOverlay({ open, onClose }: MenuOverlayProps) {
                   >
                     <span className="flex min-w-0 flex-col">
                       <span className="display text-[30px] leading-[1]">{l.label}</span>
-                      <span className={clsx('mt-1 truncate text-[12px] font-medium', isActive ? 'text-gold/80' : 'text-white/55')}>{l.hint}</span>
+                      <span className={clsx('mt-1 truncate text-[12px] font-medium', isActive ? 'text-white/90' : 'text-white/80')}>{l.hint}</span>
                     </span>
                     <ArrowUpRight
                       className="h-5 w-5 shrink-0 opacity-50 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:opacity-100"

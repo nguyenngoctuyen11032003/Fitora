@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { ACTIVITIES, ACTIVITY_BY_KEY, findActivity } from '@/data/activities';
 import { WORKOUT_CATEGORIES, type Workout, type WorkoutTemplate } from '@/types/db';
 import {
+  scrollLeftToReveal,
   activityLabel,
   buildTitle,
+  isAutoTitle,
+  titleAfterPick,
+  titleNamesActivity,
+  weekRangeLabel,
   canMarkDone,
   hasTemplateNamed,
   nowHHMM,
@@ -467,5 +472,55 @@ describe('template ranking', () => {
     const list = [t('a', 'Bụng'), t('b', 'Chân'), t('c', 'Ạ tay'), t('d', 'Lưng')];
     const hist = [w({ template_id: 'b', workout_on: '2026-10-01' }), w({ template_id: 'd', workout_on: '2026-10-08' }), w({ template_id: 'b', workout_on: '2026-09-01' })];
     expect(rankTemplates(list, hist).map((x) => x.id)).toEqual(['d', 'b', 'c', 'a']);
+  });
+});
+
+describe('scrollLeftToReveal', () => {
+  // 7 days × 44px + 6 × 2px gap = 320px content in a 278px-wide phone-frame strip.
+  it('keeps the offset when the item is already fully visible', () => {
+    expect(scrollLeftToReveal(46, 44, 0, 278)).toBe(0);
+    expect(scrollLeftToReveal(138, 44, 42, 278)).toBe(42);
+  });
+  it('scrolls right just enough to reveal an item cut off on the right (Sunday)', () => {
+    expect(scrollLeftToReveal(276, 44, 0, 278)).toBe(42);
+  });
+  it('scrolls left to the item start when it is cut off on the left (Monday)', () => {
+    expect(scrollLeftToReveal(0, 44, 42, 278)).toBe(0);
+    expect(scrollLeftToReveal(46, 44, 60, 278)).toBe(46);
+  });
+  it('never returns a negative offset', () => {
+    expect(scrollLeftToReveal(-4, 44, 10, 278)).toBe(0);
+  });
+});
+
+describe('title follows the activity (swim saved as "Chạy bộ")', () => {
+  const run = findActivity('running')!;
+  const swim = findActivity('swimming_freestyle') ?? ACTIVITIES.find((a) => a.category === 'swimming')!;
+  it('recognises generated titles only', () => {
+    expect(isAutoTitle('Chạy bộ · 8 km/h', 'running')).toBe(true);
+    expect(isAutoTitle('chay bo', 'running')).toBe(true);
+    expect(isAutoTitle('', 'running')).toBe(true);
+    expect(isAutoTitle('Chạy với Nam', 'running')).toBe(false);
+    expect(titleNamesActivity('Chạy bộ 5 km', 'running')).toBe(true);
+    expect(titleNamesActivity('Buổi sáng cùng Nam', 'running')).toBe(false);
+  });
+  it('replaces a loaded/generated title when the activity changes', () => {
+    expect(titleAfterPick('Chạy bộ · 8 km/h', 'running', false, swim, swim.variants[0])).toBe(buildTitle(swim, swim.variants[0]));
+    expect(titleAfterPick('Chạy bộ 5 km', 'running', false, swim, swim.variants[0])).toBe(buildTitle(swim, swim.variants[0]));
+    expect(titleAfterPick('', '', false, run, run.variants[0])).toBe(buildTitle(run, run.variants[0]));
+  });
+  it('keeps what the user typed or an unrelated custom title', () => {
+    expect(titleAfterPick('Chạy bộ · 8 km/h', 'running', true, swim, swim.variants[0])).toBe('Chạy bộ · 8 km/h');
+    expect(titleAfterPick('Buổi sáng cùng Nam', 'running', false, swim, swim.variants[0])).toBe('Buổi sáng cùng Nam');
+  });
+});
+
+describe('weekRangeLabel', () => {
+  // 2026-10-12 is a Monday
+  it('names the week relative to today', () => {
+    expect(weekRangeLabel('2026-10-12', '2026-10-14')).toBe('tuần này');
+    expect(weekRangeLabel('2026-10-19', '2026-10-14')).toBe('tuần sau');
+    expect(weekRangeLabel('2026-10-05', '2026-10-14')).toBe('tuần 5/10–11/10');
+    expect(weekRangeLabel('2026-10-26', '2026-10-14')).toBe('tuần 26/10–1/11');
   });
 });

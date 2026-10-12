@@ -21,7 +21,7 @@ export function Chip({ children, onClick, selected, icon, dot, size = 'md', disa
     'relative inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border font-semibold transition-[color,background-color,border-color,transform] duration-150',
     size === 'sm' ? 'min-h-[28px] px-2.5 text-[12px]' : 'min-h-[44px] px-4 text-sm',
     selected
-      ? 'border-gold/60 bg-gold/15 text-gold'
+      ? 'border-[rgba(237,180,11,0.6)] bg-[rgba(237,180,11,0.15)] text-gold'
       : 'border-line bg-white/[0.04] text-text/85',
     onClick && !selected && 'hover:bg-white/[0.08]',
     onClick && 'active:scale-[0.97] disabled:active:scale-100',

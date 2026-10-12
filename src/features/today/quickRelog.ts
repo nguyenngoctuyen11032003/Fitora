@@ -7,8 +7,6 @@ import type { CustomFood, MealEntry, MealTemplate, MealType } from '@/types/db';
 export const QUICK_LIMIT = 8;
 export const QUICK_MAX_TEMPLATES = 3;
 
-/** Recency half-life-ish constant (days): something eaten yesterday beats last month. */
-const RECENCY_DAYS = 14;
 const DAY_MS = 86_400_000;
 
 export interface QuickFoodItem {
@@ -42,31 +40,34 @@ const fin = (v: unknown) => {
   return Number.isFinite(n) ? n : 0;
 };
 
-/** 0..2 bonus that fades with the days since `iso` (never used → 0). */
+// NOTE: the saved-food formula below is deliberately identical to scan/saved.ts
+// savedFoodScore (the Scan screen), so Today and Scan offer the same "best" dish for a
+// meal. quickRelog.test.ts asserts the parity; change both together.
+
+/** 0..3 bonus by the age of the last use (never used / invalid -> 0): stepped like Scan. */
 export function recencyScore(iso: string | null | undefined, now: Date): number {
   if (!iso) return 0;
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return 0;
-  const days = Math.max(0, (now.getTime() - t) / DAY_MS);
-  return 2 * Math.exp(-days / RECENCY_DAYS);
+  const age = Math.max(0, now.getTime() - t);
+  return age < DAY_MS ? 3 : age < 3 * DAY_MS ? 2 : age < 7 * DAY_MS ? 1.5 : age < 30 * DAY_MS ? 0.5 : 0;
 }
 
-/** 0..~5: diminishing returns (eaten 30× is not 10× more relevant than 3×). */
+/** 0..3: diminishing returns (eaten 30x is not 10x more relevant than 3x). */
 export function frequencyScore(useCount: number | null | undefined): number {
-  return Math.log2(1 + Math.max(0, fin(useCount)));
+  return Math.min(3, Math.log2(1 + Math.max(0, fin(useCount))));
 }
 
-/** Relevance of a saved food for `meal`. */
+/** Relevance of a saved food for `meal`: usual meal 4, then how often and how recently. */
 export function foodScore(food: Pick<CustomFood, 'default_meal' | 'use_count' | 'last_used_at'>, meal: MealType, now: Date): number {
-  const mealPts = food.default_meal === meal ? 3 : food.default_meal == null ? 1 : 0;
-  return mealPts + frequencyScore(food.use_count) + recencyScore(food.last_used_at, now);
+  return (food.default_meal === meal ? 4 : 0) + frequencyScore(food.use_count) + recencyScore(food.last_used_at, now);
 }
 
 /** Relevance of a template for `meal`; null = not offered (made for another meal). */
 export function templateScore(t: Pick<MealTemplate, 'meal' | 'use_count' | 'last_used_at'>, meal: MealType, now: Date): number | null {
   if (t.meal && t.meal !== meal) return null;
-  const mealPts = t.meal === meal ? 3.5 : 1;
-  return mealPts + frequencyScore(t.use_count) + recencyScore(t.last_used_at, now);
+  // Slightly ahead of a food with the same usual meal: a whole meal in one tap.
+  return (t.meal === meal ? 4.5 : 0) + frequencyScore(t.use_count) + recencyScore(t.last_used_at, now);
 }
 
 /** "1 bát · 350 g" (grams omitted for a pseudo 100 g "phần" that has no real weight info). */

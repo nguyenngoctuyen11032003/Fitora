@@ -98,7 +98,7 @@ export function ScanDock({
         options={[
           { value: 'camera', label: 'Chụp ảnh', disabled: cameraUnsupported },
           { value: 'upload', label: 'Tải ảnh' },
-          { value: 'live', label: 'Live Scan', disabled: cameraUnsupported },
+          { value: 'live', label: 'Quét liên tục', disabled: cameraUnsupported },
         ]}
       />
 

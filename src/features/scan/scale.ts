@@ -4,6 +4,7 @@
 // every edit (quantity / unit / grams) only changes the grams, and nutrients
 // are always `density × grams`. That keeps edits reversible and drift-free.
 
+import { formatNumber } from '@/lib/format';
 import type { AiDish } from '@/types/db';
 
 export const SCAN_UNITS = ['g', 'bát', 'đĩa', 'chiếc', 'ly', 'phần', 'miếng', 'muỗng', 'gói'] as const;
@@ -50,10 +51,13 @@ export const EXTRA_UNIT_GRAMS: Record<string, number> = {
   suất: 350,
 };
 
-const GRAM_ALIASES = new Set(['g', 'gr', 'gram', 'grams', 'gam', 'gm']);
+// 'ml' counts as grams too (1 ml of a drink ≈ 1 g): the editor then only ever sees ONE
+// weight unit whose count IS the weight (see DishCard). A "500 ml" drink must not be
+// handled like "500 cái" (a countable unit with a stepper capped at 50).
+const GRAM_ALIASES = new Set(['g', 'gr', 'gram', 'grams', 'gam', 'gm', 'ml']);
 
 /**
- * Canonical unit spelling: trimmed, lower-case, gram synonyms → 'g', empty → 'phần'.
+ * Canonical unit spelling: trimmed, lower-case, gram/ml synonyms → 'g', empty → 'phần'.
  * Keeps the stepper/picker logic (which compares with 'g') working for "Gram", " G "…
  */
 export function normalizeUnit(unit: unknown): string {
@@ -186,8 +190,13 @@ export const dishKey = () => `d${Date.now().toString(36)}${(seq++).toString(36)}
  * estimate them from the unit table so the density stays meaningful.
  */
 export function fromAiDish(d: AiDish, key = dishKey()): ScanDish {
-  const unit = normalizeUnit(d.unit);
-  const quantity = num(d.quantity) || 1;
+  let unit = normalizeUnit(d.unit);
+  let quantity = num(d.quantity) || 1;
+  // "0,5 l" / "1,5 kg" → 500 / 1500 g, so every weight-like unit ends up as plain grams.
+  if (unit === 'kg' || unit === 'l' || unit === 'lít') {
+    unit = 'g';
+    quantity *= 1000;
+  }
   let grams = num(d.grams);
   if (unit === 'g') grams = grams || quantity;
   if (!grams) grams = quantity * defaultUnitGrams(unit);
@@ -305,9 +314,49 @@ export function macroShares(n: Pick<Nutrients, 'protein_g' | 'carbs_g' | 'fat_g'
   return { protein: p / sum, carbs: c / sum, fat: f / sum };
 }
 
-/** A dish can be saved when it has a name, a positive count and a positive weight. */
-export function isDishValid(d: Pick<ScanDish, 'name' | 'quantity' | 'grams'>): boolean {
-  return d.name.trim().length > 0 && d.quantity > 0 && d.grams > 0;
+/** Hard limits of one diary row (fit_meal_entries CHECK constraints). */
+export const ENTRY_LIMITS = { quantity: 10_000, grams: 100_000, kcal: 50_000, macro: 10_000 } as const;
+/** Above this one dish is almost surely a misread portion → warn (still allowed). */
+export const DISH_KCAL_WARN = 3000;
+
+export type DishField = 'name' | 'quantity' | 'grams' | 'kcal' | 'macros';
+export type DishIssues = Partial<Record<DishField, string>>;
+
+const MACRO_LABEL: Record<'protein_g' | 'carbs_g' | 'fat_g' | 'fiber_g', string> = {
+  protein_g: 'Đạm',
+  carbs_g: 'Tinh bột',
+  fat_g: 'Chất béo',
+  fiber_g: 'Chất xơ',
+};
+const vi = (n: number) => formatNumber(n);
+
+/** Per-field errors that would stop the dish from being saved (empty object = OK). */
+export function dishIssues(d: Pick<ScanDish, 'name' | 'quantity' | 'grams'> & Partial<Nutrients>): DishIssues {
+  const out: DishIssues = {};
+  const ok = (v: number) => Number.isFinite(v);
+  const n = { ...ZERO_NUTRIENTS, ...d };
+  if (!d.name.trim()) out.name = 'Nhập tên món';
+  if (!ok(d.quantity) || d.quantity <= 0) out.quantity = 'Phải lớn hơn 0';
+  else if (d.quantity > ENTRY_LIMITS.quantity) out.quantity = `Tối đa ${vi(ENTRY_LIMITS.quantity)}`;
+  if (!ok(d.grams) || d.grams <= 0) out.grams = 'Phải lớn hơn 0';
+  else if (d.grams > ENTRY_LIMITS.grams) out.grams = `Tối đa ${vi(ENTRY_LIMITS.grams)} g`;
+  if (!ok(n.kcal) || n.kcal < 0) out.kcal = 'Năng lượng không hợp lệ';
+  else if (n.kcal > ENTRY_LIMITS.kcal) out.kcal = `Quá ${vi(ENTRY_LIMITS.kcal)} kcal — giảm khẩu phần`;
+  const bad = (Object.keys(MACRO_LABEL) as (keyof typeof MACRO_LABEL)[]).find((k) => !ok(n[k]) || n[k] < 0 || n[k] > ENTRY_LIMITS.macro);
+  if (bad) out.macros = `${MACRO_LABEL[bad]} vượt ${vi(ENTRY_LIMITS.macro)} g — giảm khẩu phần`;
+  return out;
+}
+
+/** A dish can be saved when it has a name, a positive count and weight, and fits the diary limits. */
+export function isDishValid(d: Pick<ScanDish, 'name' | 'quantity' | 'grams'> & Partial<Nutrients>): boolean {
+  return Object.keys(dishIssues(d)).length === 0;
+}
+
+/** Warning (not an error) for a suspiciously large dish. */
+export function dishWarning(d: Pick<ScanDish, 'kcal'>): string | null {
+  return Number.isFinite(d.kcal) && d.kcal > DISH_KCAL_WARN && d.kcal <= ENTRY_LIMITS.kcal
+    ? `Hơn ${vi(DISH_KCAL_WARN)} kcal cho một món — kiểm tra lại khẩu phần.`
+    : null;
 }
 
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
@@ -322,4 +371,28 @@ export function confidenceLevel(c: number | null): ConfidenceLevel | null {
 export function insertAt<T>(list: T[], index: number, item: T): T[] {
   const i = Math.min(Math.max(0, Math.trunc(index) || 0), list.length);
   return [...list.slice(0, i), item, ...list.slice(i)];
+}
+
+/**
+ * Units offered in the picker: the AI's own unit first (tô, chén, lon… — so the original
+ * portion can always be restored with its learnt size), then the standard units, then any
+ * other unit this dish has learnt. The current unit is always present.
+ */
+export function unitOptions(dish: Pick<ScanDish, 'unit' | 'unitGrams' | 'original'>): string[] {
+  const out: string[] = [];
+  const add = (u: string) => {
+    if (u && !out.includes(u)) out.push(u);
+  };
+  if (dish.original) add(normalizeUnit(dish.original.unit));
+  for (const u of SCAN_UNITS) add(u);
+  for (const u of Object.keys(dish.unitGrams)) add(u);
+  add(dish.unit);
+  return out;
+}
+
+/** Stepper / field bounds for the count: never narrower than the value the AI or user already has. */
+export function quantityBounds(dish: Pick<ScanDish, 'unit' | 'quantity'>): { min: number; max: number; step: number; decimals: 0 | 2 } {
+  const q = Number.isFinite(dish.quantity) && dish.quantity > 0 ? dish.quantity : 0;
+  if (dish.unit === 'g') return { min: 1, max: Math.max(5000, Math.ceil(q)), step: 10, decimals: 0 };
+  return { min: q > 0 ? Math.min(0.25, q) : 0.25, max: Math.max(50, Math.ceil(q)), step: 0.5, decimals: 2 };
 }

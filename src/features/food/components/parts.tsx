@@ -46,11 +46,11 @@ export function MacroTiles({
 }) {
   const vals = { protein_g, carbs_g, fat_g, fiber_g };
   return (
-    <dl className={clsx('grid grid-cols-4 gap-2', className)}>
+    <dl className={clsx('grid grid-cols-4 gap-1.5 min-[400px]:gap-2', className)}>
       {MACRO_TILES.map((m) => (
-        <div key={m.key} className="rounded-2xl border border-line bg-white/[0.04] px-2 py-2.5 text-center">
-          <dt className="flex items-center justify-center gap-1 text-[11px] font-semibold text-muted">
-            <span className="h-1.5 w-1.5 rounded-full" style={{ background: m.color }} aria-hidden="true" />
+        <div key={m.key} className="min-w-0 rounded-2xl border border-line bg-white/[0.04] px-1 py-2.5 text-center">
+          <dt className="flex items-center justify-center gap-1 whitespace-nowrap text-[11px] font-semibold text-muted">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: m.color }} aria-hidden="true" />
             {m.label}
           </dt>
           <dd className="tabular mt-1 text-[17px] font-bold tracking-[-0.02em] text-text">

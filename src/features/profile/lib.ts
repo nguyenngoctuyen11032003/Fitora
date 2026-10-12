@@ -19,6 +19,18 @@ const uses = (n: unknown) => {
 };
 
 /**
+ * Quick re-logs of saved foods. A food saved from a scan ('ai') or from a logged entry ('meal')
+ * is created already carrying the use of that first log (use_count 1), which is not a re-log;
+ * a hand-made food ('manual') starts at 0, so each of its uses is one.
+ */
+function foodReuses(foods: ReadonlyArray<Pick<CustomFood, 'source' | 'use_count'>>): number {
+  return foods.reduce((s, x) => {
+    const n = uses(x.use_count);
+    return s + (x.source === 'manual' ? n : Math.max(0, n - 1));
+  }, 0);
+}
+
+/**
  * "Dữ liệu đã ghi nhớ" summary. Inputs are expected in the services' compareByUse order
  * (listCustomFoods / listMealTemplates), so the first names are the ones the user reaches for.
  * Never-used items are only listed after used ones (they already sort last).
@@ -46,7 +58,7 @@ export function memorySummary(
   return {
     foodCount: f.length,
     aiCount: f.filter((x) => x.source === 'ai').length,
-    reuses: [...f, ...t].reduce((s, x) => s + uses(x.use_count), 0),
+    reuses: foodReuses(f) + t.reduce((s, x) => s + uses(x.use_count), 0),
     topFoods: names(f),
     templateCount: t.length,
     topTemplates: names(t),

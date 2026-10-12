@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
 import { Button, EmptyState, GlassCard, ScreenHeader, Skeleton, useToast } from '@/components/ui';
 import { useProfile } from '@/context/ProfileContext';
-import { todayISO } from '@/lib/date';
+import { addDays, todayISO } from '@/lib/date';
 import { onDataChanged } from '@/lib/events';
 import { useAsync, useReducedMotion } from '@/lib/hooks';
 import { latestWeight, listMeasurements } from '@/services/body';
@@ -17,6 +17,8 @@ import { buildReport, canGoNext, isCurrentPeriod, periodCaption, periodLabel, pe
 import { CalorieSection, CompletionSection, FoodSection, Headline, InsightsSection, LinkCards, MacroSection, PeriodNav, WeightSection } from './sections';
 
 const PERIOD_KEY = 'fitora.reports.period';
+/** Same history window as Today's streak. */
+const STREAK_DAYS = 60;
 
 function readPeriod(): Period {
   try {
@@ -38,11 +40,12 @@ export default function ReportsPage() {
   const { from, to } = periodRange(period, anchor);
   const prevRange = periodRange(period, shiftPeriod(period, anchor, -1));
   const key = `${from}|${to}`;
+  const viewsToday = isCurrentPeriod(period, anchor, today);
 
   // useAsync drops stale responses (token), and `fresh` below is keyed by range, so rapid
   // prev/next/period switching never shows data from a superseded request.
   const { data, error, loading, reload } = useAsync(async () => {
-    const [rows, prevRows, latest, measurements, entries, savedFoods] = await Promise.all([
+    const [rows, prevRows, latest, measurements, entries, savedFoods, streakRows] = await Promise.all([
       getRangeSummary(from, to),
       // Comparison is a nice-to-have: never fail the whole report because of it.
       getRangeSummary(prevRange.from, prevRange.to).catch(() => null),
@@ -51,8 +54,10 @@ export default function ReportsPage() {
       // Food insights are optional as well.
       listMealsRange(from, to).catch(() => null),
       listCustomFoods().catch(() => []),
+      // "Chuỗi hiện tại" is the real streak (as on Today), so it needs history before the period start.
+      viewsToday ? getRangeSummary(addDays(today, -STREAK_DAYS), today).catch(() => null) : Promise.resolve(null),
     ]);
-    return { key: `${from}|${to}`, rows, prevRows, prev: prevRange, latest, measurements, entries, savedFoods };
+    return { key: `${from}|${to}`, rows, prevRows, prev: prevRange, latest, measurements, entries, savedFoods, streakRows };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
 
@@ -83,6 +88,7 @@ export default function ReportsPage() {
       today,
       profile: fit,
       refWeightKg: fresh.latest?.weight_kg ?? null,
+      streakRows: fresh.streakRows ?? undefined,
     });
   }, [fresh, from, to, period, today, fit]);
 
@@ -125,7 +131,7 @@ export default function ReportsPage() {
     return ws.length >= 2 ? Math.round(((ws[ws.length - 1].waist_cm as number) - (ws[0].waist_cm as number)) * 10) / 10 : null;
   }, [fresh]);
 
-  const isCurrent = isCurrentPeriod(period, anchor, today);
+  const isCurrent = viewsToday;
   const monthly = period === 'month';
   const animate = !reduced;
   const goalLabel = fit?.goal ? GOAL_LABELS[fit.goal] : null;

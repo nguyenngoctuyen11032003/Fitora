@@ -44,7 +44,7 @@ function Tab({ item }: { item: Item }) {
       {...prefetchHandlers(item.to)}
       className={({ isActive }) =>
         clsx(
-          'group relative flex min-h-[52px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-2xl text-[11px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-gold/70',
+          'group relative flex min-h-[52px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-2xl text-[11px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[rgba(237,180,11,0.7)]',
           isActive ? 'text-gold' : 'text-muted hover:text-text',
         )
       }

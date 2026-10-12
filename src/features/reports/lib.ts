@@ -251,8 +251,10 @@ export interface BuildInput {
   period: Period;
   today: string;
   profile: ProfileTargets | null;
-  /** Reference body weight for TDEE / steps kcal (latest known). */
+  /** Reference body weight for TDEE / steps kcal (latest known) — applied to every day of the period. */
   refWeightKg: number | null;
+  /** Recent daily rows (e.g. the last 60 days up to today), used only for the current streak. */
+  streakRows?: RangeSummaryRow[];
 }
 
 export interface Maintenance {
@@ -344,7 +346,19 @@ export function macroSplit(m: { protein_g: number; carbs_g: number; fat_g: numbe
   return { protein: out[0], carbs: out[1], fat: out[2] };
 }
 
-export function buildReport({ rows, from, to, period, today, profile, refWeightKg }: BuildInput): ReportSummary {
+/** Consecutive days with food logged ending today; an empty (still running) today does not break it. */
+export function streakEndingToday(rows: Pick<RangeSummaryRow, 'day' | 'kcal_in'>[], today: string): number {
+  const logged = new Set(rows.filter((r) => Number(r.kcal_in) > 0).map((r) => r.day.slice(0, 10)));
+  let n = 0;
+  let d = logged.has(today) ? today : addDays(today, -1);
+  for (let guard = 0; guard < 400 && logged.has(d); guard++) {
+    n++;
+    d = addDays(d, -1);
+  }
+  return n;
+}
+
+export function buildReport({ rows, from, to, period, today, profile, refWeightKg, streakRows }: BuildInput): ReportSummary {
   // Rows may arrive unordered or with a timestamp suffix → normalise, clip to the range and sort by day.
   const sortedRows = rows
     .map((r) => ({ ...r, day: r.day.slice(0, 10) }))
@@ -358,11 +372,19 @@ export function buildReport({ rows, from, to, period, today, profile, refWeightK
   const stepTarget = profile?.step_target && profile.step_target > 0 ? Number(profile.step_target) : 8000;
   const partialThreshold = target != null ? Math.round(target * PARTIAL_DAY_RATIO) : PARTIAL_DAY_FALLBACK_KCAL;
 
-  // Body weight of the period: latest weigh-in inside the range, else the latest known, else the start weight.
+  // ONE body weight for every day of every period, the same rule Today / Diary / Workout follow:
+  // latest weigh-in overall (refWeightKg) → latest weigh-in inside the range → start weight.
+  // A per-period weight made the same past day show different burned / budget numbers depending
+  // on whether the week or the month was being viewed (and differ from the other screens).
   const weightsInRange = sortedRows.filter((r) => r.day <= today && r.weight_kg != null && r.weight_kg > 0);
-  const periodWeight = weightsInRange.length
-    ? Number(weightsInRange[weightsInRange.length - 1].weight_kg)
-    : refWeightKg ?? (profile?.start_weight_kg != null ? Number(profile.start_weight_kg) : null);
+  const periodWeight =
+    refWeightKg != null && refWeightKg > 0
+      ? refWeightKg
+      : weightsInRange.length
+        ? Number(weightsInRange[weightsInRange.length - 1].weight_kg)
+        : profile?.start_weight_kg != null
+          ? Number(profile.start_weight_kg)
+          : null;
   const stepWeight = periodWeight ?? 0;
   const maint = estimateMaintenance(profile, periodWeight, today);
 
@@ -373,8 +395,7 @@ export function buildReport({ rows, from, to, period, today, profile, refWeightK
     const kcalIn = r ? Number(r.kcal_in) || 0 : 0;
     const workoutKcal = r ? Number(r.workout_kcal) || 0 : 0;
     const steps = r ? Number(r.steps) || 0 : 0;
-    // Today's step kcal must match Today/Workout, which use the latest weigh-in overall (refWeightKg).
-    const sk = stepsKcal(steps, isToday && refWeightKg != null && refWeightKg > 0 ? refWeightKg : stepWeight);
+    const sk = stepsKcal(steps, stepWeight);
     const burned = future ? null : Math.round(workoutKcal + sk);
     const logged = !future && kcalIn > 0;
     const complete = logged && !isToday && kcalIn >= partialThreshold;
@@ -455,15 +476,11 @@ export function buildReport({ rows, from, to, period, today, profile, refWeightK
   }
 
   // Current streak: consecutive logged days ending today (an empty today does not break it yet).
-  // Only meaningful while the period contains today — a past week has no "current" streak.
-  let currentStreak = 0;
+  // Only meaningful while the period contains today — a past week has no "current" streak. Like
+  // Today it looks past the period start (`streakRows` = recent history); otherwise a month on the
+  // 12th would cap the streak at 12 and a week at 7.
   const containsToday = from <= today && today <= to;
-  for (let i = elapsed.length - 1; containsToday && i >= 0; i--) {
-    const d = elapsed[i];
-    if (d.logged) currentStreak++;
-    else if (d.isToday && currentStreak === 0) continue;
-    else break;
-  }
+  const currentStreak = containsToday ? streakEndingToday(streakRows ?? sortedRows, today) : 0;
 
   let bestDay: ReportSummary['bestDay'] = null;
   for (const d of counted) {

@@ -1,18 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { defaultMealForHour, parseDateParam, parseMealParam } from './meal';
+import { guessMeal } from '@/features/food/lib';
+import { parseDateParam, parseMealParam } from './meal';
 import { frameDiff, meanLuma, toLuma } from './frame';
 
-describe('defaultMealForHour', () => {
+describe('parseMealParam', () => {
+  const at = (h: number, m: number) => parseMealParam(null, new Date(2026, 9, 12, h, m));
+  // Must agree with Today (mealForHour) and Diary / Search (guessMeal): one table for every screen.
   it.each([
-    [0, 'breakfast'],
-    [9, 'breakfast'],
-    [10, 'lunch'],
-    [13, 'lunch'],
-    [14, 'snack'],
-    [16, 'snack'],
-    [17, 'dinner'],
-    [23, 'dinner'],
-  ])('%i h → %s', (h, meal) => expect(defaultMealForHour(h)).toBe(meal));
+    [4, 0, 'breakfast'],
+    [10, 15, 'breakfast'],
+    [10, 30, 'lunch'],
+    [14, 15, 'lunch'],
+    [14, 30, 'snack'],
+    [16, 59, 'snack'],
+    [17, 0, 'dinner'],
+    [21, 29, 'dinner'],
+    [22, 30, 'snack'],
+    [2, 0, 'snack'],
+  ])('%i:%i → %s', (h, m, meal) => {
+    expect(at(h, m)).toBe(meal);
+    expect(guessMeal(new Date(2026, 9, 12, h, m))).toBe(meal);
+  });
 
   it('params fall back to sensible defaults', () => {
     expect(parseMealParam('lunch')).toBe('lunch');

@@ -7,9 +7,9 @@ import { formatNumber } from '@/lib/format';
 import { useAsync } from '@/lib/hooks';
 import { compareByUse, markCustomFoodUsed } from '@/services/foods';
 import { createMealTemplate, deleteMealTemplate, listMealTemplates, logMealTemplate, updateMealTemplate } from '@/services/mealTemplates';
-import { addMealEntries, deleteMeal } from '@/services/meals';
+import { addMealEntries, deleteMeal, listMeals } from '@/services/meals';
 import { MEAL_LABELS, type CustomFood, type MealEntry, type MealTemplate, type MealTemplateItem, type MealType } from '@/types/db';
-import { bumpUsage, toNewEntry, type FoodOption } from './lib';
+import { bumpUsage, normalizeVi, templateDuplicates, toNewEntry, type FoodOption } from './lib';
 import { formatQty } from './components/parts';
 import { deferredDelete } from './undo';
 
@@ -73,6 +73,19 @@ export function useQuickLog() {
   );
 }
 
+/** 'all' = log every dish again, 'missing' = only the dishes not yet in the meal. */
+export type TemplateDupChoice = 'all' | 'missing' | 'cancel';
+export interface TemplateDupPrompt {
+  template: MealTemplate;
+  meal: MealType;
+  /** Template dishes already logged in that meal. */
+  names: string[];
+  total: number;
+  /** Dishes of the template not logged yet. */
+  missing: number;
+  resolve: (choice: TemplateDupChoice) => void;
+}
+
 /** Meal templates ("Bữa mẫu"): list + log / create / rename / delete (with undo). */
 export function useMealTemplates() {
   const toast = useToast();
@@ -88,14 +101,47 @@ export function useMealTemplates() {
     [setData],
   );
 
+  // "Bữa trưa đã có Cơm gà — ghi thêm?" — answered in <TemplateDupDialog>.
+  const [dupPrompt, setDupPrompt] = useState<TemplateDupPrompt | null>(null);
+  const askDup = useCallback(
+    (p: Omit<TemplateDupPrompt, 'resolve'>) =>
+      new Promise<TemplateDupChoice>((resolve) =>
+        setDupPrompt({
+          ...p,
+          resolve: (c) => {
+            setDupPrompt(null);
+            resolve(c);
+          },
+        }),
+      ),
+    [],
+  );
+
   const log = useCallback(
     async (t: MealTemplate, date: string, meal: MealType, cb: LogCallbacks = {}): Promise<MealEntry[] | null> => {
+      let template = t;
+      let skipped = 0;
+      // Dishes of the template already in that meal → ask instead of silently doubling them.
+      // Best effort: if the check itself fails, log as before (undo is still offered).
+      const existing = await listMeals(date).catch(() => null);
+      const dups = existing ? templateDuplicates(t.items, existing, meal) : [];
+      if (dups.length) {
+        const dupKeys = new Set(dups.map(normalizeVi));
+        const items = t.items.filter((i) => !dupKeys.has(normalizeVi(i.name)));
+        const choice = await askDup({ template: t, meal, names: dups, total: t.items.length, missing: items.length });
+        if (choice === 'cancel') return null;
+        if (choice === 'missing') {
+          skipped = t.items.length - items.length;
+          template = { ...t, items };
+        }
+      }
       try {
-        const rows = await logMealTemplate(t, date, meal);
+        const rows = await logMealTemplate(template, date, meal);
         cb.onAdded?.(rows);
         replace(bumpUsage(t));
         notifyDataChanged('meals');
-        toast.success(`Đã ghi “${t.name}” (${rows.length} món · ${formatNumber(kcalOf(rows))} kcal) vào ${MEAL_LABELS[meal].toLowerCase()}.`, {
+        const skippedNote = skipped ? `, bỏ qua ${skipped} món đã có` : '';
+        toast.success(`Đã ghi “${t.name}” (${rows.length} món · ${formatNumber(kcalOf(rows))} kcal${skippedNote}) vào ${MEAL_LABELS[meal].toLowerCase()}.`, {
           duration: 6000,
           action: { label: 'Hoàn tác', onClick: () => void undoRows(rows, cb)() },
         });
@@ -105,7 +151,7 @@ export function useMealTemplates() {
         return null;
       }
     },
-    [replace, toast, undoRows],
+    [askDup, replace, toast, undoRows],
   );
 
   const create = useCallback(
@@ -163,5 +209,5 @@ export function useMealTemplates() {
     [setData, toast],
   );
 
-  return { templates, loading: q.loading && !q.data, error: q.error, log, create, rename, remove, reload };
+  return { templates, loading: q.loading && !q.data, error: q.error, log, create, rename, remove, reload, dupPrompt };
 }

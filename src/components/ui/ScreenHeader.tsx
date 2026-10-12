@@ -43,7 +43,7 @@ export function ScreenHeader({ title, eyebrow, subtitle, back, actions, size = '
         </div>
       )}
       <div className={clsx(reveal && 'animate-speed-reveal')}>
-        {eyebrow && <p className="eyebrow mb-2 text-gold/90">{eyebrow}</p>}
+        {eyebrow && <p className="eyebrow mb-2 text-[rgba(237,180,11,0.9)]">{eyebrow}</p>}
         <h1 className={clsx('display text-text', size === 'lg' ? 'text-[44px]' : 'text-[32px]')}>{title}</h1>
         {subtitle && <p className="mt-2.5 text-[15px] leading-relaxed text-muted">{subtitle}</p>}
       </div>

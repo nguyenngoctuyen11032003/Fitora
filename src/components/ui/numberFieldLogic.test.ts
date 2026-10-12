@@ -1,5 +1,6 @@
+import { createElement } from 'react';
 import { describe, expect, it } from 'vitest';
-import { clampNumber, formatNumberInput, sanitizeNumberInput } from './numberFieldLogic';
+import { clampNumber, formatNumberInput, labelText, rangeMessage, sanitizeNumberInput, stepperAriaLabel } from './numberFieldLogic';
 import { clampRatio } from './progress';
 
 describe('clampNumber', () => {
@@ -52,5 +53,35 @@ describe('clampRatio', () => {
     expect(clampRatio(Number.NaN, 100)).toEqual({ ratio: 0, clamped: 0, over: false });
     expect(clampRatio(10, 0)).toEqual({ ratio: 0, clamped: 0, over: false });
     expect(clampRatio(10, Number.POSITIVE_INFINITY)).toEqual({ ratio: 0, clamped: 0, over: false });
+  });
+});
+
+describe('rangeMessage', () => {
+  it('reports values above max with the unit (vi format)', () => {
+    expect(rangeMessage(999, { min: 25, max: 300 }, 'kg')).toBe('Tối đa 300 kg');
+    expect(rangeMessage(9999999, { min: 0, max: 200000 }, 'bước')).toBe('Tối đa 200.000 bước');
+    expect(rangeMessage(60, { min: 0.25, max: 50 })).toBe('Tối đa 50');
+  });
+  it('reports values below min unless the user is still typing', () => {
+    expect(rangeMessage(2, { min: 25, max: 300 }, 'kg')).toBe('Tối thiểu 25 kg');
+    expect(rangeMessage(0.1, { min: 0.25 })).toBe('Tối thiểu 0,25');
+    expect(rangeMessage(2, { min: 25, max: 300 }, 'kg', false)).toBeNull();
+    expect(rangeMessage(301, { min: 25, max: 300 }, 'kg', false)).toBe('Tối đa 300 kg');
+  });
+  it('is null for in-range, empty or unbounded values', () => {
+    expect(rangeMessage(76.6, { min: 25, max: 300 }, 'kg')).toBeNull();
+    expect(rangeMessage(300, { min: 25, max: 300 })).toBeNull();
+    expect(rangeMessage(null, { min: 25, max: 300 })).toBeNull();
+    expect(rangeMessage(1e9, {})).toBeNull();
+  });
+});
+
+describe('labelText / stepperAriaLabel', () => {
+  it('lấy tên dễ đọc cho nút Giảm/Tăng để trình đọc màn hình phân biệt các ô', () => {
+    expect(labelText('Nước mỗi ngày')).toBe('Nước mỗi ngày');
+    expect(labelText(createElement('span', null, createElement('i', { 'aria-hidden': true }), 'Đạm', createElement('b', null, '30% · 600 kcal')))).toBe('Đạm');
+    expect(labelText(undefined)).toBe('');
+    expect(stepperAriaLabel('Giảm', 'Đạm')).toBe('Giảm Đạm');
+    expect(stepperAriaLabel('Tăng', '')).toBe('Tăng');
   });
 });

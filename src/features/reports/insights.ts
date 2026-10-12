@@ -4,7 +4,7 @@
 import { parseISODate, weekdayLong } from '@/lib/date';
 import { formatNumber } from '@/lib/format';
 import type { Goal } from '@/types/db';
-import type { Period, ReportSummary } from './lib';
+import { ddmm, type Period, type ReportSummary } from './lib';
 
 export interface PeriodComparison {
   /** Δ average intake kcal/day (complete days of both periods). */
@@ -53,6 +53,20 @@ export function dayName(day: string): string {
   return `${weekdayLong(day)} ${d.getDate()}/${d.getMonth() + 1}`;
 }
 
+/**
+ * How to call the comparison period: "tuần trước" / "tháng trước" only when the viewed period is the
+ * current one (its predecessor is then really last week / month); for older periods the explicit range,
+ * so "So với tuần trước" never appears on a screen that is itself captioned "Tuần trước".
+ */
+export function prevPeriodName(s: Pick<ReportSummary, 'days'>, prev: Pick<ReportSummary, 'from' | 'to'> | null, period: Period): string {
+  const current = s.days.some((d) => d.isToday);
+  if (current || !prev) return period === 'week' ? 'tuần trước' : 'tháng trước';
+  return period === 'week' ? `tuần ${ddmm(prev.from)} – ${ddmm(prev.to)}` : `tháng ${parseISODate(prev.from).getMonth() + 1}`;
+}
+
+/** A report needs a few elapsed days before "very consistent" means anything (1/1 is not a habit yet). */
+export const MIN_DAYS_FOR_CONSISTENCY = 3;
+
 const kg1 = (n: number) => formatNumber(Math.abs(n), 1);
 const int = (n: number) => formatNumber(Math.abs(Math.round(n)));
 
@@ -85,19 +99,19 @@ export function buildInsights(
     // The streak sentence only when it adds information: a streak equal to the logged-day
     // count just repeats the "N/M ngày" lead ("ghi 7/7 ngày. Chuỗi 7 ngày" reads twice).
     const streak =
-      s.currentStreak >= 2 && s.currentStreak < s.loggedDays
+      s.currentStreak >= 2 && s.currentStreak !== s.loggedDays
         ? ` Chuỗi hiện tại ${s.currentStreak} ngày liên tiếp.`
         : s.currentStreak < 2 && s.longestStreak >= 3 && s.longestStreak < s.loggedDays
           ? ` Chuỗi dài nhất ${s.longestStreak} ngày.`
           : '';
     const ratio = s.loggingRate;
     const lead =
-      ratio >= 0.85
+      ratio >= 0.85 && s.elapsedDays >= MIN_DAYS_FOR_CONSISTENCY
         ? `Rất đều đặn: ghi nhật ký ${s.loggedDays}/${s.elapsedDays} ngày.`
-        : ratio >= 0.5
+        : ratio >= 0.5 || s.elapsedDays < MIN_DAYS_FOR_CONSISTENCY
           ? `Đã ghi nhật ký ${s.loggedDays}/${s.elapsedDays} ngày.`
           : `Đã ghi ${s.loggedDays}/${s.elapsedDays} ngày — ghi thêm vài ngày để báo cáo chính xác hơn.`;
-    out.push({ kind: 'consistency', tone: ratio >= 0.85 ? 'good' : 'neutral', text: lead + streak });
+    out.push({ kind: 'consistency', tone: ratio >= 0.85 && s.elapsedDays >= MIN_DAYS_FOR_CONSISTENCY ? 'good' : 'neutral', text: lead + streak });
   }
 
   // 2. Best day.
@@ -109,8 +123,9 @@ export function buildInsights(
     });
   }
 
-  // 3. Protein vs target.
-  if (proteinTarget && proteinTarget > 0 && s.avgBasisDays > 0) {
+  // 3. Protein vs target — only from finished days: judging a still-running day (first day of the
+  // week/month, only today logged) would call a normal morning "47% of target".
+  if (proteinTarget && proteinTarget > 0 && s.avgBasisDays > 0 && !s.avgBasisIncomplete) {
     const avg = s.avgMacros.protein_g;
     const pct = Math.round((avg / proteinTarget) * 100);
     out.push(
@@ -142,7 +157,7 @@ export function buildInsights(
 
   // 5. Versus previous period.
   const cmp = comparePeriods(s, prev);
-  const prevName = period === 'week' ? 'tuần trước' : 'tháng trước';
+  const prevName = prevPeriodName(s, prev, period);
   if (cmp.loggingPts != null && cmp.loggingPts >= 10) {
     out.push({ kind: 'compare', tone: 'good', text: `Ghi nhật ký đều hơn ${prevName} (tỉ lệ ngày có ghi +${cmp.loggingPts}%).` });
   } else if (cmp.avgIn != null && Math.abs(cmp.avgIn) >= 100) {

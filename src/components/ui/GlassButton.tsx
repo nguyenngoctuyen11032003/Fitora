@@ -26,7 +26,7 @@ export const GlassButton = forwardRef<HTMLButtonElement, GlassButtonProps>(funct
         'glass text-text disabled:pointer-events-none disabled:opacity-40',
         variant,
         variant === 'pill' && 'text-sm font-semibold',
-        active && '!border-gold/50 !bg-gold/15 text-gold',
+        active && '!border-[rgba(237,180,11,0.5)] !bg-[rgba(237,180,11,0.15)] text-gold',
         className,
       )}
       {...rest}

@@ -48,7 +48,8 @@ export function AppFrame({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-[100dvh] w-full items-center justify-center md:gap-[clamp(32px,6vw,120px)] md:px-8 md:py-6">
       <BrandColumn />
-      <div className="relative h-[100dvh] w-full fitora-frame md:h-[min(92vh,900px)] md:w-auto">
+      {/* Phone: pinned to all four edges (not 100dvh) so it also covers the home-indicator strip in iOS standalone. */}
+      <div className="fixed inset-0 h-auto w-full fitora-frame md:relative md:inset-auto md:h-[min(92vh,900px)]">
         {/* side buttons (desktop only) */}
         <span className="fitora-frame__btn -left-[5px] top-[120px] hidden h-8 md:block" aria-hidden="true" />
         <span className="fitora-frame__btn -left-[5px] top-[176px] hidden h-14 md:block" aria-hidden="true" />

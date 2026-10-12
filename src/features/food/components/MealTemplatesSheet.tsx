@@ -1,9 +1,10 @@
 import { Layers, Pencil, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { BottomSheet, Button, EmptyState, GlassButton, Input, Segmented } from '@/components/ui';
+import { BottomSheet, Button, EmptyState, GlassButton, Input, Modal, Segmented } from '@/components/ui';
 import { formatNumber } from '@/lib/format';
 import { MEAL_LABELS, MEAL_TYPES, type MealTemplate, type MealType } from '@/types/db';
 import { dishesSummary, MEAL_SHORT, usageLabel } from '../lib';
+import type { TemplateDupPrompt } from '../useSmartLog';
 
 export interface MealTemplatesSheetProps {
   open: boolean;
@@ -14,6 +15,12 @@ export interface MealTemplatesSheetProps {
   onLog: (t: MealTemplate, meal: MealType) => Promise<boolean>;
   onRename: (t: MealTemplate, patch: { name: string; meal: MealType | null }) => Promise<boolean>;
   onDelete: (t: MealTemplate) => void;
+}
+
+/** "Sáng · Đã ghi 2 lần · hôm qua" (own line, so it is not cut off beside the buttons on a 360 px phone). */
+function templateUsage(t: MealTemplate): string {
+  const use = usageLabel(t.use_count, t.last_used_at).replace('Đã ăn', 'Đã ghi').replace('Chưa ăn lần nào', 'Chưa ghi');
+  return [t.meal ? MEAL_SHORT[t.meal] : null, use].filter(Boolean).join(' · ');
 }
 
 /** "Bữa mẫu": log a whole meal with one tap, rename, delete (with undo). */
@@ -77,11 +84,11 @@ export function MealTemplatesSheet({ open, onClose, templates, meal: defaultMeal
                 <li key={t.id} className="glass-card flex items-center gap-2 rounded-2xl p-3">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[15px] font-bold text-text">{t.name}</p>
-                    <p className="truncate text-[12px] text-muted">{dishesSummary(t.items, 3)}</p>
-                    <p className="tabular truncate text-[12px] text-muted">
+                    <p className="line-clamp-2 break-words text-[12px] text-muted">{dishesSummary(t.items, 3)}</p>
+                    <p className="tabular text-[12px] text-muted">
                       {t.items.length} món · <span className="font-semibold text-text">{formatNumber(t.total_kcal)} kcal</span>
-                      {t.meal ? ` · ${MEAL_SHORT[t.meal]}` : ''} · {usageLabel(t.use_count, t.last_used_at).replace('Đã ăn', 'Đã ghi').replace('Chưa ăn lần nào', 'Chưa ghi')}
                     </p>
+                    <p className="text-[12px] text-muted">{templateUsage(t)}</p>
                   </div>
                   <GlassButton label={`Sửa bữa mẫu ${t.name}`} onClick={() => setEditing(t.id)} className="shrink-0 text-muted">
                     <Pencil className="h-4 w-4" />
@@ -150,5 +157,43 @@ function TemplateEditor({
         </div>
       </form>
     </li>
+  );
+}
+
+/** "Bữa trưa đã có Cơm gà xối mỡ — ghi thêm?" before a template doubles dishes already logged. */
+export function TemplateDupDialog({ prompt }: { prompt: TemplateDupPrompt | null }) {
+  // Keep the last prompt while the dialog animates out.
+  const last = useRef<TemplateDupPrompt | null>(null);
+  if (prompt) last.current = prompt;
+  const p = prompt ?? last.current;
+  if (!p) return null;
+  const { missing } = p;
+  const shown = p.names.slice(0, 2).map((n) => `“${n}”`).join(', ') + (p.names.length > 2 ? ` và ${p.names.length - 2} món khác` : '');
+  const mealLabel = MEAL_LABELS[p.meal];
+  return (
+    <Modal
+      open={!!prompt}
+      onClose={() => p.resolve('cancel')}
+      title="Món đã có trong bữa"
+      footer={
+        // One stacked column (the footer would otherwise go 3-across on wide screens).
+        <div className="flex w-full flex-col-reverse gap-2.5">
+          <Button variant="ghost" onClick={() => p.resolve('cancel')} block>
+            Hủy
+          </Button>
+          <Button variant="secondary" onClick={() => p.resolve('all')} block data-autofocus={missing > 0 ? undefined : true}>
+            {missing > 0 ? `Ghi cả bữa (${p.total} món)` : 'Vẫn ghi thêm'}
+          </Button>
+          {missing > 0 && (
+            <Button onClick={() => p.resolve('missing')} block data-autofocus>
+              Chỉ ghi {missing} món còn thiếu
+            </Button>
+          )}
+        </div>
+      }
+    >
+      {mealLabel} đã có {shown}.{' '}
+      {missing > 0 ? `Ghi bữa mẫu “${p.template.name}” sẽ thêm trùng các món này.` : `Ghi “${p.template.name}” sẽ thêm lần nữa toàn bộ món.`}
+    </Modal>
   );
 }

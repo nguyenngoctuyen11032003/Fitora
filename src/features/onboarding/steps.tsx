@@ -406,6 +406,7 @@ export function GoalStep({ draft, onChange, errors = {}, compact, plan }: StepPr
             </span>
           </SectionTitle>
           <NumberField
+            label={<span className="sr-only">Cân nặng mục tiêu</span>}
             value={draft.target_weight_kg}
             onChange={(v) => onChange({ target_weight_kg: v })}
             unit="kg"

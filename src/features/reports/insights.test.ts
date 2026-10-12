@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { addDays } from '@/lib/date';
 import type { RangeSummaryRow } from '@/types/db';
-import { buildInsights, comparePeriods, dayName } from './insights';
+import { buildInsights, comparePeriods, dayName, prevPeriodName } from './insights';
 import { buildReport, canGoNext, macroSplit, periodLabel, periodRange, shiftPeriod, weightTrend, type ProfileTargets } from './lib';
 
 const row = (day: string, p: Partial<RangeSummaryRow> = {}): RangeSummaryRow => ({
@@ -188,6 +189,49 @@ describe('comparePeriods / buildInsights', () => {
       { period: 'week', goal: 'lose', proteinTarget: null },
     );
     expect(gappy[0].text).toContain('Chuỗi hiện tại 2 ngày');
+  });
+  it('shows the real streak (longer than the period) as "Chuỗi hiện tại"', () => {
+    // Monday 12/10: only today in the week, but the streak really runs 14 days (Today shows 14).
+    const rows = [row('2026-10-12', { kcal_in: 900 })];
+    const s = buildReport({
+      rows,
+      from: '2026-10-12',
+      to: '2026-10-18',
+      period: 'week',
+      today: '2026-10-12',
+      profile,
+      refWeightKg: 80,
+      streakRows: Array.from({ length: 14 }, (_, i) => row(addDays('2026-09-29', i), { kcal_in: 1500 })),
+    });
+    expect(s.currentStreak).toBe(14);
+    expect(buildInsights(s, { period: 'week', goal: 'lose', proteinTarget: null })[0].text).toContain('Chuỗi hiện tại 14 ngày');
+  });
+  it('names the comparison period explicitly when the viewed period is not the current one', () => {
+    const cur = week(full(1990, 150), '2026-10-25'); // viewing 12–18/10 a week later → "Tuần trước"
+    const prevRows = full(1900, 120).map((r) => ({ ...r, day: addDays(r.day, -7) }));
+    const prev = buildReport({ rows: prevRows, from: '2026-10-05', to: '2026-10-11', period: 'week', today: '2026-10-25', profile, refWeightKg: 80 });
+    expect(prevPeriodName(cur, prev, 'week')).toBe('tuần 05/10 – 11/10');
+    const ins = buildInsights(cur, { period: 'week', goal: 'lose', proteinTarget: null, prev, max: 6 });
+    expect(ins.find((i) => i.kind === 'compare')?.text ?? '').not.toContain('tuần trước');
+    // Current period keeps the natural wording.
+    const now = week(full(1990, 150), '2026-10-18');
+    expect(prevPeriodName(now, prev, 'week')).toBe('tuần trước');
+    const month = buildReport({ rows: [], from: '2026-09-01', to: '2026-09-30', period: 'month', today: '2026-10-12', profile, refWeightKg: 80 });
+    const monthPast = buildReport({ rows: [], from: '2026-10-01', to: '2026-10-31', period: 'month', today: '2026-11-12', profile, refWeightKg: 80 });
+    expect(prevPeriodName(monthPast, month, 'month')).toBe('tháng 9');
+  });
+  it('first day of a period: no protein verdict from an unfinished day, no "Rất đều đặn" after one day', () => {
+    const s = week([row('2026-10-12', { kcal_in: 900, protein_g: 74, carbs_g: 80, fat_g: 30 })], '2026-10-12');
+    expect(s.avgBasisIncomplete).toBe(true);
+    const ins = buildInsights(s, { period: 'week', goal: 'lose', proteinTarget: 156 });
+    expect(ins.find((i) => i.kind === 'protein')).toBeUndefined();
+    expect(ins[0].text).not.toContain('Rất đều đặn');
+    expect(ins[0].text).toContain('1/1');
+    expect(ins[0].tone).toBe('neutral');
+  });
+  it('"Rất đều đặn" needs at least 3 elapsed days', () => {
+    const three = week(['2026-10-12', '2026-10-13', '2026-10-14'].map((d) => row(d, { kcal_in: 1900 })), '2026-10-14');
+    expect(buildInsights(three, { period: 'week', goal: 'lose', proteinTarget: null })[0].text).toContain('Rất đều đặn');
   });
   it('dayName', () => {
     expect(dayName('2026-10-13')).toBe('Thứ Ba 13/10');

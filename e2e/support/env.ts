@@ -22,6 +22,10 @@ export const USERS = {
   other: { email: 'other@fitora.test', name: 'Người Khác' },
   /** Seeded account used ONLY by smart.spec (scan → saved food → re-log, meal templates). */
   smart: { email: 'smart@fitora.test', name: 'Người Dùng Thông Minh' },
+  /** Seeded account used ONLY by smart-edge.spec (AI errors, offline, double taps, input limits). */
+  edge: { email: 'edge@fitora.test', name: 'Người Thử Giới Hạn' },
+  /** Onboarded account whose food data smart-edge.spec wipes (empty states of the smart features). */
+  empty: { email: 'empty@fitora.test', name: 'Người Chưa Lưu Món' },
 } as const;
 export type UserKey = keyof typeof USERS;
 
@@ -84,6 +88,16 @@ export async function wipeFit(key: UserKey): Promise<void> {
   await withDb(async (c) => {
     for (const t of ['fit_meal_entries', 'fit_meal_templates', 'fit_workouts', 'fit_workout_templates', 'fit_custom_foods', 'fit_daily_logs',
       'fit_body_measurements', 'fit_progress_photos', 'fit_ai_usage', 'fit_profiles']) {
+      await c.query(`delete from public.${t} where user_id = $1`, [id]);
+    }
+  });
+}
+
+/** Removes the food data (diary, saved foods, meal templates) but keeps the profile: an onboarded, empty account. */
+export async function wipeFood(key: UserKey): Promise<void> {
+  const id = await userId(key);
+  await withDb(async (c) => {
+    for (const t of ['fit_meal_entries', 'fit_meal_templates', 'fit_custom_foods']) {
       await c.query(`delete from public.${t} where user_id = $1`, [id]);
     }
   });

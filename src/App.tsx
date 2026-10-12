@@ -1,3 +1,4 @@
+import { WifiOff } from 'lucide-react';
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { HashRouter, Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -39,8 +40,8 @@ const APP_PREFETCH = ['/', '/diary', '/scan', '/workout', '/progress', '/food/se
 // instead of replaying the reveal (a visible "blink" on cold start).
 let splashFirstShownAt = 0;
 
-/** Full-screen brand splash while the session / profile resolve. */
-function Splash() {
+/** Full-screen brand splash while the session / profile resolve (logo only before login). */
+function Splash({ logo = true }: { logo?: boolean } = {}) {
   const [animate] = useState(() => {
     const now = Date.now();
     if (!splashFirstShownAt) splashFirstShownAt = now;
@@ -48,7 +49,7 @@ function Splash() {
   });
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-5" role="status" aria-label="Đang tải Fitora">
-      <Logo size={64} glow className={animate ? 'animate-scale-in' : undefined} />
+      {logo && <Logo size={64} glow className={animate ? 'animate-scale-in' : undefined} />}
       <span className={`display text-[56px] text-gradient${animate ? ' animate-speed-reveal' : ''}`}>Fitora</span>
       <span className="h-[3px] w-24 overflow-hidden rounded-full bg-white/10">
         <span className="block h-full w-1/2 animate-shimmer rounded-full bg-gradient-to-r from-transparent via-gold to-transparent bg-[length:200%_100%]" />
@@ -89,7 +90,7 @@ function RequireOnboarded() {
   const ready = !loading && Boolean(fit?.onboarded_at);
   // Once inside the app, warm the other tabs' chunks while idle so tab switches are instant.
   useEffect(() => (ready ? prefetchOnIdle(APP_PREFETCH) : undefined), [ready]);
-  if (loading) return <Splash />;
+  if (loading) return <Splash logo={false} />; // signed in already: no logo inside the app
   // Profile could not be loaded (offline, server down) and nothing cached: don't send an
   // onboarded user back to onboarding, and don't render pages that need the targets.
   if (!fit && error) return <ProfileLoadError error={error} />;
@@ -103,7 +104,7 @@ function ProfileLoadError({ error }: { error: unknown }) {
   const [busy, setBusy] = useState(false);
   return (
     <div className="absolute inset-0 flex flex-col justify-center gap-4 px-7" role="alert" style={{ paddingTop: 'var(--safe-top)' }}>
-      <Logo size={48} glow />
+      <WifiOff className="h-10 w-10 text-gold" aria-hidden="true" />
       <h1 className="display mt-2 text-[34px] text-text">Chưa kết nối được</h1>
       <p className="text-[15px] leading-relaxed text-muted">{errorMessage(error)} Kiểm tra kết nối mạng rồi bấm Thử lại.</p>
       <Button

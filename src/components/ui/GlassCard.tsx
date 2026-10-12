@@ -29,7 +29,7 @@ export const GlassCard = forwardRef<HTMLElement, GlassCardProps>(function GlassC
         strong ? 'glass-strong rounded-card' : 'glass-card',
         PAD[padding],
         interactive && 'cursor-pointer transition-transform duration-200 hover:bg-white/[0.08] active:scale-[0.985]',
-        accent && 'ring-1 ring-gold/40',
+        accent && 'ring-1 ring-[rgba(237,180,11,0.4)]',
         className,
       )}
       {...rest}

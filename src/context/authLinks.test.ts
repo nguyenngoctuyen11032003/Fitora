@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { linkErrorMessage, readAuthRedirect } from './authLinks';
+import { linkErrorMessage, linkNeedsConfirm, readAuthRedirect } from './authLinks';
 
 const BASE = 'https://u.github.io/Fitora/';
 
@@ -41,5 +41,24 @@ describe('linkErrorMessage', () => {
     expect(() => linkErrorMessage(null, '100% broken')).not.toThrow();
     expect(linkErrorMessage(null, '100% broken')).toMatch(/Liên kết/);
     expect(linkErrorMessage(null, null)).toBeNull();
+  });
+  it('không bao giờ hiện nguyên văn chữ lấy từ URL (chống giả mạo nội dung)', () => {
+    const spoof = 'Tài khoản Fitora của bạn đã bị khóa. Gọi ngay 0900 123 456 hoặc truy cập fitora-hotro.vn';
+    const msg = linkErrorMessage('server_error', spoof);
+    expect(msg).toMatch(/^Liên kết không hợp lệ/);
+    expect(msg).not.toContain('0900');
+    expect(linkErrorMessage(null, spoof)).not.toContain('fitora-hotro.vn');
+  });
+});
+
+describe('linkNeedsConfirm', () => {
+  it('liên kết token_hash khi đã đăng nhập phải hỏi lại, không tự đổi tài khoản', () => {
+    expect(linkNeedsConfirm(true, 'abc', 'email')).toBe(true);
+    expect(linkNeedsConfirm(true, 'abc', 'recovery')).toBe(true);
+  });
+  it('chưa đăng nhập hoặc không có token thì dùng ngay', () => {
+    expect(linkNeedsConfirm(false, 'abc', 'email')).toBe(false);
+    expect(linkNeedsConfirm(true, null, null)).toBe(false);
+    expect(linkNeedsConfirm(true, 'abc', null)).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import { BookmarkPlus, CalendarDays, Check, Plus, Search, Sparkles, Utensils } from 'lucide-react';
-import { useId, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { useId, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Link } from 'react-router-dom';
 import { BottomSheet } from '@/components/ui/BottomSheet';
 import { Button } from '@/components/ui/Button';
@@ -62,7 +62,16 @@ export function ReviewSheet({
   const dateId = useId();
   const sum = useMemo(() => totals(dishes), [dishes]);
   const invalid = dishes.some((d) => !isDishValid(d));
-  const canSave = dishes.length > 0 && !invalid && !saving;
+  // Not disabled when invalid: a tap jumps to the first dish to fix (a dead button explains nothing).
+  const canSave = dishes.length > 0 && !saving;
+  const listRef = useRef<HTMLElement>(null);
+  const trySave = () => {
+    const bad = dishes.find((d) => !isDishValid(d));
+    if (!bad) return onSave();
+    const card = listRef.current?.querySelector<HTMLElement>(`[data-dish-key="${bad.key}"]`);
+    card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus({ preventScroll: true });
+  };
   const aiCount = dishes.filter((d) => d.original).length;
   const today = todayISO();
   const description = !dishes.length
@@ -120,7 +129,7 @@ export function ReviewSheet({
       title="Kết quả quét"
       description={description}
       footer={
-        <Button size="lg" block onClick={onSave} disabled={!canSave} loading={saving} icon={<Check className="h-5 w-5" />}>
+        <Button size="lg" block onClick={trySave} disabled={!canSave} loading={saving} icon={<Check className="h-5 w-5" />}>
           {saving ? 'Đang lưu…' : `Lưu vào nhật ký · ${formatNumber(sum.kcal)} kcal`}
         </Button>
       }
@@ -198,7 +207,7 @@ export function ReviewSheet({
         )}
 
         {/* Dishes */}
-        <section className="flex flex-col gap-3" aria-label="Danh sách món">
+        <section ref={listRef} className="flex flex-col gap-3" aria-label="Danh sách món">
           {dishes.map((d, i) => (
             <DishCard
               key={d.key}
@@ -253,7 +262,11 @@ export function ReviewSheet({
           </p>
         )}
 
-        {invalid && <p role="alert" className="text-center text-[13px] font-medium text-[var(--danger-text)]">Mỗi món cần có tên, số lượng và khối lượng lớn hơn 0.</p>}
+        {invalid && (
+          <p role="alert" className="text-center text-[13px] font-medium text-[var(--danger-text)]">
+            Có món chưa hợp lệ — sửa các ô báo đỏ (tên, số lượng, khối lượng hoặc năng lượng quá lớn) rồi lưu.
+          </p>
+        )}
       </div>
     </BottomSheet>
   );

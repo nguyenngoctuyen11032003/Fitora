@@ -8,7 +8,7 @@ import { formatGrams, formatNumber } from '@/lib/format';
 import { saveEntryAsFood } from '@/services/foods';
 import { addMealEntries, updateMeal } from '@/services/meals';
 import { MEAL_LABELS, MEAL_TYPES, type MealEntry, type MealType } from '@/types/db';
-import { computePortion, convertQuantity, MEAL_SHORT, scaleNutrients, toNewEntry, unitOptions, type FoodOption } from '../lib';
+import { computePortion, convertQuantity, defaultPortion, MEAL_SHORT, scaleNutrients, toNewEntry, unitOptions, type FoodOption } from '../lib';
 import { MacroTiles } from './parts';
 
 export interface FoodSheetProps {
@@ -45,6 +45,8 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
   const [meal, setMeal] = useState<MealType>(defaultMeal);
   const [saving, setSaving] = useState(false);
   const [remembering, setRemembering] = useState(false);
+  // Entry just saved to "Món của tôi" (the parent's `entry` prop is not refreshed while open).
+  const [rememberedId, setRememberedId] = useState<string | null>(null);
   // Synchronous guard: two taps (or Enter + tap) in the same frame both see saving === false.
   const busy = useRef(false);
 
@@ -65,7 +67,7 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
     } else {
       const u = initial && units.some((x) => x.unit === initial.unit) ? initial.unit : opt.defaultUnit;
       setUnit(u);
-      setQty(initial && u === initial.unit ? initial.quantity : isWeight(u) ? 100 : 1);
+      setQty(initial && u === initial.unit ? initial.quantity : defaultPortion({ defaultUnit: u, defaultQty: u === opt.defaultUnit ? opt.defaultQty : undefined }).quantity);
       setMeal(defaultMeal);
     }
     setSaving(false);
@@ -125,6 +127,7 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
     setRemembering(true);
     try {
       const food = await saveEntryAsFood(entry);
+      setRememberedId(entry.id);
       toast.success(`Đã lưu “${food.name}” vào Món của tôi — lần sau chỉ cần chọn.`);
       notifyDataChanged('foods');
       onSaved({ ...entry, custom_food_id: food.id }, 'edit');
@@ -242,7 +245,7 @@ export function FoodSheet({ open, onClose, option, date, meal: defaultMeal, init
           />
         </section>
         {entry && (
-          <RememberRow saved={!!entry.custom_food_id} busy={remembering} onSave={() => void remember()} />
+          <RememberRow saved={!!entry.custom_food_id || rememberedId === entry.id}busy={remembering} onSave={() => void remember()} />
         )}
         <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
       </form>

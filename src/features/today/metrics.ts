@@ -349,3 +349,20 @@ export function applyMealDelta(
     },
   };
 }
+
+/** Water / steps as the server last confirmed them (loaded, or written successfully). */
+export interface ConfirmedDaily {
+  date: string;
+  water_ml: number;
+  steps: number;
+}
+
+/**
+ * Rolls the optimistic water / steps back to the last confirmed values after a failed
+ * write. Returns the same object when nothing differs or the confirmation is for another day.
+ */
+export function restoreConfirmed(summary: DaySummary, confirmed: ConfirmedDaily | null, date: string): DaySummary {
+  if (!confirmed || confirmed.date !== date) return summary;
+  if (summary.water_ml === confirmed.water_ml && summary.steps === confirmed.steps) return summary;
+  return { ...summary, water_ml: confirmed.water_ml, steps: confirmed.steps };
+}

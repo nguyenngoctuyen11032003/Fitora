@@ -23,12 +23,14 @@ import {
   defaultStatus,
   defaultVariant,
   distanceForDuration,
+  isAutoTitle,
   durationForDistance,
   normalizeTime,
   nowHHMM,
   paceLabel,
   sessionKcal,
   splitDistanceNote,
+  titleAfterPick,
   variantForMet,
   variantForSpeed,
 } from './lib';
@@ -53,6 +55,7 @@ const DURATIONS = [15, 30, 45, 60, 90];
 
 export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, onClose, onSave, onDelete, onSaveTemplate }: Props) {
   const [draft, setDraft] = useState<WorkoutDraft>(() => draftFrom(mode, today));
+  /** The user typed the title in this sheet (loaded or generated titles are not "touched"). */
   const [titleTouched, setTitleTouched] = useState(false);
   const [picking, setPicking] = useState(true);
   const [query, setQuery] = useState('');
@@ -81,7 +84,7 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
     const kept = stash.current?.key === modeKey(mode) ? stash.current : null;
     const d = kept ? kept.draft : draftFrom(mode, today);
     setDraft(d);
-    setTitleTouched(kept ? kept.titleTouched : mode.kind === 'edit' || !!mode.preset?.title);
+    setTitleTouched(kept ? kept.titleTouched : false);
     setPicking(!d.activity);
     setQuery('');
     setCat('all');
@@ -106,15 +109,22 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
 
   const pick = (a: ActivityDef) => {
     const v = defaultVariant(a);
-    setDraft((d) => ({ ...d, activity: a.key, category: a.category, met: v.met, title: titleTouched && d.title ? d.title : buildTitle(a, v), template_id: null, distance_km: null }));
-    setTitleTouched(false);
+    setDraft((d) => ({
+      ...d,
+      activity: a.key,
+      category: a.category,
+      met: v.met,
+      title: titleAfterPick(d.title, d.activity, titleTouched, a, v),
+      template_id: null,
+      distance_km: null,
+    }));
     setPicking(false);
   };
 
   const pickCustom = (name: string) => {
     const c: WorkoutCategory = cat === 'all' ? 'other' : cat;
     setDraft((d) => ({ ...d, activity: name.trim().slice(0, 60), category: c, met: categoryDefaultMet(c), title: name.trim().slice(0, 80), template_id: null, distance_km: null }));
-    setTitleTouched(true);
+    setTitleTouched(false);
     setPicking(false);
   };
 
@@ -132,22 +142,25 @@ export function WorkoutSheet({ open, mode, today, weightKg, weightNote, recent, 
       template_id: w.template_id,
       distance_km: km,
     }));
-    setTitleTouched(true);
+    setTitleTouched(false);
     setPicking(false);
   };
+
+  /** The title follows the intensity only while it is still a generated one. */
+  const followsActivity = () => !titleTouched && isAutoTitle(draft.title, draft.activity);
 
   const chooseVariant = (met: number) => {
     const v = act?.variants.find((x) => x.met === met);
     // With a distance entered, a different pace means a different duration.
     const dur = draft.distance_km ? durationForDistance(draft.distance_km, v?.kmh) : null;
-    setDraft((d) => ({ ...d, met, title: !titleTouched && act ? buildTitle(act, v) : d.title, ...(dur ? { duration_min: Math.min(1440, dur) } : {}) }));
+    setDraft((d) => ({ ...d, met, title: act && followsActivity() ? buildTitle(act, v) : d.title, ...(dur ? { duration_min: Math.min(1440, dur) } : {}) }));
   };
 
   /** Distance + duration → speed → closest intensity (keeps a hand-typed title). */
   const intensityFor = (km: number | null, minutes: number | null): Partial<WorkoutDraft> => {
     if (!act || !km || !minutes) return {};
     const v = variantForSpeed(act, km / (minutes / 60));
-    return v ? { met: v.met, title: !titleTouched ? buildTitle(act, v) : draft.title } : {};
+    return v ? { met: v.met, title: followsActivity() ? buildTitle(act, v) : draft.title } : {};
   };
 
   const changeDistance = (km: number | null) => {

@@ -2,6 +2,7 @@
 import type { FoodCategory, FoodItem, FoodUnit, Nutrients } from '@/data/foods';
 import type { CustomFood, CustomFoodSource, FitProfile, MealEntry, MealSource, MealTemplate, MealType, NewMealEntry } from '@/types/db';
 import { MEAL_LABELS, MEAL_TYPES } from '@/types/db';
+import { parseServingLabel } from '@/services/foods';
 import { activityModel, effectiveWeight, energyBalance, targetsFromProfile, type EnergyBalance } from '@/features/today/metrics';
 
 /* ===================================================================== */
@@ -34,6 +35,8 @@ export interface FoodOption {
   per100g: Nutrients;
   units: FoodUnit[];
   defaultUnit: string;
+  /** Quantity of `defaultUnit` that is one usual portion (saved foods: "2 lát" → 2, "250 ml" → 250). */
+  defaultQty?: number;
   origin: FoodOrigin;
   customFoodId?: string | null;
   /** Normalised search keys; first = name. */
@@ -50,6 +53,7 @@ export interface FoodOption {
   savedFrom?: CustomFoodSource;
 }
 
+const r2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 const r1 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 10) / 10;
 
 export function fromDbFood(food: FoodItem): FoodOption {
@@ -73,16 +77,33 @@ export function servingUnit(label: string | null | undefined): string {
   return (t || 'phần').slice(0, 20);
 }
 
+const WEIGHT_UNIT_ALIASES: Record<string, 'g' | 'ml'> = { g: 'g', gr: 'g', gram: 'g', grams: 'g', gam: 'g', ml: 'ml' };
+
+/**
+ * How one serving of a saved food is expressed as a portion: "1 tô" → 1 tô, "2 lát" → 2 lát,
+ * a weight label ("100 g", "250 ml") → unit g / ml with quantity = serving_grams (never a
+ * unit literally called "100 g"). Same convention as the scanner and one-tap re-log.
+ */
+export function customServing(cf: Pick<CustomFood, 'serving_label' | 'serving_grams'>): { unit: string; grams: number; quantity: number } {
+  const total = Number(cf.serving_grams) > 0 ? Number(cf.serving_grams) : 100;
+  const { count, unit } = parseServingLabel(cf.serving_label);
+  const w = WEIGHT_UNIT_ALIASES[unit.toLowerCase().replace(/\.$/, '')];
+  if (w) return { unit: w, grams: 1, quantity: Math.round(total * 100) / 100 };
+  return { unit, grams: total / count, quantity: count };
+}
+
 export function fromCustomFood(cf: CustomFood): FoodOption {
-  const unit = servingUnit(cf.serving_label);
+  const serving = customServing(cf);
+  const unit = serving.unit;
   return {
     key: `custom:${cf.id}`,
     name: cf.name,
     brand: cf.brand,
     category: null,
     per100g: { kcal: cf.kcal_100g, protein: cf.protein_100g, carbs: cf.carbs_100g, fat: cf.fat_100g, fiber: cf.fiber_100g },
-    units: [{ unit, grams: cf.serving_grams }],
+    units: [{ unit, grams: serving.grams }],
     defaultUnit: unit,
+    defaultQty: serving.quantity,
     origin: 'custom',
     customFoodId: cf.id,
     searchKeys: [normalizeVi(cf.name), normalizeVi(cf.brand)].filter(Boolean),
@@ -250,7 +271,8 @@ export function kcalFromMacros(p: number, c: number, f: number): number {
 /** Custom-food form: values typed per serving → per 100 g. */
 export function per100FromServing(n: Nutrients, servingGrams: number): Nutrients {
   const k = servingGrams > 0 ? 100 / servingGrams : 0;
-  return { kcal: r1(n.kcal * k), protein: r1(n.protein * k), carbs: r1(n.carbs * k), fat: r1(n.fat * k), fiber: r1(n.fiber * k) };
+  // 2 decimals like the numeric(7,2) columns: 1 decimal turns 35 g protein in a 450 g serving into 35.1 g when re-logged.
+  return { kcal: r2(n.kcal * k), protein: r2(n.protein * k), carbs: r2(n.carbs * k), fat: r2(n.fat * k), fiber: r2(n.fiber * k) };
 }
 
 /**
@@ -431,8 +453,9 @@ export function lastPortion(opt: FoodOption, e: Pick<MealEntry, 'unit' | 'quanti
 }
 
 /** Default portion to log an option with one tap: 1 household unit, or 100 g / ml. */
-export function defaultPortion(opt: Pick<FoodOption, 'defaultUnit'>): { quantity: number; unit: string } {
-  return { quantity: isWeightUnit(opt.defaultUnit) ? 100 : 1, unit: opt.defaultUnit };
+export function defaultPortion(opt: Pick<FoodOption, 'defaultUnit' | 'defaultQty'>): { quantity: number; unit: string } {
+  const q = Number(opt.defaultQty);
+  return { quantity: q > 0 ? q : isWeightUnit(opt.defaultUnit) ? 100 : 1, unit: opt.defaultUnit };
 }
 
 /* ===================================================================== */
@@ -775,4 +798,48 @@ export function diaryBalance(
     weight,
     model,
   );
+}
+
+/* ===================================================================== */
+/* Deep links + template duplicates                                        */
+/* ===================================================================== */
+
+export type FoodListTab = 'suggest' | 'mine' | 'popular';
+
+/**
+ * `?tab=` on /food/search → initial list tab. Accepts the tab ids plus the
+ * aliases other screens link with ('recent' → Gợi ý, 'saved' / 'templates' → Món của tôi).
+ */
+export function parseListTab(v: string | null | undefined): FoodListTab | null {
+  switch ((v ?? '').trim().toLowerCase()) {
+    case 'suggest':
+    case 'recent':
+      return 'suggest';
+    case 'mine':
+    case 'saved':
+    case 'templates':
+      return 'mine';
+    case 'popular':
+      return 'popular';
+    default:
+      return null;
+  }
+}
+
+/**
+ * Template items whose dish is already logged in `meal` (same name, diacritics-insensitive).
+ * Returns the template items' display names, in template order, without repeats.
+ */
+export function templateDuplicates(items: ReadonlyArray<{ name: string }>, entries: ReadonlyArray<Pick<MealEntry, 'name' | 'meal'>>, meal: MealType): string[] {
+  const logged = new Set(entries.filter((e) => e.meal === meal).map((e) => normalizeVi(e.name)));
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const it of items) {
+    const k = normalizeVi(it?.name);
+    if (k && logged.has(k) && !seen.has(k)) {
+      seen.add(k);
+      out.push(it.name);
+    }
+  }
+  return out;
 }

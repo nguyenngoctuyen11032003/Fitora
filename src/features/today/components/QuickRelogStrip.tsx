@@ -12,7 +12,7 @@ import { FoodSheet } from '@/features/food/components/FoodSheet';
 import { fromCustomFood, MEAL_SHORT, servingUnit } from '@/features/food/lib';
 import { notifyDataChanged } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
-import { logCustomFood, markCustomFoodUsed } from '@/services/foods';
+import { logCustomFood, markCustomFoodUsed, unmarkCustomFoodUsed, type CustomFoodUsage } from '@/services/foods';
 import { logMealTemplate } from '@/services/mealTemplates';
 import { deleteMeal, mealPhotoUrl } from '@/services/meals';
 import { MEAL_LABELS, MEAL_TYPES, type CustomFood, type MealEntry, type MealTemplate, type MealType } from '@/types/db';
@@ -271,6 +271,15 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
   const [sheetFood, setSheetFood] = useState<CustomFood | null>(null);
   const [sheetTemplate, setSheetTemplate] = useState<MealTemplate | null>(null);
   const mealLabel = MEAL_LABELS[meal];
+  /** Latest saved foods for usage snapshots (taken right before a log, restored by undo). */
+  const foodsRef = useRef(foods);
+  foodsRef.current = foods;
+  const usageOf = useCallback((ids: Array<string | null | undefined>): CustomFoodUsage[] => {
+    const want = new Set(ids.filter((x): x is string => !!x));
+    return foodsRef.current
+      .filter((f) => want.has(f.id))
+      .map((f) => ({ id: f.id, last_used_at: f.last_used_at, default_meal: f.default_meal }));
+  }, []);
 
   useEffect(() => {
     const timers = doneTimers.current;
@@ -293,10 +302,16 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
   }, []);
 
   const undo = useCallback(
-    async (rows: MealEntry[], name: string) => {
+    async (rows: MealEntry[], name: string, usage: CustomFoodUsage[]) => {
       const res = await Promise.allSettled(rows.map((r) => deleteMeal(r.id)));
       const removed = rows.filter((_, i) => res[i].status === 'fulfilled').map((r) => r.id);
       if (removed.length) onApplied([], removed);
+      // Nothing was eaten after all: give the saved foods their usage count / usual meal back
+      // (only when every entry is gone, otherwise the log still stands).
+      if (usage.length && removed.length === rows.length) {
+        await unmarkCustomFoodUsed(usage);
+        notifyDataChanged('foods');
+      }
       notifyDataChanged('meals');
       const err = res.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
       if (err) toast.error(err.reason);
@@ -307,7 +322,7 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
 
   /** Shared success path: dashboard + other screens + toast with undo. */
   const afterLog = useCallback(
-    (key: string | null, rows: MealEntry[], name: string, kcal: number, at: MealType) => {
+    (key: string | null, rows: MealEntry[], name: string, kcal: number, at: MealType, usage: CustomFoodUsage[]) => {
       onApplied(rows, []);
       notifyDataChanged('meals');
       if (key) {
@@ -324,7 +339,7 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
           label: 'Hoàn tác',
           onClick: () => {
             toast.dismiss(id);
-            void undo(rows, name);
+            void undo(rows, name, usage);
           },
         },
       });
@@ -335,15 +350,17 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
   const logTemplate = useCallback(
     async (t: MealTemplate, at: MealType, key: string | null): Promise<boolean> => {
       try {
+        // Foods linked from the template get their usage bumped too; undo restores them.
+        const usage = usageOf(t.items.map((i) => i?.custom_food_id));
         const rows = await logMealTemplate(t, date, at);
-        afterLog(key, rows, t.name, Math.round(rows.reduce((a, r) => a + (Number(r.kcal) || 0), 0)), at);
+        afterLog(key, rows, t.name, Math.round(rows.reduce((a, r) => a + (Number(r.kcal) || 0), 0)), at, usage);
         return true;
       } catch (e) {
         toast.error(e);
         return false;
       }
     },
-    [afterLog, date, toast],
+    [afterLog, date, toast, usageOf],
   );
 
   const onTap = useCallback(
@@ -354,8 +371,9 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
       setState(item.key, 'busy');
       try {
         if (item.kind === 'food') {
+          const usage = usageOf([item.food.id]);
           const row = await logCustomFood(item.food, date, meal, 1);
-          afterLog(item.key, [row], item.food.name, Math.round(Number(row.kcal) || 0), meal);
+          afterLog(item.key, [row], item.food.name, Math.round(Number(row.kcal) || 0), meal, usage);
         } else if (!(await logTemplate(item.template, meal, item.key))) {
           setState(item.key, 'idle');
         }
@@ -366,7 +384,7 @@ export const QuickRelogStrip = memo(function QuickRelogStrip({ date, meal, meals
         busyKeys.current.delete(item.key);
       }
     },
-    [afterLog, date, logTemplate, meal, setState, toast],
+    [afterLog, date, logTemplate, meal, setState, toast, usageOf],
   );
 
   const tap = useCallback((item: QuickItem) => void onTap(item), [onTap]);

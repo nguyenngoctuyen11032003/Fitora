@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import { ChevronRight, Flame, RefreshCw, Ruler, Scale, Target } from 'lucide-react';
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { BigNumber } from '@/components/ui/BigNumber';
 import { Button } from '@/components/ui/Button';
@@ -14,7 +14,24 @@ import { errorMessage } from '@/services/errors';
 import type { BodyMeasurement, FitProfile } from '@/types/db';
 import { DeltaBadge } from './DeltaBadge';
 import { CIRCUMFERENCES, deltaTone, fieldDelta, groupByMonth, latestValue, num, planRefresh, targetStatus, waistToHeight, weightStats, type WhtrKey } from './lib';
-import { WeightChart } from './WeightChart';
+
+// recharts is heavy (~100 kB gzip) → its own chunk, so /body paints the hero and history without waiting for it.
+const WeightChart = lazy(() => import('./WeightChart').then((m) => ({ default: m.WeightChart })));
+
+/** Same footprint as WeightChart (header, range control, 150px plot) → no layout shift when it lands. */
+function WeightChartSkeleton() {
+  return (
+    <div className="flex flex-col gap-3" role="status" aria-label="Đang tải biểu đồ cân nặng" data-testid="weight-chart-skeleton">
+      <div className="flex h-[61px] flex-col justify-center gap-2.5">
+        <Skeleton height={10} width={120} />
+        <Skeleton height={13} width="70%" />
+        <Skeleton height={10} width={110} />
+      </div>
+      <Skeleton height={54} rounded="full" />
+      <Skeleton height={150} />
+    </div>
+  );
+}
 
 const BMI_STYLE: Record<string, string> = {
   underweight: 'text-water border-[rgba(94,200,242,0.35)] bg-[rgba(94,200,242,0.1)]',
@@ -192,7 +209,9 @@ export function MeasurementsTab({ rows, loading, error, fit, onAdd, onEdit, onRe
 
       {stats.count > 0 && (
         <GlassCard className="animate-fade-slide-up animate-delay-100">
-          <WeightChart rows={asc} target={target} />
+          <Suspense fallback={<WeightChartSkeleton />}>
+            <WeightChart rows={asc} target={target} />
+          </Suspense>
         </GlassCard>
       )}
 

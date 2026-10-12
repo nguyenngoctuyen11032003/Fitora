@@ -1,9 +1,9 @@
 import clsx from 'clsx';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useRef, type KeyboardEvent } from 'react';
+import { useEffect, useRef, type KeyboardEvent } from 'react';
 import { GlassButton } from '@/components/ui/GlassButton';
 import { addDays, formatDayVi, parseISODate, weekdayShort } from '@/lib/date';
-import type { DayMark } from './lib';
+import { scrollLeftToReveal, type DayMark } from './lib';
 
 interface Props {
   days: string[];
@@ -19,6 +19,18 @@ interface Props {
 /** Mon–Sun strip with done (gold dot) / planned (ring) markers. */
 export function WeekStrip({ days, selected, today, marks, onSelect, onShiftWeek, onToday, loading }: Props) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const selectedIndex = days.indexOf(selected);
+
+  // In very narrow containers (desktop phone frame on a short window) the strip scrolls horizontally so each day
+  // keeps a 44px touch target — keep the selected day in view without moving the page vertically.
+  useEffect(() => {
+    const list = listRef.current;
+    const btn = selectedIndex >= 0 ? refs.current[selectedIndex] : null;
+    if (!list || !btn || list.scrollWidth <= list.clientWidth) return;
+    list.scrollLeft = scrollLeftToReveal(btn.offsetLeft - list.offsetLeft, btn.offsetWidth, list.scrollLeft, list.clientWidth);
+  }, [selectedIndex, days]);
+
   const first = parseISODate(days[0]);
   const last = parseISODate(days[6]);
   const range =
@@ -59,50 +71,58 @@ export function WeekStrip({ days, selected, today, marks, onSelect, onShiftWeek,
         </GlassButton>
       </div>
 
-      <div role="listbox" aria-label="Chọn ngày" className="grid grid-cols-7 gap-0.5 min-[380px]:gap-1.5">
-        {days.map((d, i) => {
-          const on = d === selected;
-          const isToday = d === today;
-          const m = marks[d];
-          const label = `${formatDayVi(d, 'long')}${m ? `, ${m.done} buổi đã tập, ${m.planned} buổi lên lịch` : ''}`;
-          return (
-            <button
-              key={d}
-              ref={(el) => (refs.current[i] = el)}
-              type="button"
-              role="option"
-              aria-selected={on}
-              aria-current={isToday ? 'date' : undefined}
-              aria-label={label}
-              tabIndex={on ? 0 : -1}
-              onClick={() => onSelect(d)}
-              onKeyDown={(e) => onKey(e, i)}
-              className={clsx(
-                'relative flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[18px] border transition-[background-color,transform,border-color] duration-200 active:scale-[0.95]',
-                on
-                  ? 'border-gold/70 bg-gold text-[#1a0e02] shadow-[0_10px_26px_-12px_rgba(237,180,11,0.9)]'
-                  : isToday
-                    ? 'border-gold/40 bg-white/[0.05] text-text'
-                    : 'border-line bg-white/[0.03] text-text/85 hover:bg-white/[0.07]',
-              )}
-            >
-              <span className={clsx('text-[11px] font-bold uppercase tracking-[0.08em]', on ? 'text-[#1a0e02]/70' : isToday ? 'text-gold' : 'text-muted')}>
-                {weekdayShort(d)}
-              </span>
-              <span className="num text-[22px] leading-none">{parseISODate(d).getDate()}</span>
-              <span className="flex h-1.5 items-center gap-1" aria-hidden="true">
-                {loading ? null : (
-                  <>
-                    {m?.done ? <span className={clsx('h-1.5 w-1.5 rounded-full', on ? 'bg-[#1a0e02]' : 'bg-gold')} /> : null}
-                    {m?.planned ? (
-                      <span className={clsx('h-1.5 w-1.5 rounded-full border', on ? 'border-[#1a0e02]' : 'border-text/70')} />
-                    ) : null}
-                  </>
+      {/* Size container: gap/scroll follow the strip's own width (phone frame), not the browser viewport. */}
+      <div className="[container-type:inline-size]">
+        <div
+          ref={listRef}
+          role="listbox"
+          aria-label="Chọn ngày"
+          className="no-scrollbar grid grid-cols-[repeat(7,minmax(44px,1fr))] gap-0.5 [@container(max-width:319.98px)]:-mb-4 [@container(max-width:319.98px)]:snap-x [@container(max-width:319.98px)]:overflow-x-auto [@container(max-width:319.98px)]:pb-4 [@container(min-width:360px)]:gap-1.5"
+        >
+          {days.map((d, i) => {
+            const on = d === selected;
+            const isToday = d === today;
+            const m = marks[d];
+            const label = `${formatDayVi(d, 'long')}${m ? `, ${m.done} buổi đã tập, ${m.planned} buổi lên lịch` : ''}`;
+            return (
+              <button
+                key={d}
+                ref={(el) => (refs.current[i] = el)}
+                type="button"
+                role="option"
+                aria-selected={on}
+                aria-current={isToday ? 'date' : undefined}
+                aria-label={label}
+                tabIndex={on ? 0 : -1}
+                onClick={() => onSelect(d)}
+                onKeyDown={(e) => onKey(e, i)}
+                className={clsx(
+                  'relative flex min-h-[72px] min-w-[44px] snap-start flex-col items-center justify-center gap-1 rounded-[18px] border transition-[background-color,transform,border-color] duration-200 active:scale-[0.95]',
+                  on
+                    ? 'border-gold/70 bg-gold text-[#1a0e02] shadow-[0_10px_26px_-12px_rgba(237,180,11,0.9)]'
+                    : isToday
+                      ? 'border-gold/40 bg-white/[0.05] text-text'
+                      : 'border-line bg-white/[0.03] text-text/85 hover:bg-white/[0.07]',
                 )}
-              </span>
-            </button>
-          );
-        })}
+              >
+                <span className={clsx('text-[11px] font-bold uppercase tracking-[0.08em]', on ? 'text-[#1a0e02]/70' : isToday ? 'text-gold' : 'text-muted')}>
+                  {weekdayShort(d)}
+                </span>
+                <span className="num text-[22px] leading-none">{parseISODate(d).getDate()}</span>
+                <span className="flex h-1.5 items-center gap-1" aria-hidden="true">
+                  {loading ? null : (
+                    <>
+                      {m?.done ? <span className={clsx('h-1.5 w-1.5 rounded-full', on ? 'bg-[#1a0e02]' : 'bg-gold')} /> : null}
+                      {m?.planned ? (
+                        <span className={clsx('h-1.5 w-1.5 rounded-full border', on ? 'border-[#1a0e02]' : 'border-text/70')} />
+                      ) : null}
+                    </>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
       <div className="flex items-center justify-center gap-4 text-[11px] font-semibold text-muted" aria-hidden="true">
         <span className="inline-flex items-center gap-1.5">

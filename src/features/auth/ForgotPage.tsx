@@ -51,7 +51,7 @@ export default function ForgotPage() {
     >
       {sent ? (
         <div className="flex flex-col items-start gap-4">
-          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-gold/15 text-gold">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-[rgba(237,180,11,0.15)] text-gold">
             <MailCheck className="h-7 w-7" aria-hidden="true" />
           </span>
           <p className="text-[15px] leading-relaxed text-muted">

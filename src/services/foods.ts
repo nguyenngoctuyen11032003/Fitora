@@ -164,6 +164,41 @@ export async function markCustomFoodUsed(ids: string | string[], meal?: MealType
   }
 }
 
+/** What a saved food looked like before a markCustomFoodUsed bump (the row you had in hand). */
+export type CustomFoodUsage = Pick<CustomFood, 'id' | 'last_used_at' | 'default_meal'>;
+
+/**
+ * Undo of ONE markCustomFoodUsed bump (e.g. "Hoàn tác" after a one-tap re-log): pass the
+ * food rows as they were BEFORE the bump. use_count −1 (never below 0), last_used_at and
+ * default_meal go back to the snapshot (last_used_at is never moved forward; it becomes
+ * null when the count returns to 0). BEST-EFFORT like markCustomFoodUsed: never throws,
+ * returns the updated rows ([] on failure). Call it once per bump you are undoing.
+ */
+export async function unmarkCustomFoodUsed(before: CustomFoodUsage | CustomFoodUsage[]): Promise<CustomFood[]> {
+  const seen = new Set<string>();
+  const list = (Array.isArray(before) ? before : [before]).filter((f) => {
+    if (!f || typeof f.id !== 'string' || !f.id || seen.has(f.id)) return false;
+    seen.add(f.id);
+    return true;
+  });
+  if (!list.length) return [];
+  try {
+    const res = await Promise.all(
+      list.map(async (f) => {
+        const { data, error } = await db().rpc('fit_unmark_food_used', {
+          p_id: f.id,
+          p_prev_last_used_at: f.last_used_at ?? null,
+          p_prev_default_meal: f.default_meal && MEAL_TYPES.includes(f.default_meal) ? f.default_meal : null,
+        });
+        return error ? [] : ((data as CustomFood[] | null) ?? []);
+      }),
+    );
+    return res.flat();
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Saved food whose name matches `name` ignoring case / diacritics / punctuation, or null.
  * Pass `foods` (e.g. an already loaded list) to avoid a request. With duplicates the most
@@ -238,19 +273,42 @@ export function servingUnitOf(label: string | null | undefined): string {
 }
 
 /**
+ * Splits a serving label into count + unit: "1 bát" → {1,'bát'}, "2 lát" → {2,'lát'},
+ * "1,5 chén" → {1.5,'chén'}, "1/2 ổ" → {0.5,'ổ'}, "100g" → {100,'g'}, "bát" → {1,'bát'},
+ * "" → {1,'phần'}. Unit max 20 chars (fit_meal_entries.unit).
+ */
+export function parseServingLabel(label: string | null | undefined): { count: number; unit: string } {
+  const t = String(label ?? '').trim().replace(/\s+/g, ' ');
+  const m = /^(\d+\/\d+|\d+(?:[.,]\d+)?)\s*(.*)$/.exec(t);
+  let count = 1;
+  let unit = t;
+  if (m) {
+    const [num, den] = m[1].split('/');
+    const n = den !== undefined ? Number(num) / Number(den) : Number(num.replace(',', '.'));
+    if (Number.isFinite(n) && n > 0) {
+      count = n;
+      unit = m[2].trim();
+    }
+  }
+  return { count, unit: (unit || 'phần').slice(0, 20) };
+}
+
+/**
  * The meal entry for `servings` servings of a saved food (source 'custom', linked by
- * custom_food_id, sharing the food's photo). Pure — no request.
+ * custom_food_id, sharing the food's photo). A counted label is kept readable: 1 serving
+ * of "2 lát" is logged as quantity 2, unit "lát" (never "1 2 lát"). Pure — no request.
  */
 export function customFoodEntry(food: CustomFood, date: string, meal: MealType, servings = 1): NewMealEntry {
   const q = Number(servings) > 0 && Number.isFinite(Number(servings)) ? Number(servings) : 1;
   const grams = food.serving_grams * q;
   const v = (per100: number) => r1((per100 * grams) / 100);
+  const serving = parseServingLabel(food.serving_label);
   return {
     eaten_on: date,
     meal,
     name: food.name,
-    quantity: Math.round(q * 100) / 100,
-    unit: servingUnitOf(food.serving_label),
+    quantity: Math.min(10000, Math.max(0.01, Math.round(q * serving.count * 100) / 100)),
+    unit: serving.unit,
     grams: r1(grams),
     kcal: v(food.kcal_100g),
     protein_g: v(food.protein_100g),

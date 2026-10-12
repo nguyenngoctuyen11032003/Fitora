@@ -17,6 +17,8 @@
   /* 0.5 (was 0.4): placeholders stay legible on the field fill (~4:1 instead of ~2.8:1) */
   --muted-2: rgba(235, 220, 205, 0.5);
   --gold: #edb40b;
+  /* RGB channels of --gold, for Tailwind opacity modifiers (rgb(var(--gold-rgb) / <alpha-value>)). */
+  --gold-rgb: 237 180 11;
   --gold-soft: rgba(237, 180, 11, 0.16);
   --ember: #e1500a;
   --danger: #e10600;
@@ -54,6 +56,8 @@
 /* ===================================================================== */
 @layer base {
   html {
+    /* Same colour as the in-app background: iOS paints html's background in the safe-area strips. */
+    background-color: var(--bg);
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
@@ -394,7 +398,9 @@
   .fitora-frame {
     position: relative;
     height: min(92vh, 900px);
-    aspect-ratio: 390 / 844;
+    /* Width follows the height (390:844) but never drops below a 360px-wide screen (+2×11px bezel):
+       on 1280×800 / 1366×768 laptops the pure aspect ratio gave a 304–318px screen. */
+    width: clamp(382px, calc(min(92vh, 900px) * 390 / 844), 430px);
     border-radius: 54px;
     padding: 11px;
     background: linear-gradient(145deg, #1d1612 0%, #050302 45%, #120c09 100%);
@@ -507,5 +513,10 @@
   body {
     height: 100%;
     overflow: hidden;
+  }
+  /* The darker desktop-surround backdrop must never show on a phone (iOS PWA bottom strip). */
+  body {
+    background-color: var(--bg);
+    background-image: none;
   }
 }

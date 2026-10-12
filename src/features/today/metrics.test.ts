@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { FitProfile, MealEntry } from '@/types/db';
+import type { DaySummary, FitProfile, MealEntry } from '@/types/db';
 import {
   activityModel,
   computeStreaks,
@@ -21,6 +21,7 @@ import {
   targetsFromProfile,
   applyMealDelta,
   clockKey,
+  restoreConfirmed,
 } from './metrics';
 import { guessMeal } from '@/features/food/lib';
 
@@ -275,5 +276,19 @@ describe('applyMealDelta', () => {
     const r = applyMealDelta(meals, sum, '2026-10-12', [a, entry('y', 100, '2026-10-11')], ['zz']);
     expect(r.meals).toBe(meals);
     expect(r.summary).toBe(sum);
+  });
+});
+
+describe('restoreConfirmed', () => {
+  const sum = { water_ml: 1000, steps: 4000, kcal_eaten: 10 } as unknown as DaySummary;
+  it('rolls optimistic water / steps back to the confirmed values', () => {
+    const out = restoreConfirmed(sum, { date: '2026-10-12', water_ml: 750, steps: 4000 }, '2026-10-12');
+    expect(out).toMatchObject({ water_ml: 750, steps: 4000, kcal_eaten: 10 });
+    expect(out).not.toBe(sum);
+  });
+  it('is a no-op when equal, unknown, or for another day', () => {
+    expect(restoreConfirmed(sum, { date: '2026-10-12', water_ml: 1000, steps: 4000 }, '2026-10-12')).toBe(sum);
+    expect(restoreConfirmed(sum, null, '2026-10-12')).toBe(sum);
+    expect(restoreConfirmed(sum, { date: '2026-10-11', water_ml: 0, steps: 0 }, '2026-10-12')).toBe(sum);
   });
 });

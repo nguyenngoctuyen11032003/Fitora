@@ -1,11 +1,13 @@
 import { Repeat, RotateCw } from 'lucide-react';
 import { BottomSheet } from '@/components/ui/BottomSheet';
 import { addDays, formatDayVi } from '@/lib/date';
+import { weekRangeLabel } from './lib';
 
 interface Props {
   open: boolean;
   onClose: () => void;
   selected: string;
+  today: string;
   weekStart: string;
   weekEnd: string;
   dayCount: number;
@@ -14,14 +16,17 @@ interface Props {
   onRepeat: (scope: 'day' | 'week') => void;
 }
 
-/** "Lặp lại tuần sau": copy the selected day or the whole week as planned sessions. */
-export function RepeatSheet({ open, onClose, selected, weekStart, weekEnd, dayCount, weekCount, repeating, onRepeat }: Props) {
+/** Copy the selected day or the whole shown week, one week ahead, as planned sessions. */
+export function RepeatSheet({ open, onClose, selected, today, weekStart, weekEnd, dayCount, weekCount, repeating, onRepeat }: Props) {
+  const target = weekRangeLabel(addDays(weekStart, 7), today);
+  const isThisWeek = weekRangeLabel(weekStart, today) === 'tuần này';
+  const thisWeek = weekRangeLabel(weekStart, today);
   return (
     <BottomSheet
       open={open}
       onClose={onClose}
-      title="Lặp lại tuần sau"
-      description="Sao chép thành các buổi “Lên lịch”. Buổi đã có sẵn ở tuần sau sẽ được bỏ qua."
+      title={`Lặp lại sang ${target}`}
+      description={`Sao chép thành các buổi “Lên lịch”. Buổi đã có sẵn ở ${target} và ngày đã qua sẽ được bỏ qua.`}
     >
       <div className="flex flex-col gap-2.5 pb-2">
         <RepeatOption
@@ -32,7 +37,7 @@ export function RepeatSheet({ open, onClose, selected, weekStart, weekEnd, dayCo
           onClick={() => onRepeat('day')}
         />
         <RepeatOption
-          title="Cả tuần này"
+          title={isThisWeek ? 'Cả tuần này' : `Cả ${thisWeek}`}
           sub={`${weekCount} buổi → tuần ${formatDayVi(addDays(weekStart, 7), 'short')}–${formatDayVi(addDays(weekEnd, 7), 'short')}`}
           loading={repeating === 'week'}
           disabled={!!repeating || !weekCount}

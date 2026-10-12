@@ -21,10 +21,12 @@ import {
   logCustomFood,
   markCustomFoodUsed,
   normalizeFoodName,
+  parseServingLabel,
   per100FromTotals,
   saveEntryAsFood,
   saveScannedDishes,
   servingUnitOf,
+  unmarkCustomFoodUsed,
   updateCustomFood,
 } from './foods';
 import { PHOTO_CLEANUP_DELAY_MS } from './meals';
@@ -136,6 +138,32 @@ describe('customFoodEntry / servingUnitOf', () => {
     expect(servingUnitOf('2 lát')).toBe('2 lát');
     expect(servingUnitOf('')).toBe('phần');
   });
+
+  it('a counted label is logged as count × servings of the bare unit ("2 lát" → 2 lát, not "1 2 lát")', () => {
+    const f = food({ serving_label: '2 lát', serving_grams: 60, kcal_100g: 250 });
+    expect(customFoodEntry(f, '2026-10-12', 'breakfast', 1)).toMatchObject({ quantity: 2, unit: 'lát', grams: 60, kcal: 150 });
+    expect(customFoodEntry(f, '2026-10-12', 'breakfast', 1.5)).toMatchObject({ quantity: 3, unit: 'lát', grams: 90 });
+    expect(customFoodEntry(food({ serving_label: '100 g', serving_grams: 100 }), '2026-10-12', 'snack', 2)).toMatchObject({
+      quantity: 200,
+      unit: 'g',
+      grams: 200,
+    });
+    expect(customFoodEntry(food({ serving_label: '1 phần' }), '2026-10-12', 'snack', 1)).toMatchObject({ quantity: 1, unit: 'phần' });
+  });
+
+  it('parseServingLabel', () => {
+    expect(parseServingLabel('1 bát')).toEqual({ count: 1, unit: 'bát' });
+    expect(parseServingLabel(' 2  lát ')).toEqual({ count: 2, unit: 'lát' });
+    expect(parseServingLabel('1,5 chén')).toEqual({ count: 1.5, unit: 'chén' });
+    expect(parseServingLabel('1/2 ổ')).toEqual({ count: 0.5, unit: 'ổ' });
+    expect(parseServingLabel('100g')).toEqual({ count: 100, unit: 'g' });
+    expect(parseServingLabel('3')).toEqual({ count: 3, unit: 'phần' });
+    expect(parseServingLabel('bát')).toEqual({ count: 1, unit: 'bát' });
+    expect(parseServingLabel('0 bát')).toEqual({ count: 1, unit: '0 bát' });
+    expect(parseServingLabel('1/0 ổ')).toEqual({ count: 1, unit: '1/0 ổ' });
+    expect(parseServingLabel(null)).toEqual({ count: 1, unit: 'phần' });
+    expect(parseServingLabel('2 ' + 'x'.repeat(30)).unit).toHaveLength(20);
+  });
 });
 
 describe('CRUD', () => {
@@ -181,6 +209,30 @@ describe('CRUD', () => {
     expect(await markCustomFoodUsed([])).toEqual([]);
     fake.failNext = { rpc: 'fit_mark_food_used', error: { message: 'boom' } };
     expect(await markCustomFoodUsed('a')).toEqual([]);
+  });
+
+  it('unmarkCustomFoodUsed restores the pre-bump snapshot (undo) and never throws', async () => {
+    const prev = '2026-10-01T07:00:00.000Z';
+    const before = food({ id: 'b', use_count: 3, last_used_at: prev, default_meal: 'breakfast' });
+    fake.tables.fit_custom_foods = [{ ...before }];
+    await markCustomFoodUsed('b', 'dinner');
+    expect(fake.tables.fit_custom_foods[0]).toMatchObject({ use_count: 4, default_meal: 'dinner' });
+    const rows = await unmarkCustomFoodUsed([before, before]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ use_count: 3, last_used_at: prev, default_meal: 'breakfast' });
+    expect(fake.calls.filter((c) => c.rpc === 'fit_unmark_food_used').map((c) => c.args)).toEqual([
+      { p_id: 'b', p_prev_last_used_at: prev, p_prev_default_meal: 'breakfast' },
+    ]);
+    // first use undone → back to "never used"
+    const fresh = food({ id: 'c' });
+    fake.tables.fit_custom_foods.push({ ...fresh });
+    await markCustomFoodUsed('c', 'snack');
+    const [c] = await unmarkCustomFoodUsed(fresh);
+    expect(c).toMatchObject({ use_count: 0, last_used_at: null, default_meal: null });
+    expect(await unmarkCustomFoodUsed(fresh)).toEqual([]); // never below 0
+    expect(await unmarkCustomFoodUsed([])).toEqual([]);
+    fake.failNext = { rpc: 'fit_unmark_food_used', error: { message: 'boom' } };
+    expect(await unmarkCustomFoodUsed(before)).toEqual([]);
   });
 
   it('findCustomFoodByName matches without diacritics and prefers the most used duplicate', async () => {

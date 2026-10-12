@@ -102,6 +102,18 @@ describe('macro editing', () => {
     expect(p.protein_g + p.carbs_g + p.fat_g).toBeGreaterThanOrEqual(99);
     expect(p.protein_g + p.carbs_g + p.fat_g).toBeLessThanOrEqual(101);
   });
+  it('macroPercents always totals exactly 100 (largest remainder)', () => {
+    // 36.6 / 38.6 / 24.7 would round to 37 + 39 + 25 = 101
+    const p = macroPercents({ protein_g: 110, carbs_g: 116, fat_g: 33 });
+    expect(p.protein_g + p.carbs_g + p.fat_g).toBe(100);
+    for (let pr = 20; pr <= 200; pr += 7)
+      for (let c = 20; c <= 400; c += 13)
+        for (let f = 10; f <= 120; f += 5) {
+          const q = macroPercents({ protein_g: pr, carbs_g: c, fat_g: f });
+          expect(q.protein_g + q.carbs_g + q.fat_g).toBe(100);
+        }
+    expect(macroPercents({ protein_g: 0, carbs_g: 0, fat_g: 0 })).toEqual({ protein_g: 0, carbs_g: 0, fat_g: 0 });
+  });
 });
 
 describe('helpers', () => {

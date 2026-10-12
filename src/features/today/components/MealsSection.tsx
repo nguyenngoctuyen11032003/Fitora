@@ -35,8 +35,8 @@ export const MealsSection = memo(function MealsSection({ groups, date, suggested
         </span>
         <span className="relative min-w-0 flex-1">
           <span className="block text-[18px] font-extrabold leading-tight tracking-[-0.03em]">Scan bữa ăn</span>
-          <span className="mt-0.5 block truncate text-[13px] font-semibold text-[#1a0e02]/75">
-            Chụp ảnh · AI tính calo cho {MEAL_LABELS[suggestedMeal].toLowerCase()}
+          <span className="mt-0.5 line-clamp-2 text-[13px] font-semibold leading-snug text-[#1a0e02]/75">
+            AI tính calo · <span className="whitespace-nowrap">{MEAL_LABELS[suggestedMeal].toLowerCase()}</span>
           </span>
         </span>
         <ArrowRight className="relative h-5 w-5 shrink-0 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />

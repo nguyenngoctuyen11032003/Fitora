@@ -49,6 +49,15 @@ const GRAM_UNITS = ['g', 'gr', 'gr.', 'gram', 'grams', 'gam'];
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
 
+/** Confidence as 0–1; a 0–100 percentage (85 → 0.85) is rescaled instead of being clamped to 100%. */
+export function normalizeConfidence(v: unknown): number {
+  const c = n(v);
+  return Math.min(1, c > 1 && c <= 100 ? c / 100 : c);
+}
+
+/** Max kcal beyond Atwater 4/4/9 per gram of dish: alcohol (≤ ~0.32 g/g × 7 kcal/g) is the only real source. */
+export const MAX_EXTRA_KCAL_PER_G = 2.4;
+
 /** Confidence a dish drops to when its own numbers contradict each other ("Cần kiểm tra"). */
 export const LOW_CONFIDENCE = 0.4;
 
@@ -72,7 +81,7 @@ export function normalizeDish(d: Partial<AiDish>): AiDish {
   let carbs_g = n(d.carbs_g);
   let fat_g = n(d.fat_g);
   let fiber_g = n(d.fiber_g);
-  let confidence = d.confidence === undefined || d.confidence === null ? 0.5 : Math.min(1, n(d.confidence));
+  let confidence = d.confidence === undefined || d.confidence === null ? 0.5 : normalizeConfidence(d.confidence);
 
   if (grams > 0) {
     // Macros (and fiber) cannot weigh more than the whole dish.
@@ -99,6 +108,12 @@ export function normalizeDish(d: Partial<AiDish>): AiDish {
   } else if (fromMacros > 0 && kcal - fromMacros > Math.max(100, fromMacros)) {
     // kcal is more than double what the macros account for: one of them is off. Keep the
     // kcal (the macros may just be incomplete) but flag the dish for review.
+    confidence = Math.min(confidence, LOW_CONFIDENCE);
+  }
+  // Far more energy than the macros plus any alcohol could explain (a x10 slip, or kcal of a
+  // bigger portion): trust the macros.
+  if (grams > 0 && fromMacros > 0 && kcal > fromMacros + grams * MAX_EXTRA_KCAL_PER_G + 50) {
+    kcal = fromMacros;
     confidence = Math.min(confidence, LOW_CONFIDENCE);
   }
   // Denser than pure fat is physically impossible.

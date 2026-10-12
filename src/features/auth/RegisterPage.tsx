@@ -76,7 +76,7 @@ export default function RegisterPage() {
     return (
       <AuthLayout eyebrow="Gần xong rồi" title="Kiểm tra email" compact footer={<Link to="/login" className="inline-flex min-h-[44px] items-center font-bold text-gold">Về đăng nhập</Link>}>
         <div className="flex flex-col items-start gap-4">
-          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-gold/15 text-gold">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-[rgba(237,180,11,0.15)] text-gold">
             <MailCheck className="h-7 w-7" aria-hidden="true" />
           </span>
           <p className="text-[15px] leading-relaxed text-muted">

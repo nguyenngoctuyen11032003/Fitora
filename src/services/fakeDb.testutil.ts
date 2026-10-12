@@ -142,6 +142,18 @@ export function createFakeDb(): FakeDb {
     }
     return { data: rows.map((r) => ({ ...r })), error: null };
   };
+  db.rpcs.fit_unmark_food_used = (args, d) => {
+    const rows = (d.tables.fit_custom_foods ?? []).filter((r) => r.id === args.p_id && Number(r.use_count ?? 0) > 0);
+    for (const r of rows) {
+      const prev = (args.p_prev_last_used_at as string | null) ?? null;
+      const cur = r.last_used_at as string | null;
+      r.last_used_at =
+        Number(r.use_count) <= 1 ? null : prev === null || (cur && Date.parse(prev) <= Date.parse(cur)) ? prev : cur;
+      r.use_count = Number(r.use_count) - 1;
+      r.default_meal = (args.p_prev_default_meal as string | null) ?? null;
+    }
+    return { data: rows.map((r) => ({ ...r })), error: null };
+  };
   db.rpcs.fit_mark_meal_template_used = (args, d) => {
     const rows = (d.tables.fit_meal_templates ?? []).filter((r) => r.id === args.p_id);
     for (const r of rows) {

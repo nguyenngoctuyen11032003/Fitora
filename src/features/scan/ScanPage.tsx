@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, ty
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
 import { GlassButton } from '@/components/ui/GlassButton';
+import { ConfirmDialog } from '@/components/ui/Modal';
 import { Spinner } from '@/components/ui/Spinner';
 import { useToast } from '@/components/ui/Toast';
 import { formatDayVi, todayISO } from '@/lib/date';
@@ -12,24 +13,25 @@ import { formatNumber } from '@/lib/format';
 import { captureVideoFrame, compressImage } from '@/lib/image';
 import { AiScanError, scanFood } from '@/services/ai';
 import { markCustomFoodUsed, saveScannedDishes } from '@/services/foods';
-import { addMealEntries, photoInUse, uploadMealPhoto } from '@/services/meals';
+import { addMealEntries, photoInUse, updateMeal, uploadMealPhoto } from '@/services/meals';
 import { removeImages } from '@/services/storage';
 import { MEAL_LABELS, type AiErrorCode, type CustomFood, type MealEntry, type MealType } from '@/types/db';
 import { Analysing } from './Analysing';
 import { CameraFallback, isCameraUnavailable } from './CameraFallback';
-import { buildMealEntries } from './entries';
+import { buildMealEntries, entryLinks } from './entries';
 import { parseDateParam, parseMealParam } from './meal';
 import { QuickLogSheet } from './QuickLogSheet';
 import { ReviewSheet } from './ReviewSheet';
-import { dishTotals, rankSavedFoods, rememberSignature, remembers } from './saved';
+import { dishTotals, rankSavedFoods, remembers } from './saved';
 import { SavedStrip } from './SavedStrip';
-import { fromAiDish, totals, type ScanDish } from './scale';
+import { fromAiDish, isDishValid, totals, type ScanDish } from './scale';
 import { ScanDock, type ScanMode } from './ScanDock';
 import { ScanErrorPanel } from './ScanErrorPanel';
 import { useShots, vibrate, type Shot } from './shot';
 import { UploadDropzone } from './UploadDropzone';
 import { cameraSupported, useCamera } from './useCamera';
 import { useLiveScan } from './useLiveScan';
+import { useBackGuard } from './useBackGuard';
 import { useFoodPhotoUrls, useSavedFoods } from './useSavedFoods';
 import { Viewfinder } from './Viewfinder';
 import './scan.css';
@@ -73,13 +75,20 @@ export default function ScanPage() {
   const abortRef = useRef<AbortController | null>(null);
   const uploadedPath = useRef<{ blob: Blob; path: string } | null>(null);
   const saved = useRef(false);
-  // dish key → what was remembered in "Món của tôi" (a retried save does not count twice).
-  const remembered = useRef(new Map<string, { sig: string; id: string }>());
   // Synchronous guards: state updates land a render later, a fast double tap would slip through.
   const savingRef = useRef(false);
   const capturingRef = useRef(false);
 
   const manualHref = `/food/search?meal=${meal}&date=${date}`;
+  const savedHref = `${manualHref}&tab=mine`;
+
+  /* ---------- Back button: close the result first, never lose a paid scan silently ---------- */
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const guard = useBackGuard(phase === 'review' || dishes.length > 0, () => {
+    if (savingRef.current) return;
+    if (phase === 'review') setPhase('capture');
+    else if (dishes.length) setConfirmLeave(true);
+  });
 
   /* ---------- saved foods ("Món của tôi") ---------- */
   const savedFoods = useSavedFoods();
@@ -260,6 +269,7 @@ export default function ScanPage() {
 
   const save = async () => {
     if (savingRef.current || !dishes.length) return;
+    if (dishes.some((d) => !isDishValid(d))) return; // the sheet shows what to fix
     savingRef.current = true;
     setSaving(true);
     let photoPath: string | null = null;
@@ -279,57 +289,64 @@ export default function ScanPage() {
       }
     }
 
-    // Remember the confirmed dishes in "Món của tôi" first, so the diary rows can link to them.
-    // Best-effort: a failure here must never block logging the meal.
-    const foodIds: Record<string, string> = {};
-    let rememberedNow = 0;
-    let rememberFailed = false;
-    const toRemember = dishes.filter((d) => remembers(d) && d.name.trim());
-    const fresh = toRemember.filter((d) => {
-      const prev = remembered.current.get(d.key);
-      if (prev && prev.sig === rememberSignature(d)) {
-        foodIds[d.key] = prev.id;
-        return false;
-      }
-      return true;
-    });
-    if (fresh.length) {
-      try {
-        const rows = await saveScannedDishes(fresh.map(dishTotals), { photoPath, meal });
-        rows.forEach((row, i) => {
-          foodIds[fresh[i].key] = row.id;
-          remembered.current.set(fresh[i].key, { sig: rememberSignature(fresh[i]), id: row.id });
-        });
-        rememberedNow = fresh.length;
-      } catch {
-        rememberFailed = true;
-      }
-    }
-
+    // 1. The diary rows first: a failed insert must not leave a "remembered" dish behind.
+    let inserted: MealEntry[];
     try {
-      await addMealEntries(buildMealEntries(dishes, { date, meal, photoPath, foodIds }));
-      saved.current = true;
-      // Dishes that use a saved food's numbers without being re-remembered still count as a use.
-      const linkedOnly = dishes.filter((d) => !foodIds[d.key] && d.savedFoodId).map((d) => d.savedFoodId as string);
-      if (linkedOnly.length) void markCustomFoodUsed(linkedOnly, meal);
-      notifyDataChanged('meals');
-      if (rememberedNow) notifyDataChanged('foods');
-      const kcal = formatNumber(totals(dishes).kcal);
-      const memo = rememberedNow ? ` · đã ghi nhớ ${rememberedNow} món` : '';
-      toast.success(`Đã thêm ${dishes.length} món · ${kcal} kcal vào ${MEAL_LABELS[meal].toLowerCase()}${memo}`);
-      if (photoFailed) toast.info('Không tải được ảnh — món đã được lưu không kèm ảnh.');
-      if (rememberFailed) toast.info('Chưa ghi nhớ được món vào Món của tôi — bữa ăn vẫn đã được lưu.');
-      navigate(`/diary?date=${date}`, { replace: true });
+      inserted = await addMealEntries(buildMealEntries(dishes, { date, meal, photoPath }));
     } catch (e) {
       toast.error(e);
       savingRef.current = false;
       setSaving(false);
+      return;
     }
+    saved.current = true;
+
+    // 2. Remember the confirmed dishes in "Món của tôi" (the save counts as one use) and link
+    //    the new rows to them. Best-effort: the meal is already logged.
+    let rememberedNow = 0;
+    let rememberFailed = false;
+    const fresh = dishes.filter((d) => remembers(d) && d.name.trim());
+    const foodIds: Record<string, string> = {};
+    if (fresh.length) {
+      try {
+        const rows = await saveScannedDishes(fresh.map(dishTotals), { photoPath, meal });
+        rows.forEach((row, i) => (foodIds[fresh[i].key] = row.id));
+        rememberedNow = rows.length;
+        await Promise.all(entryLinks(dishes, inserted, foodIds).map((l) => updateMeal(l.id, { custom_food_id: l.custom_food_id }).catch(() => undefined)));
+      } catch {
+        rememberFailed = true;
+      }
+    }
+    // Dishes that use a saved food's numbers without being re-remembered still count as a use.
+    const linkedOnly = dishes.filter((d) => !foodIds[d.key] && d.savedFoodId).map((d) => d.savedFoodId as string);
+    if (linkedOnly.length) void markCustomFoodUsed(linkedOnly, meal).catch(() => undefined);
+
+    notifyDataChanged('meals');
+    if (rememberedNow || linkedOnly.length) notifyDataChanged('foods');
+    const kcal = formatNumber(totals(dishes).kcal);
+    const memo = rememberedNow ? ` · đã ghi nhớ ${rememberedNow} món` : '';
+    toast.success(`Đã thêm ${dishes.length} món · ${kcal} kcal vào ${MEAL_LABELS[meal].toLowerCase()}${memo}`);
+    if (photoFailed) toast.info('Không tải được ảnh — món đã được lưu không kèm ảnh.');
+    if (rememberFailed) toast.info('Chưa ghi nhớ được món vào Món của tôi — bữa ăn vẫn đã được lưu.');
+    await guard.release();
+    navigate(`/diary?date=${date}`, { replace: true });
+  };
+
+  const leave = () => {
+    if (window.history.state && window.history.state.idx > 0) navigate(-1);
+    else navigate('/');
   };
 
   const close = () => {
-    if (window.history.state && window.history.state.idx > 0) navigate(-1);
-    else navigate('/');
+    if (dishes.length) setConfirmLeave(true);
+    else void guard.release().then(leave);
+  };
+
+  const discardAndLeave = async () => {
+    setConfirmLeave(false);
+    await guard.release();
+    setDishes([]);
+    leave();
   };
 
   /* ---------- derived UI ---------- */
@@ -340,7 +357,7 @@ export default function ScanPage() {
   const liveTotal = useMemo(() => (live.result ? totals(live.result.dishes).kcal : 0), [live.result]);
   const pendingKcal = useMemo(() => totals(dishes).kcal, [dishes]);
   const showStrip = phase === 'capture' && mode !== 'live' && !hasPending && ranked.length > 0;
-  const strip = (title?: string) => <SavedStrip foods={ranked} urls={foodPhotos} onPick={setQuickFood} allHref={manualHref} title={title} />;
+  const strip = (title?: string) => <SavedStrip foods={ranked} urls={foodPhotos} onPick={setQuickFood} allHref={savedHref} title={title} />;
   const subtitle = `${MEAL_LABELS[meal]} · ${date === todayISO() ? 'Hôm nay' : formatDayVi(date, 'short')}`;
 
   return (
@@ -387,7 +404,7 @@ export default function ScanPage() {
             <X className="h-5 w-5" />
           </GlassButton>
           <div className="min-w-0 flex-1 text-center">
-            <p className="eyebrow !text-gold">AI Scan</p>
+            <p className="eyebrow !text-gold">Quét món AI</p>
             <p className="mt-0.5 truncate text-[15px] font-bold">{subtitle}</p>
           </div>
           {usesCamera && cam.torchSupported ? (
@@ -497,6 +514,17 @@ export default function ScanPage() {
         manualHref={manualHref}
         foods={savedFoods.foods}
         rankedFoods={ranked}
+      />
+
+      <ConfirmDialog
+        open={confirmLeave}
+        danger
+        title="Bỏ kết quả quét?"
+        message={`${dishes.length} món vừa quét chưa được lưu vào nhật ký. Thoát bây giờ sẽ mất kết quả này.`}
+        confirmLabel="Bỏ kết quả"
+        cancelLabel="Ở lại"
+        onCancel={() => setConfirmLeave(false)}
+        onConfirm={() => void discardAndLeave()}
       />
 
       <QuickLogSheet

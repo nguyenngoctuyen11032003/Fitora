@@ -1,6 +1,5 @@
 import { Droplet, Flame, Utensils } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Logo } from '@/components/ui/Logo';
 import { useAuth } from '@/context/AuthContext';
 import { useProfile } from '@/context/ProfileContext';
 import { stepsKcal } from '@/lib/energy';
@@ -12,7 +11,7 @@ import { latestWeight } from '@/services/body';
 import { getDaySummary } from '@/services/summary';
 import type { DaySummary } from '@/types/db';
 
-/** Desktop-only (≥1100px) left column: logo, huge wordmark, tagline and 3 of today's numbers. */
+/** Desktop-only (≥1100px) left column: huge wordmark, tagline and 3 of today's numbers. */
 export function BrandColumn() {
   const { session } = useAuth();
   const { fit } = useProfile();
@@ -62,7 +61,6 @@ export function BrandColumn() {
 
   return (
     <aside className="hidden w-[min(440px,34vw)] shrink-0 flex-col justify-center desk:flex" aria-label="Fitora">
-      <Logo size={88} glow className="mb-8 animate-scale-in" />
       <p className="eyebrow mb-4 animate-fade-slide-up text-gold">AI Nutrition &amp; Fitness Coach</p>
       <h1 className="display animate-speed-reveal text-[128px] leading-[0.82] text-gradient">Fitora</h1>
       <p className="mt-6 max-w-[360px] animate-fade-slide-up text-[17px] leading-relaxed text-muted animate-delay-200">

@@ -23,9 +23,16 @@ describe('memorySummary', () => {
     expect(s.foodCount).toBe(4);
     expect(s.aiCount).toBe(2);
     expect(s.templateCount).toBe(1);
-    expect(s.reuses).toBe(13);
+    // manual 7 + ai (3-1) + ai 0 + meal (1-1) + template 2
+    expect(s.reuses).toBe(11);
     expect(s.topFoods).toEqual(['Sữa chua', 'Bún bò Huế', 'Cơm tấm']);
     expect(s.topTemplates).toEqual(['Sáng quen thuộc']);
+  });
+
+  it('does not count the scan / "Lưu món này" that created a saved food as a re-log', () => {
+    const s = memorySummary([food('Phở', 'ai', 1), food('Bún', 'ai', 1), food('Bánh mì', 'meal', 1)], []);
+    expect(s.reuses).toBe(0);
+    expect(memorySummary([food('Phở', 'ai', 3)], []).reuses).toBe(2);
   });
 
   it('keeps service order, skips blank and duplicate names, honours top', () => {

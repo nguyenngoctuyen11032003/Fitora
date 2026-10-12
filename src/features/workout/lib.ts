@@ -147,6 +147,35 @@ export function buildTitle(a: ActivityDef, v?: ActivityVariant): string {
   return `${a.name} · ${v.label}`.slice(0, 80);
 }
 
+/**
+ * Is `title` one the app generated for `activity` ("Chạy bộ", "Chạy bộ · 8 km/h") rather than something the user wrote?
+ * Auto titles follow the activity/intensity; hand-written ones are never touched.
+ */
+export function isAutoTitle(title: string, activity: string): boolean {
+  const t = normalizeVi(title);
+  if (!t) return true;
+  const a = findActivity(activity);
+  if (!a) return t === normalizeVi(activity);
+  const name = normalizeVi(a.name);
+  return t === name || a.variants.some((v) => t === normalizeVi(buildTitle(a, v)));
+}
+
+/**
+ * Does the title still name the activity it was made for (so it goes stale when the activity changes)?
+ * Covers generated titles and quick-log/recent ones such as "Chạy bộ 5 km".
+ */
+export function titleNamesActivity(title: string, activity: string): boolean {
+  if (isAutoTitle(title, activity)) return true;
+  const name = normalizeVi(findActivity(activity)?.name ?? activity);
+  return !!name && normalizeVi(title).startsWith(name);
+}
+
+/** Title after switching to activity `next`: kept only when the user typed it or it is unrelated to the old activity. */
+export function titleAfterPick(prevTitle: string, prevActivity: string, typed: boolean, next: ActivityDef, variant?: ActivityVariant): string {
+  const keep = !!prevTitle.trim() && (typed || !titleNamesActivity(prevTitle, prevActivity));
+  return keep ? prevTitle : buildTitle(next, variant);
+}
+
 export function categoryDefaultMet(c: WorkoutCategory): number {
   return CATEGORY_DEFAULT_MET[c] ?? 4;
 }
@@ -243,6 +272,19 @@ export function dayBurn(workouts: Pick<Workout, 'workout_on' | 'status' | 'kcal'
     plannedCount,
     plannedKcal: Math.round(plannedKcal),
   };
+}
+
+/**
+ * Names the Monday-based week starting `weekStart` relative to `today`:
+ * "tuần này", "tuần sau" or "tuần 19/10–25/10" (so a repeat never claims the wrong week).
+ */
+export function weekRangeLabel(weekStart: string, today: string): string {
+  const d = diffDays(weekStart, today); // days from the week's start to today
+  if (d >= 0 && d <= 6) return 'tuần này';
+  if (d >= -7 && d <= -1) return 'tuần sau';
+  const end = addDays(weekStart, 6);
+  const dm = (iso: string) => `${Number(iso.slice(8, 10))}/${Number(iso.slice(5, 7))}`;
+  return `tuần ${dm(weekStart)}–${dm(end)}`;
 }
 
 /** Insert row for a template applied to `date`. */
@@ -534,4 +576,15 @@ export function rankTemplates<T extends Pick<WorkoutTemplate, 'id' | 'name'>>(te
     if (la !== lb) return lb.localeCompare(la);
     return a.name.localeCompare(b.name, 'vi');
   });
+}
+
+/**
+ * Horizontal scroll offset that brings an item [itemLeft, itemLeft + itemWidth) fully into a scroller's viewport
+ * with the least movement (used by the week strip when it has to scroll in a narrow phone frame).
+ */
+export function scrollLeftToReveal(itemLeft: number, itemWidth: number, scrollLeft: number, clientWidth: number): number {
+  const right = itemLeft + itemWidth;
+  if (itemLeft < scrollLeft) return Math.max(0, itemLeft);
+  if (right > scrollLeft + clientWidth) return Math.max(0, right - clientWidth);
+  return scrollLeft;
 }

@@ -3,12 +3,14 @@ import { Minus, Plus } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { parseDecimal } from '@/lib/format';
 import { FieldShell } from './Input';
-import { clampNumber, formatNumberInput as fmt, sanitizeNumberInput } from './numberFieldLogic';
+import { clampNumber, formatNumberInput as fmt, labelText, rangeMessage, sanitizeNumberInput, stepperAriaLabel } from './numberFieldLogic';
 
 export interface NumberFieldProps {
   value: number | null;
   onChange: (value: number | null) => void;
   label?: ReactNode;
+  /** Plain-text name for the − / + buttons ("Giảm Đạm"); derived from `label` when omitted. */
+  ariaLabel?: string;
   /** Unit shown at the end of the field ("kg", "g", "kcal"). */
   unit?: ReactNode;
   hint?: ReactNode;
@@ -30,19 +32,28 @@ export interface NumberFieldProps {
   autoFocus?: boolean;
   icon?: ReactNode;
   wrapperClassName?: string;
-  /** Called on blur with the clamped value. */
+  /**
+   * Clamp an out-of-range value to [min, max] on blur (default false). By
+   * default the typed value is kept, emitted as-is and flagged inline
+   * ("Tối đa 300 kg") so a typo is never silently saved as a different number;
+   * the parent form decides whether to block saving.
+   */
+  clampOnBlur?: boolean;
+  /** Called on blur, after the value is committed. */
   onBlur?: () => void;
 }
 
 /**
  * Numeric input that accepts "68,5" or "68.5" (vi keyboards), uses
- * inputMode="decimal", clamps to [min,max] on blur and optional steppers.
+ * inputMode="decimal", flags values outside [min,max] (clamps on blur only with
+ * clampOnBlur) and optional steppers (which always stay in range).
  * ArrowUp / ArrowDown step the value (Shift = ×10).
  */
 export function NumberField({
   value,
   onChange,
   label,
+  ariaLabel,
   unit,
   hint,
   error,
@@ -59,12 +70,14 @@ export function NumberField({
   autoFocus,
   icon,
   wrapperClassName,
+  clampOnBlur = false,
   onBlur,
 }: NumberFieldProps) {
   const auto = useId();
   const fid = id ?? auto;
   const [text, setText] = useState(() => fmt(value, decimals));
   const lastEmitted = useRef<number | null>(value);
+  const [focused, setFocused] = useState(false);
 
   // External value changes (not caused by typing) re-sync the text.
   useEffect(() => {
@@ -93,8 +106,9 @@ export function NumberField({
 
   const handleBlur = () => {
     const n = parseDecimal(text);
+    setFocused(false);
     if (n !== null) {
-      const c = clamp(n);
+      const c = clampOnBlur ? clamp(n) : clampNumber(n, { decimals });
       setText(fmt(c, decimals));
       if (c !== value) emit(c);
     } else if (text) {
@@ -118,7 +132,11 @@ export function NumberField({
     bump(e.key === 'ArrowUp' ? 1 : -1, e.shiftKey ? 10 : 1);
   };
 
-  const describedBy = error ? `${fid}-err` : hint ? `${fid}-hint` : undefined;
+  // Parent errors win; otherwise flag an out-of-range value ourselves (min only once the user leaves the field).
+  const shownError =
+    error ?? rangeMessage(value, { min, max }, typeof unit === 'string' ? unit : undefined, !focused) ?? undefined;
+  const describedBy = shownError ? `${fid}-err` : hint ? `${fid}-hint` : undefined;
+  const stepName = ariaLabel ?? labelText(label);
   const atMin = min !== undefined && (value ?? min) <= min;
   const atMax = max !== undefined && value !== null && value >= max;
 
@@ -135,10 +153,11 @@ export function NumberField({
       placeholder={placeholder}
       disabled={disabled}
       autoFocus={autoFocus}
-      aria-invalid={error ? true : undefined}
+      aria-invalid={shownError ? true : undefined}
       aria-describedby={describedBy}
       onChange={(e) => handleText(e.target.value)}
       onKeyDown={onKeyDown}
+      onFocus={() => setFocused(true)}
       onBlur={handleBlur}
       className={clsx('tabular text-text', big && '!py-2 text-center !text-[44px] font-extrabold tracking-[-0.04em]')}
     />
@@ -146,7 +165,7 @@ export function NumberField({
 
   if (!stepper) {
     return (
-      <FieldShell id={fid} label={label} hint={hint} error={error} icon={icon} trailing={unit} wrapperClassName={wrapperClassName}>
+      <FieldShell id={fid} label={label} hint={hint} error={shownError} icon={icon} trailing={unit} wrapperClassName={wrapperClassName}>
         {input}
       </FieldShell>
     );
@@ -157,11 +176,11 @@ export function NumberField({
       id={fid}
       label={label}
       hint={hint}
-      error={error}
+      error={shownError}
       icon={
         <button
           type="button"
-          aria-label="Giảm"
+          aria-label={stepperAriaLabel('Giảm', stepName)}
           aria-controls={fid}
           disabled={disabled || atMin}
           onClick={() => bump(-1)}
@@ -175,7 +194,7 @@ export function NumberField({
           {unit}
           <button
             type="button"
-            aria-label="Tăng"
+            aria-label={stepperAriaLabel('Tăng', stepName)}
             aria-controls={fid}
             disabled={disabled || atMax}
             onClick={() => bump(1)}

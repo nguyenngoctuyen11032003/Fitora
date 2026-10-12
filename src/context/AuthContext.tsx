@@ -5,7 +5,7 @@ import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase';
 import { signOut as authSignOut, verifyEmailLink } from '@/services/auth';
 import { forgetSignedUrls } from '@/services/storage';
-import { linkErrorMessage, readAuthRedirect } from './authLinks';
+import { linkErrorMessage, linkNeedsConfirm, readAuthRedirect } from './authLinks';
 
 export interface AuthState {
   session: Session | null;
@@ -28,6 +28,8 @@ interface BootResult {
   recovery: boolean;
   navTo: string | null;
   toast: { kind: 'success' | 'error'; message: unknown } | null;
+  /** A token_hash link found while someone is signed in: spent only after the user confirms. */
+  pending: { tokenHash: string; type: string } | null;
 }
 
 /**
@@ -38,10 +40,22 @@ interface BootResult {
 let bootPromise: Promise<BootResult> | null = null;
 let bootApplied = false;
 
+/** Spend a token_hash e-mail link with verifyOtp and say where to go next. */
+async function spendLink(tokenHash: string, type: string, current: Session | null): Promise<Partial<BootResult>> {
+  try {
+    const data = await verifyEmailLink(tokenHash, type);
+    const session = data?.session ?? current;
+    if (type === 'recovery') return { session, recovery: true, navTo: '/reset' };
+    return { session, toast: { kind: 'success', message: WELCOME }, navTo: session ? '/' : '/login' };
+  } catch (e) {
+    return { session: current, toast: { kind: 'error', message: e }, navTo: type === 'recovery' ? '/forgot' : '/login' };
+  }
+}
+
 // Mirrors Note_mytasks/src/main.js boot(): PKCE ?code is exchanged inside getSession();
 // token_hash links (custom e-mail templates) are spent here with verifyOtp.
 async function boot(client: SupabaseClient): Promise<BootResult> {
-  const out: BootResult = { session: null, recovery: false, navTo: null, toast: null };
+  const out: BootResult = { session: null, recovery: false, navTo: null, toast: null, pending: null };
   try {
     out.session = (await client.auth.getSession()).data.session;
   } catch (e) {
@@ -57,20 +71,9 @@ async function boot(client: SupabaseClient): Promise<BootResult> {
   const { tokenHash, type, flow, hadCode, errorCode, errorDescription } = link;
 
   if (tokenHash && type) {
-    try {
-      const data = await verifyEmailLink(tokenHash, type);
-      out.session = data?.session ?? out.session;
-      if (type === 'recovery') {
-        out.recovery = true;
-        out.navTo = '/reset';
-      } else {
-        out.toast = { kind: 'success', message: WELCOME };
-        out.navTo = out.session ? '/' : '/login';
-      }
-    } catch (e) {
-      out.toast = { kind: 'error', message: e };
-      out.navTo = type === 'recovery' ? '/forgot' : '/login';
-    }
+    // Login CSRF: an attacker's link must not silently replace the signed-in account.
+    if (linkNeedsConfirm(Boolean(out.session), tokenHash, type)) out.pending = { tokenHash, type };
+    else Object.assign(out, await spendLink(tokenHash, type, out.session));
   } else if (flow === 'recovery' && hadCode && out.session) {
     // Legacy PKCE recovery link: PASSWORD_RECOVERY fired inside getSession() before we subscribed.
     out.recovery = true;
@@ -140,6 +143,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession((prev) => (prev?.access_token === s?.access_token ? prev : s));
     });
 
+    const applyEffects = (r: Pick<BootResult, 'recovery' | 'toast' | 'navTo'>) => {
+      if (r.recovery) setRecovery(true);
+      if (r.toast) {
+        if (r.toast.kind === 'success') toastRef.current.success(String(r.toast.message));
+        else toastRef.current.error(r.toast.message);
+      }
+      if (r.navTo) go(r.navTo);
+    };
+
     bootPromise ??= boot(client);
     bootPromise
       .then((r) => {
@@ -147,12 +159,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const first = !bootApplied;
         bootApplied = true;
         if (first) {
-          if (r.recovery) setRecovery(true);
-          if (r.toast) {
-            if (r.toast.kind === 'success') toastRef.current.success(String(r.toast.message));
-            else toastRef.current.error(r.toast.message);
+          applyEffects(r);
+          if (r.pending) {
+            const { tokenHash, type } = r.pending;
+            const who = r.session?.user.email;
+            toastRef.current.show(
+              `${who ? `Bạn đang đăng nhập bằng ${who}. ` : ''}Mở liên kết trong email sẽ chuyển sang tài khoản khác. Chỉ tiếp tục nếu chính bạn vừa yêu cầu liên kết này.`,
+              {
+                kind: 'info',
+                duration: 0,
+                action: {
+                  label: 'Tiếp tục',
+                  onClick: () => {
+                    void spendLink(tokenHash, type, r.session).then((out) => {
+                      applyEffects({ recovery: out.recovery ?? false, toast: out.toast ?? null, navTo: out.navTo ?? null });
+                      if (out.session) setSession(out.session);
+                    });
+                  },
+                },
+              },
+            );
           }
-          if (r.navTo) go(r.navTo);
         }
         setSession((prev) => (eventSeen ? prev : r.session));
         setLoading(false);

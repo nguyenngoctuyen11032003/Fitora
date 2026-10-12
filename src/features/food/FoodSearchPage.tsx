@@ -13,7 +13,7 @@ import { listMealsRange } from '@/services/meals';
 import { MEAL_LABELS, MEAL_TYPES, type CustomFood, type MealEntry, type MealTemplate, type MealType } from '@/types/db';
 import { CustomFoodSheet } from './components/CustomFoodSheet';
 import { FoodSheet } from './components/FoodSheet';
-import { MealTemplatesSheet } from './components/MealTemplatesSheet';
+import { MealTemplatesSheet, TemplateDupDialog } from './components/MealTemplatesSheet';
 import { FoodThumb, useMealPhotoUrls } from './components/parts';
 import { QuickAddSheet } from './components/QuickAddSheet';
 import {
@@ -27,18 +27,20 @@ import {
   highlightParts,
   MEAL_SHORT,
   mealSuggestions,
+  parseListTab,
   parseMeal,
   recentFoods,
   searchFoods,
   templatesForMeal,
   usageLabel,
   withDbAliases,
+  type FoodListTab,
   type FoodOption,
 } from './lib';
 import { deferredDelete } from './undo';
 import { useMealTemplates, useQuickLog, type LogCallbacks } from './useSmartLog';
 
-type Tab = 'suggest' | 'mine' | 'popular';
+type Tab = FoodListTab;
 
 const DB_OPTIONS: FoodOption[] = FOODS.map(fromDbFood);
 const POPULAR: FoodOption[] = POPULAR_FOOD_IDS.map((id) => FOOD_BY_ID[id]).filter(Boolean).map(fromDbFood);
@@ -47,7 +49,7 @@ const isWeight = (u: string) => u === 'g' || u === 'ml';
 export default function FoodSearchPage() {
   const toast = useToast();
   const navigate = useNavigate();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const today = todayISO();
   const asked = params.get('date');
   const date = isISODate(asked) && asked < today ? asked : today;
@@ -57,7 +59,23 @@ export default function FoodSearchPage() {
 
   const [query, setQuery] = useState('');
   const q = useDebounced(query.trim(), 150);
-  const [tab, setTab] = useState<Tab>('suggest');
+  // ?tab=mine|popular|suggest (Profile / Reports / menu "Món của tôi") picks the first tab; switching keeps it in the URL.
+  const urlTab = parseListTab(params.get('tab'));
+  const [tab, setTabState] = useState<Tab>(() => urlTab ?? 'suggest');
+  const setTab = useCallback(
+    (t: Tab) => {
+      setTabState(t);
+      setParams(
+        (prev) => {
+          const n = new URLSearchParams(prev);
+          n.set('tab', t);
+          return n;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
   const inputRef = useRef<HTMLInputElement>(null);
 
   const history = useAsync(() => listMealsRange(addDays(today, -60), today), [today]);
@@ -99,11 +117,17 @@ export default function FoodSearchPage() {
   // Brand-new account (nothing to suggest yet) → start on "Phổ biến".
   const personalLoading = history.loading || customs.loading || tpl.loading;
   const nothingPersonal = !personalLoading && !suggestions.length && !recent.length && !mealTemplates.length;
-  const autoSwitched = useRef(false);
+  const autoSwitched = useRef(urlTab !== null); // an explicit ?tab wins
+  // The menu / Profile "Món của tôi" link while this page is already open only changes the URL.
+  useEffect(() => {
+    if (!urlTab) return;
+    autoSwitched.current = true;
+    setTabState(urlTab);
+  }, [urlTab]);
   useEffect(() => {
     if (nothingPersonal && !autoSwitched.current) {
       autoSwitched.current = true;
-      setTab((t) => (t === 'suggest' ? (savedFoods.length || tpl.templates.length ? 'mine' : 'popular') : t));
+      setTabState((t) => (t === 'suggest' ? (savedFoods.length || tpl.templates.length ? 'mine' : 'popular') : t));
     }
   }, [nothingPersonal, savedFoods.length, tpl.templates.length]);
 
@@ -111,7 +135,8 @@ export default function FoodSearchPage() {
   const [picked, setPicked] = useState<{ option: FoodOption; quantity: number; unit: string } | null>(null);
   const [quickOpen, setQuickOpen] = useState(false);
   const [customSheet, setCustomSheet] = useState<{ food: CustomFood | null } | null>(null);
-  const [templatesOpen, setTemplatesOpen] = useState(false);
+  // ?templates=1 → open the Bữa mẫu sheet straight away.
+  const [templatesOpen, setTemplatesOpen] = useState(() => !!params.get('templates'));
   const [added, setAdded] = useState(0);
 
   const onFoodUsed = useCallback(
@@ -333,7 +358,11 @@ export default function FoodSearchPage() {
         />
       )}
 
-      <section aria-live="polite" aria-label={q ? `Kết quả cho ${q}` : 'Danh sách món'} className="mt-4">
+      {/* Only a short summary is announced, never the whole list (screen readers would read every row on each keystroke). */}
+      <p role="status" className="sr-only">
+        {q && !personalLoading ? (results.length > 0 ? `${results.length} kết quả cho “${q}”` : `Không thấy “${q}”`) : ''}
+      </p>
+      <section aria-label={q ? `Kết quả cho ${q}` : 'Danh sách món'} className="mt-4">
         {q ? (
           results.length > 0 ? (
             <>
@@ -484,13 +513,25 @@ export default function FoodSearchPage() {
       />
       <MealTemplatesSheet
         open={templatesOpen}
-        onClose={() => setTemplatesOpen(false)}
+        onClose={() => {
+          setTemplatesOpen(false);
+          if (params.get('templates'))
+            setParams(
+              (prev) => {
+                const n = new URLSearchParams(prev);
+                n.delete('templates');
+                return n;
+              },
+              { replace: true },
+            );
+        }}
         templates={tpl.templates}
         meal={meal}
         onLog={(t, at) => logTemplate(t, at)}
         onRename={(t, patch) => tpl.rename(t, patch)}
         onDelete={tpl.remove}
       />
+      <TemplateDupDialog prompt={tpl.dupPrompt} />
     </Page>
   );
 }

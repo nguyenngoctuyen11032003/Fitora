@@ -35,6 +35,7 @@ import {
   toInsert,
   toPatch,
   weekDays,
+  weekRangeLabel,
   workoutFromTemplate,
 } from './lib';
 import { RepeatSheet } from './RepeatSheet';
@@ -341,6 +342,9 @@ export default function WorkoutPage() {
   // ---- repeat to next week ------------------------------------------------
   const [repeatOpen, setRepeatOpen] = useState(false);
   const [repeating, setRepeating] = useState<'day' | 'week' | null>(null);
+  // Sessions that would really be copied: days already past are skipped.
+  const repeatableDay = useMemo(() => planCopies(sessions, [], 7, { minDate: today }).length, [sessions, today]);
+  const repeatableWeek = useMemo(() => planCopies(workouts, [], 7, { minDate: today }).length, [workouts, today]);
   const repeat = async (scope: 'day' | 'week') => {
     const sources = scope === 'day' ? sessions : workouts;
     if (!sources.length) return;
@@ -356,7 +360,7 @@ export default function WorkoutPage() {
       const existing = await listWorkouts(from, to);
       const rows = planCopies(sources, existing, 7, { weightKg: weight.kg, minDate: today });
       if (!rows.length) {
-        toast.info(planCopies(sources, existing, 7).length ? 'Các ngày còn lại đã qua — không có gì để lên lịch.' : 'Tuần sau đã có đủ các buổi này rồi.');
+        toast.info(planCopies(sources, existing, 7).length ? 'Các ngày còn lại đã qua — không có gì để lên lịch.' : scope === 'day' ? 'Ngày đó đã có đủ các buổi này rồi.' : 'Tuần đó đã có đủ các buổi này rồi.');
         setRepeatOpen(false);
         return;
       }
@@ -373,12 +377,12 @@ export default function WorkoutPage() {
       }
       if (ok) notifyDataChanged('workouts');
       setRepeatOpen(false);
-      const target = scope === 'day' ? from : addDays(selected, 7);
+      const target = addDays(selected, 7);
       if (failure) {
         toast.error(ok ? `Mới lên lịch được ${ok}/${rows.length} buổi — thử lại để thêm phần còn lại.` : failure);
         return;
       }
-      toast.show(`Đã lên lịch ${ok} buổi cho tuần sau.`, { kind: 'success', action: { label: 'Xem', onClick: () => setSelected(target) } });
+      toast.show(`Đã lên lịch ${ok} buổi cho ${scope === 'day' ? formatDayVi(from).toLowerCase() : weekRangeLabel(from, today)}.`, { kind: 'success', action: { label: 'Xem', onClick: () => setSelected(target) } });
     } catch (e) {
       toast.error(e);
     } finally {
@@ -453,8 +457,8 @@ export default function WorkoutPage() {
               <button
                 type="button"
                 onClick={() => setRepeatOpen(true)}
-                aria-label="Lặp lại sang tuần sau"
-                title="Lặp lại sang tuần sau"
+                aria-label="Lặp lại sang tuần kế tiếp"
+                title="Lặp lại sang tuần kế tiếp"
                 className="glass circle text-text"
               >
                 <Repeat className="h-[18px] w-[18px]" />
@@ -574,10 +578,11 @@ export default function WorkoutPage() {
         open={repeatOpen}
         onClose={() => setRepeatOpen(false)}
         selected={selected}
+        today={today}
         weekStart={weekStart}
         weekEnd={weekEnd}
-        dayCount={sessions.length}
-        weekCount={workouts.length}
+        dayCount={repeatableDay}
+        weekCount={repeatableWeek}
         repeating={repeating}
         onRepeat={(scope) => void repeat(scope)}
       />

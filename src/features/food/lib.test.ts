@@ -17,6 +17,7 @@ import {
   optionForEdit,
   servingProblem,
   withEntryUnit,
+  defaultPortion,
   fromCustomFood,
   fromDbFood,
   fromEntry,
@@ -477,5 +478,62 @@ describe('diary helpers', () => {
   it('sortByLogged keeps an edited entry in place', () => {
     const rows = [entry({ id: 'x', created_at: '2026-10-09T07:00:00Z' }), entry({ id: 'y', created_at: '2026-10-09T05:00:00Z' })];
     expect(sortByLogged(rows).map((r) => r.id)).toEqual(['y', 'x']);
+  });
+});
+
+describe('saved food serving labels', () => {
+  const base: CustomFood = {
+    id: 'cf1',
+    user_id: 'u',
+    name: 'Sữa tươi',
+    brand: null,
+    serving_label: '250 ml',
+    serving_grams: 250,
+    kcal_100g: 60,
+    protein_100g: 3,
+    carbs_100g: 5,
+    fat_100g: 3,
+    fiber_100g: 0,
+    source: 'manual',
+    photo_path: null,
+    use_count: 0,
+    last_used_at: null,
+    default_meal: null,
+    created_at: '2026-10-01T00:00:00Z',
+    updated_at: '2026-10-01T00:00:00Z',
+  };
+
+  it('a weight / volume label becomes unit g / ml with the serving as the quantity (not a unit called "100 g")', () => {
+    const o = fromCustomFood(base);
+    expect(o.defaultUnit).toBe('ml');
+    expect(o.units).toEqual([{ unit: 'ml', grams: 1 }]);
+    expect(defaultPortion(o)).toEqual({ quantity: 250, unit: 'ml' });
+    const row = toNewEntry(o, 250, 'ml', 'snack', '2026-10-09');
+    expect(row.unit).toBe('ml');
+    expect(row.kcal).toBe(150);
+    expect(unitOptions(o).map((u) => u.unit)).toEqual(['ml']);
+
+    const g = fromCustomFood({ ...base, serving_label: '100 g', serving_grams: 100 });
+    expect(g.defaultUnit).toBe('g');
+    expect(defaultPortion(g)).toEqual({ quantity: 100, unit: 'g' });
+    expect(fromCustomFood({ ...base, serving_label: '30gr', serving_grams: 30 }).defaultUnit).toBe('g');
+  });
+
+  it('a counted label keeps its count: "2 lát" = 2 lát, grams per lát', () => {
+    const o = fromCustomFood({ ...base, serving_label: '2 lát', serving_grams: 60 });
+    expect(o.units).toEqual([{ unit: 'lát', grams: 30 }]);
+    expect(defaultPortion(o)).toEqual({ quantity: 2, unit: 'lát' });
+    expect(toNewEntry(o, 2, 'lát', 'snack', '2026-10-09').grams).toBe(60);
+    const bowl = fromCustomFood({ ...base, serving_label: '1 bát', serving_grams: 300 });
+    expect(defaultPortion(bowl)).toEqual({ quantity: 1, unit: 'bát' });
+    expect(defaultPortion(fromCustomFood({ ...base, serving_label: '1 phần', serving_grams: 300 }))).toEqual({ quantity: 1, unit: 'phần' });
+  });
+
+  it('per-100 g values keep 2 decimals so one serving re-logs as typed', () => {
+    const per = per100FromServing({ kcal: 650, protein: 35, carbs: 70, fat: 20, fiber: 4 }, 450);
+    expect(per.protein).toBe(7.78);
+    const back = perServingFromPer100(per, 450);
+    expect(back.kcal).toBe(650);
+    expect(back.protein).toBe(35);
   });
 });

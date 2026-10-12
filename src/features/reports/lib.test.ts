@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RangeSummaryRow } from '@/types/db';
+import { addDays } from '@/lib/date';
 import {
   buildReport,
   dayExpenditure,
@@ -116,16 +117,43 @@ describe('buildReport', () => {
     expect(s.days[6].kcalIn).toBeNull();
   });
 
-  it("today's step kcal uses the latest weigh-in overall (refWeightKg), past days the period weight", () => {
-    // Past period (no today inside) with an in-range weigh-in of 70 kg; latest overall is 80 kg.
+  it('one weight for every day: the latest weigh-in overall (refWeightKg), same as Today / Diary / Workout', () => {
+    // An in-range weigh-in of 70 kg must NOT change past days: the latest overall (80 kg) rules them all.
     const rows = [
       row('2026-10-05', { steps: 7000, weight_kg: 70 }),
       row('2026-10-09', { steps: 7000 }), // today
     ];
     const s = buildReport({ ...base, rows, profile });
-    expect(s.days[0].stepsKcal).toBe(280); // 7000*0.04*70/70
+    expect(s.days[0].stepsKcal).toBe(320); // 7000*0.04*80/70
     expect(s.days[4].isToday).toBe(true);
-    expect(s.days[4].stepsKcal).toBe(320); // 7000*0.04*80/70, same as Today/Workout
+    expect(s.days[4].stepsKcal).toBe(320);
+  });
+
+  it('the same past day gives the same burned / budget / expenditure in a week view and a month view', () => {
+    const month = { from: '2026-10-01', to: '2026-10-31', period: 'month' as const, today: '2026-10-12', refWeightKg: 76.6 };
+    const week = { from: '2026-10-05', to: '2026-10-11', period: 'week' as const, today: '2026-10-12', refWeightKg: 76.6 };
+    const rows = [
+      row('2026-10-02', { kcal_in: 1800, steps: 9000, workout_kcal: 300, weight_kg: 79 }),
+      row('2026-10-09', { kcal_in: 1520, steps: 8700, workout_kcal: 790, weight_kg: 76.8 }),
+      row('2026-10-12', { kcal_in: 800, weight_kg: 76.6 }),
+    ];
+    const m = buildReport({ ...month, rows, profile });
+    const w = buildReport({ ...week, rows, profile });
+    const dm = m.days.find((d) => d.day === '2026-10-09')!;
+    const dw = w.days.find((d) => d.day === '2026-10-09')!;
+    expect(dw.burned).toBe(dm.burned);
+    expect(dw.budget).toBe(dm.budget);
+    expect(dw.expenditure).toBe(dm.expenditure);
+    expect(w.maintenance).toBe(m.maintenance);
+  });
+
+  it('falls back to the in-range weigh-in, then the start weight, when there is no reference weight', () => {
+    const rows = [row('2026-10-05', { kcal_in: 2000, weight_kg: 90 })];
+    const withIn = buildReport({ ...base, rows, profile, refWeightKg: null });
+    expect(withIn.days[0].stepsKcal).toBe(0);
+    expect(withIn.maintenance).toBe(2219); // 90 kg
+    const none = buildReport({ ...base, rows: [row('2026-10-05', { kcal_in: 2000 })], profile, refWeightKg: null });
+    expect(none.maintenance).not.toBeNull(); // start weight 80
   });
 
   it('computes balance vs estimated expenditure, only over complete logged days', () => {
@@ -193,11 +221,36 @@ describe('buildReport', () => {
     expect(s.longestStreak).toBe(3); // still a logged day for the streak
   });
 
-  it('uses the weigh-in of the period for maintenance (not only the latest overall)', () => {
+  it('maintenance follows the reference weight, not the weigh-ins inside the period', () => {
     const rows = [row('2026-10-05', { kcal_in: 2000, weight_kg: 90 })];
     const s = buildReport({ ...base, rows, profile, refWeightKg: 70 });
-    // 10*90 + 1093.75 − 150 + 5 = 1848.75 → 1849 × 1.2 = 2219
-    expect(s.maintenance).toBe(2219);
+    // 10*70 + 1093.75 − 150 + 5 = 1648.75 → 1649 × 1.2 = 1979
+    expect(s.maintenance).toBe(1979);
+  });
+
+  describe('current streak', () => {
+    const t = '2026-10-12';
+    const mk = (from: string, to: string, period: 'week' | 'month') => ({ from, to, period, today: t, refWeightKg: 76, profile });
+    // 14 consecutive logged days: 29/09 … 12/10.
+    const history = Array.from({ length: 14 }, (_, i) => row(addDays('2026-09-29', i), { kcal_in: 1500 }));
+    it('is the real streak (looks before the period start), like Today', () => {
+      expect(history[0].day).toBe('2026-09-29');
+      expect(history[13].day).toBe('2026-10-12');
+      const month = buildReport({ ...mk('2026-10-01', '2026-10-31', 'month'), rows: history.filter((r) => r.day >= '2026-10-01'), streakRows: history });
+      expect(month.currentStreak).toBe(14);
+      const week = buildReport({ ...mk('2026-10-12', '2026-10-18', 'week'), rows: history.filter((r) => r.day >= '2026-10-12'), streakRows: history });
+      expect(week.currentStreak).toBe(14);
+    });
+    it('an empty today does not break it; a gap yesterday does', () => {
+      const noToday = history.filter((r) => r.day !== t);
+      expect(buildReport({ ...mk('2026-10-01', '2026-10-31', 'month'), rows: noToday, streakRows: noToday }).currentStreak).toBe(13);
+      const gap = history.filter((r) => r.day !== '2026-10-11');
+      expect(buildReport({ ...mk('2026-10-01', '2026-10-31', 'month'), rows: gap, streakRows: gap }).currentStreak).toBe(1);
+    });
+    it('a past period has no current streak', () => {
+      const s = buildReport({ ...mk('2026-10-05', '2026-10-11', 'week'), rows: history, streakRows: history });
+      expect(s.currentStreak).toBe(0);
+    });
   });
 
   it('counts on-target days against target + burned (±10%)', () => {

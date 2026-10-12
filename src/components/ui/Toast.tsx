@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { errorMessage } from '@/services/errors';
 import { Portal } from './Portal';
+import { claimToastAction } from './toastGuard';
 
 export type ToastKind = 'success' | 'error' | 'info';
 
@@ -43,6 +44,8 @@ const COLORS = { success: 'text-ok', error: 'text-[var(--danger-text)]', info: '
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
   const seq = useRef(0);
+  // Toasts whose action already ran: a double-tap during the fade-out must not run it twice.
+  const fired = useRef(new Set<number>());
   // Mirror of the visible items so show() can de-duplicate synchronously.
   const live = useRef<ToastItem[]>([]);
   live.current = items;
@@ -153,8 +156,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   if (!e.currentTarget.contains(e.relatedTarget as Node | null)) resume(t.id);
                 }}
                 className={clsx(
-                  'glass-strong pointer-events-auto flex w-full max-w-[380px] items-center gap-3 rounded-2xl bg-[rgba(24,14,10,0.94)] py-2.5 pl-4 pr-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.45)] transition-[opacity,transform] duration-200',
-                  t.leaving ? '-translate-y-2 opacity-0' : 'animate-drop-in',
+                  'glass-strong flex w-full max-w-[380px] items-center gap-3 rounded-2xl bg-[rgba(24,14,10,0.94)] py-2.5 pl-4 pr-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.45)] transition-[opacity,transform] duration-200',
+                  t.leaving ? 'pointer-events-none -translate-y-2 opacity-0' : 'pointer-events-auto animate-drop-in',
                 )}
               >
                 <Icon className={clsx('h-5 w-5 shrink-0', COLORS[t.kind])} aria-hidden="true" />
@@ -163,7 +166,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   <button
                     type="button"
                     onClick={() => {
-                      t.action?.onClick();
+                      if (claimToastAction(fired.current, t.id)) t.action?.onClick();
                       dismiss(t.id);
                     }}
                     className="min-h-[44px] shrink-0 rounded-full px-3 text-sm font-bold text-gold hover:bg-white/5"

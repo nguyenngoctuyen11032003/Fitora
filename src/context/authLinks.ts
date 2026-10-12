@@ -91,5 +91,17 @@ export function linkErrorMessage(code: string | null, description: string | null
   // Raw provider text is English ('Email link is invalid or has expired'): map it.
   const mapped = toFitError({ message: text });
   if (mapped.code !== 'unknown' && mapped.code !== 'network') return mapped.message;
-  return /[À-ỹ]/.test(text) ? text : 'Liên kết không hợp lệ hoặc đã hết hạn. Hãy yêu cầu liên kết mới.';
+  // Never echo text taken from the URL: anyone can craft a link that makes the app display it.
+  return GENERIC_LINK_ERROR;
+}
+
+const GENERIC_LINK_ERROR = 'Liên kết không hợp lệ hoặc đã hết hạn. Hãy yêu cầu liên kết mới.';
+
+/**
+ * A token_hash link needs no PKCE verifier, so it works in any browser: spending one while
+ * someone is already signed in would silently swap that session for the link owner's account
+ * (login CSRF). The caller must ask first when this returns true.
+ */
+export function linkNeedsConfirm(hasSession: boolean, tokenHash: string | null, type: string | null): boolean {
+  return hasSession && Boolean(tokenHash && type);
 }
