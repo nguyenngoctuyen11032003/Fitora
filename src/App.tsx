@@ -147,12 +147,18 @@ function ProfileLoadError({ error }: { error: unknown }) {
 /** Public auth pages: bounce signed-in users home (except during password recovery). */
 function PublicOnly() {
   const { session, loading, recovery } = useAuth();
+  const plan = usePlan();
   const location = useLocation();
   const signedOut = !loading && !session;
   // On the auth screens, the next screens are almost always Today (after sign-in) or Register.
   useEffect(() => (signedOut ? prefetchOnIdle(['/', '/register', '/onboarding'], 2500) : undefined), [signedOut]);
   if (loading) return <Splash />;
-  if (session && !recovery) return <Navigate to={returnPath(location.state)} replace />;
+  if (session && !recovery) {
+    // Admins land on the console after signing in (unless they were sent here from a specific page).
+    if (plan.loading) return <Splash />;
+    const back = returnPath(location.state);
+    return <Navigate to={plan.isAdmin && back === '/' ? '/admin' : back} replace />;
+  }
   return (
     <Suspense fallback={<Splash />}>
       <Outlet />
