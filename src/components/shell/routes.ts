@@ -21,6 +21,7 @@ export const ROUTE_LOADERS = {
   '/progress': () => import('@/features/reports/ReportsPage'),
   '/body': () => import('@/features/body/BodyPage'),
   '/profile': () => import('@/features/profile/ProfilePage'),
+  '/admin': () => import('@/features/admin/AdminPage'),
 } satisfies Record<string, Loader>;
 
 export type RoutePath = keyof typeof ROUTE_LOADERS;

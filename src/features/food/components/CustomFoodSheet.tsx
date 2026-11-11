@@ -1,9 +1,12 @@
-import { Trash2 } from 'lucide-react';
+import { Camera, ImagePlus, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { compressImage } from '@/lib/image';
 import { BottomSheet, Button, GlassButton, Input, NumberField, useToast } from '@/components/ui';
 import { notifyDataChanged } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
 import { createCustomFood, updateCustomFood } from '@/services/foods';
+import { schedulePhotoCleanup, uploadMealPhoto } from '@/services/meals';
+import { signedUrl } from '@/services/storage';
 import { CUSTOM_FOOD_SOURCE_LABELS, type CustomFood } from '@/types/db';
 import { kcalFromMacros, kcalMismatch, per100FromServing, perServingFromPer100, servingProblem, usageLabel } from '../lib';
 
@@ -37,6 +40,12 @@ export function CustomFoodSheet({ open, onClose, initialName, food: editing, onS
   const [c, setC] = useState<number | null>(null);
   const [f, setF] = useState<number | null>(null);
   const [fiber, setFiber] = useState<number | null>(null);
+  // Photo: the saved one (path), a newly picked one (blob, uploaded on save) or none.
+  const [photoPath, setPhotoPath] = useState<string | null>(null);
+  const [newPhoto, setNewPhoto] = useState<Blob | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [tried, setTried] = useState(false);
   const [saving, setSaving] = useState(false);
   // Synchronous guard: two taps in the same frame both see saving === false.
@@ -59,7 +68,9 @@ export function CustomFoodSheet({ open, onClose, initialName, food: editing, onS
       setC(v1(per.carbs));
       setF(v1(per.fat));
       setFiber(v1(per.fiber));
+      setPhotoPath(editing.photo_path);
     } else {
+      setPhotoPath(null);
       setName(initialName ?? '');
       setBrand('');
       setLabel('1 phần');
@@ -70,11 +81,51 @@ export function CustomFoodSheet({ open, onClose, initialName, food: editing, onS
       setF(null);
       setFiber(null);
     }
+    setNewPhoto(null);
     setTried(false);
     setSaving(false);
     busy.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialName, editing?.id]);
+
+  // Preview of the picked photo (object URL) or of the saved one (signed URL).
+  useEffect(() => {
+    if (!open) return;
+    if (newPhoto) {
+      const url = URL.createObjectURL(newPhoto);
+      setPhotoUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }
+    if (!photoPath) {
+      setPhotoUrl(null);
+      return;
+    }
+    let alive = true;
+    signedUrl(photoPath)
+      .then((u) => alive && setPhotoUrl(u))
+      .catch(() => alive && setPhotoUrl(null));
+    return () => {
+      alive = false;
+    };
+  }, [open, newPhoto, photoPath]);
+
+  const pickPhoto = async (file: File | undefined) => {
+    if (!file) return;
+    setPhotoBusy(true);
+    try {
+      const c = await compressImage(file, { maxSide: 1024, quality: 0.8 });
+      setNewPhoto(c.blob);
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setPhotoBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+  const clearPhoto = () => {
+    setNewPhoto(null);
+    setPhotoPath(null);
+  };
 
   const fromMacros = kcalFromMacros(p ?? 0, c ?? 0, f ?? 0);
   const finalKcal = kcal ?? (fromMacros > 0 ? fromMacros : null);
@@ -90,7 +141,9 @@ export function CustomFoodSheet({ open, onClose, initialName, food: editing, onS
     busy.current = true;
     setSaving(true);
     const per100 = per100FromServing({ kcal: finalKcal, protein: p ?? 0, carbs: c ?? 0, fat: f ?? 0, fiber: fiber ?? 0 }, grams!);
+    let uploaded: string | null = null;
     try {
+      if (newPhoto) uploaded = await uploadMealPhoto(newPhoto);
       const values = {
         name: name.trim(),
         brand: brand.trim() || null,
@@ -101,13 +154,17 @@ export function CustomFoodSheet({ open, onClose, initialName, food: editing, onS
         carbs_100g: per100.carbs,
         fat_100g: per100.fat,
         fiber_100g: per100.fiber,
+        photo_path: uploaded ?? photoPath,
       };
       const food = editing ? await updateCustomFood(editing.id, values) : await createCustomFood(values);
+      // A replaced / removed photo is cleaned up unless something else still uses it.
+      if (editing?.photo_path && editing.photo_path !== food.photo_path) schedulePhotoCleanup(editing.photo_path);
       toast.success(editing ? `Đã cập nhật “${food.name}”.` : `Đã lưu “${food.name}” vào Món của tôi.`);
       notifyDataChanged('foods');
       onSaved(food, editing ? 'edit' : 'add');
       onClose();
     } catch (e) {
+      if (uploaded) schedulePhotoCleanup(uploaded, 0);
       toast.error(e);
       busy.current = false;
       setSaving(false);
@@ -145,6 +202,28 @@ export function CustomFoodSheet({ open, onClose, initialName, food: editing, onS
           void save();
         }}
       >
+        <div className="flex items-center gap-3">
+          {photoUrl ? (
+            <img src={photoUrl} alt="Ảnh món" className="h-20 w-20 shrink-0 rounded-2xl border border-line object-cover" />
+          ) : (
+            <span aria-hidden="true" className="grid h-20 w-20 shrink-0 place-items-center rounded-2xl border border-dashed border-line bg-white/[0.04] text-muted">
+              <Camera className="h-6 w-6" />
+            </span>
+          )}
+          <div className="flex min-w-0 flex-col items-start gap-1">
+            <GlassButton variant="pill" onClick={() => fileRef.current?.click()} disabled={photoBusy || saving}>
+              <ImagePlus className="h-4 w-4 text-gold" aria-hidden="true" />
+              {photoBusy ? 'Đang xử lý…' : photoUrl ? 'Đổi ảnh' : 'Thêm ảnh'}
+            </GlassButton>
+            {photoUrl && (
+              <button type="button" onClick={clearPhoto} disabled={saving} className="inline-flex min-h-[36px] items-center gap-1 rounded-full px-2 text-[13px] font-semibold text-muted hover:text-text">
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+                Xóa ảnh
+              </button>
+            )}
+          </div>
+          <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => void pickPhoto(e.target.files?.[0])} />
+        </div>
         <Input label="Tên món" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} placeholder="VD: Sữa chua Hy Lạp" error={nameErr} autoComplete="off" />
         <Input label="Thương hiệu (tuỳ chọn)" value={brand} onChange={(e) => setBrand(e.target.value)} maxLength={80} autoComplete="off" />
         <div className="grid grid-cols-2 gap-2">

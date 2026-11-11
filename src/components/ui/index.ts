@@ -13,6 +13,7 @@ export { MACROS, MacroBar, type MacroBarProps, type MacroValues } from './MacroB
 export { ConfirmDialog, Modal, type ConfirmDialogProps, type ModalProps } from './Modal';
 export { NumberField, type NumberFieldProps } from './NumberField';
 export { OVERLAY_ROOT_ID, Portal } from './Portal';
+export { PlanPill, ProRing } from './PlanBadge';
 export { ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { Ring, type RingProps } from './Ring';
 export { ScreenHeader, type ScreenHeaderProps } from './ScreenHeader';

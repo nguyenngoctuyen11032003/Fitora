@@ -9,6 +9,7 @@ import { Logo } from '@/components/ui/Logo';
 import { PageSkeleton } from '@/components/ui/Skeleton';
 import { ToastProvider } from '@/components/ui/Toast';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { PlanProvider, usePlan } from '@/context/PlanContext';
 import { ProfileProvider, useProfile } from '@/context/ProfileContext';
 import { Button } from '@/components/ui/Button';
 import { returnPath } from '@/features/auth/redirect';
@@ -31,6 +32,7 @@ const WorkoutPage = lazy(ROUTE_LOADERS['/workout']);
 const ReportsPage = lazy(ROUTE_LOADERS['/progress']);
 const BodyPage = lazy(ROUTE_LOADERS['/body']);
 const ProfilePage = lazy(ROUTE_LOADERS['/profile']);
+const AdminPage = lazy(ROUTE_LOADERS['/admin']);
 
 /** Main tabs first (most likely next taps), then the focused flows. */
 const APP_PREFETCH = ['/', '/diary', '/scan', '/workout', '/progress', '/food/search'];
@@ -87,6 +89,7 @@ function RequireAuth({ children }: { children?: ReactNode }) {
 /** Signed-in AND onboarded (fit_profiles.onboarded_at not null), else → /onboarding. */
 function RequireOnboarded() {
   const { fit, loading, error } = useProfile();
+  const plan = usePlan();
   const ready = !loading && Boolean(fit?.onboarded_at);
   // Once inside the app, warm the other tabs' chunks while idle so tab switches are instant.
   useEffect(() => (ready ? prefetchOnIdle(APP_PREFETCH) : undefined), [ready]);
@@ -94,7 +97,19 @@ function RequireOnboarded() {
   // Profile could not be loaded (offline, server down) and nothing cached: don't send an
   // onboarded user back to onboarding, and don't render pages that need the targets.
   if (!fit && error) return <ProfileLoadError error={error} />;
-  if (!fit?.onboarded_at) return <Navigate to="/onboarding" replace />;
+  if (!fit?.onboarded_at) {
+    // An admin does not have to fill in the nutrition survey to reach the console.
+    if (plan.loading) return <Splash logo={false} />;
+    return <Navigate to={plan.isAdmin ? '/admin' : '/onboarding'} replace />;
+  }
+  return <Outlet />;
+}
+
+/** Admin console only (the server re-checks every call; this just hides the screen). */
+function RequireAdmin() {
+  const { loading, isAdmin } = usePlan();
+  if (loading) return <Splash logo={false} />;
+  if (!isAdmin) return <Navigate to="/" replace />;
   return <Outlet />;
 }
 
@@ -203,6 +218,12 @@ function AppRoutes() {
           <Route path="/onboarding" element={<OnboardingPage />} />
         </Route>
 
+        <Route element={<RequireAdmin />}>
+          <Route element={<ShellLayout bottomNav={false} />}>
+            <Route path="/admin" element={<AdminPage />} />
+          </Route>
+        </Route>
+
         <Route element={<RequireOnboarded />}>
           {/* Main tabs + menu pages, with the bottom nav */}
           <Route element={<ShellLayout />}>
@@ -236,6 +257,7 @@ export default function App() {
         {/* AuthProvider is null-safe when Supabase is not configured. */}
         <AuthProvider>
           <ProfileProvider>
+           <PlanProvider>
             <AppFrame>
               {isConfigured ? (
                 <ScreenBoundary>
@@ -247,6 +269,7 @@ export default function App() {
                 <NotConfigured />
               )}
             </AppFrame>
+           </PlanProvider>
           </ProfileProvider>
         </AuthProvider>
       </ToastProvider>

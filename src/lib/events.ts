@@ -3,7 +3,7 @@
 
 const EVT = 'fitora:data-changed';
 
-export type DataKind = 'meals' | 'workouts' | 'daily' | 'body' | 'profile' | 'foods' | 'any';
+export type DataKind = 'meals' | 'workouts' | 'daily' | 'body' | 'profile' | 'foods' | 'plan' | 'any';
 
 export function notifyDataChanged(kind: DataKind = 'any'): void {
   window.dispatchEvent(new CustomEvent<DataKind>(EVT, { detail: kind }));

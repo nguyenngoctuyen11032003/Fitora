@@ -1,9 +1,11 @@
 import clsx from 'clsx';
-import { BookOpen, Bookmark, Droplet, Dumbbell, Flame, Home, LogOut, PersonStanding, ScanLine, Target, TrendingUp, UserRound, Utensils, type LucideIcon } from 'lucide-react';
+import { BookOpen, Bookmark, Droplet, Dumbbell, Flame, Home, LogOut, PersonStanding, ScanLine, ShieldCheck, Target, TrendingUp, UserRound, Utensils, type LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Avatar } from '@/components/ui/Avatar';
+import { ProRing } from '@/components/ui/PlanBadge';
 import { useAuth } from '@/context/AuthContext';
+import { usePlan } from '@/context/PlanContext';
 import { useProfile } from '@/context/ProfileContext';
 import { formatNumber } from '@/lib/format';
 import { SAVED_FOODS_PATH } from './MenuOverlay';
@@ -108,6 +110,8 @@ export function Sidebar({ className }: { className?: string }) {
   const { pathname } = useLocation();
   const { signOut, session } = useAuth();
   const { shared, displayName } = useProfile();
+  const { isPro, isAdmin } = usePlan();
+  const groups = isAdmin ? [...GROUPS, { title: 'Quản trị', items: [{ to: '/admin', label: 'Quản trị', icon: ShieldCheck }] }] : GROUPS;
   const [busy, setBusy] = useState(false);
   const scanActive = pathname === '/scan';
   return (
@@ -136,7 +140,7 @@ export function Sidebar({ className }: { className?: string }) {
       </div>
 
       <nav aria-label="Điều hướng chính" className="no-scrollbar mt-5 min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        {GROUPS.map((g) => (
+        {groups.map((g) => (
           <div key={g.title} className="mb-4">
             <p className="eyebrow mb-1.5 px-3 !text-[10px]">{g.title}</p>
             <div className="flex flex-col gap-0.5">
@@ -152,7 +156,9 @@ export function Sidebar({ className }: { className?: string }) {
         <TodayGlanceCard />
         <div className="flex items-center gap-3 rounded-2xl px-2 py-1.5">
           <Link to="/profile" {...prefetchHandlers('/profile')} className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl" aria-label="Hồ sơ của bạn">
-            <Avatar src={shared?.avatar_url} name={displayName} size={38} />
+            <ProRing pro={isPro}>
+              <Avatar src={shared?.avatar_url} name={displayName} size={isPro ? 32 : 38} />
+            </ProRing>
             <span className="min-w-0">
               <span className="block truncate text-[14px] font-bold text-text">{displayName}</span>
               <span className="block truncate text-[12px] text-muted">{session?.user.email}</span>

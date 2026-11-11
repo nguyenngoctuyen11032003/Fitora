@@ -6,7 +6,7 @@ import { FitoraError } from './errors';
 
 export const AI_ERROR_MESSAGES: Record<AiErrorCode, string> = {
   not_food: 'Không nhận ra món ăn trong ảnh. Hãy chụp gần hơn, đủ sáng và thấy rõ món.',
-  quota_exceeded: 'Bạn đã dùng hết lượt quét AI hôm nay. Hãy nhập món thủ công hoặc thử lại vào ngày mai.',
+  quota_exceeded: 'Bạn đã dùng hết lượt quét AI hôm nay (tài khoản thường 5 lượt/ngày, Pro 20 lượt/ngày). Hãy nhập món thủ công hoặc thử lại vào ngày mai.',
   bad_request: 'Ảnh không hợp lệ hoặc quá lớn. Hãy thử ảnh khác.',
   ai_unavailable: 'AI đang bận hoặc tạm gián đoạn. Hãy thử lại sau ít phút.',
   network: 'Không kết nối được máy chủ. Hãy kiểm tra mạng và thử lại.',

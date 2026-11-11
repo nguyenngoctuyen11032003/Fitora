@@ -1,4 +1,4 @@
-import { Check, ChefHat, Pencil, PenLine, Plus, ScanLine, Search, Sparkles, X } from 'lucide-react';
+import { Check, ChefHat, Pencil, PenLine, Plus, ScanLine, Search, Sparkles, Trash2, X } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
@@ -232,6 +232,15 @@ export default function FoodSearchPage() {
     [customById],
   );
 
+  const deleteSaved = useCallback(
+    (o: FoodOption) => {
+      const f = o.customFoodId ? customById.get(o.customFoodId) : undefined;
+      if (f) removeCustom(f);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [customById],
+  );
+
   // Enter in the search box opens the best match for what is typed now (no debounce wait).
   const onSearchKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
@@ -270,6 +279,7 @@ export default function FoodSearchPage() {
         onPick={pick}
         onQuick={quick}
         onEdit={opts.edit && r.option.origin === 'custom' ? editSaved : undefined}
+        onDelete={opts.edit && r.option.origin === 'custom' ? deleteSaved : undefined}
       />
     );
   };
@@ -600,10 +610,11 @@ interface FoodRowProps {
   onPick: (o: FoodOption, quantity: number, unit: string) => void;
   onQuick: (o: FoodOption, quantity: number, unit: string) => void;
   onEdit?: (o: FoodOption) => void;
+  onDelete?: (o: FoodOption) => void;
 }
 
 /** Row: tap = portion sheet, "+" = add this portion right away (undo in the toast), pencil = edit a saved food. */
-const FoodRow = memo(function FoodRow({ option, quantity, unit, count, highlight, photoUrl, busy, mealLabel, onPick, onQuick, onEdit }: FoodRowProps) {
+const FoodRow = memo(function FoodRow({ option, quantity, unit, count, highlight, photoUrl, busy, mealLabel, onPick, onQuick, onEdit, onDelete }: FoodRowProps) {
   const qty = quantity || (isWeight(unit) ? 100 : 1);
   const kcal = computePortion(option, qty, unit).kcal;
   const saved = option.origin === 'custom';
@@ -667,6 +678,16 @@ const FoodRow = memo(function FoodRow({ option, quantity, unit, count, highlight
           className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted transition-colors hover:text-text"
         >
           <Pencil className="h-4 w-4" aria-hidden="true" />
+        </button>
+      )}
+      {onDelete && (
+        <button
+          type="button"
+          onClick={() => onDelete(option)}
+          aria-label={`Xóa món đã lưu ${option.name}`}
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted transition-colors hover:text-[var(--danger-text)]"
+        >
+          <Trash2 className="h-4 w-4" aria-hidden="true" />
         </button>
       )}
       <button

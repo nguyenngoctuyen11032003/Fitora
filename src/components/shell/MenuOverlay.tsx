@@ -5,6 +5,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Portal } from '@/components/ui/Portal';
 import { useFocusTrap } from '@/components/ui/useFocusTrap';
 import { useAuth } from '@/context/AuthContext';
+import { usePlan } from '@/context/PlanContext';
 import { useProfile } from '@/context/ProfileContext';
 import { isLinkActive, prefetchHandlers } from './routes';
 
@@ -32,6 +33,8 @@ export interface MenuOverlayProps {
 export function MenuOverlay({ open, onClose }: MenuOverlayProps) {
   const { signOut } = useAuth();
   const { displayName } = useProfile();
+  const { isAdmin } = usePlan();
+  const links = isAdmin ? [...MENU_LINKS, { to: '/admin', label: 'Quản trị', hint: 'Tài khoản · gói · thanh toán' }] : MENU_LINKS;
   const { pathname, search } = useLocation();
   const [mounted, setMounted] = useState(open);
   const [leaving, setLeaving] = useState(false);
@@ -83,7 +86,7 @@ export function MenuOverlay({ open, onClose }: MenuOverlayProps) {
 
         <nav className="no-scrollbar relative mt-3 min-h-0 flex-1 overflow-y-auto px-3 pb-6 [mask-image:linear-gradient(to_bottom,black_calc(100%-28px),transparent)]" aria-label="Điều hướng chính">
           <ul className="flex flex-col">
-            {MENU_LINKS.map((l, i) => {
+            {links.map((l, i) => {
               const isActive = isLinkActive(l.to, pathname, search);
               return (
                 <li key={l.to} className="animate-fade-slide-left" style={{ animationDelay: `${80 + i * 55}ms` }}>

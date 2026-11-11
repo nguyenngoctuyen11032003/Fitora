@@ -13,6 +13,7 @@ import {
   Mail,
   Pencil,
   RefreshCw,
+  ShieldCheck,
   Scale,
   Sparkles,
   Target,
@@ -24,6 +25,8 @@ import { Link } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
+import { PlanPill, ProRing } from '@/components/ui/PlanBadge';
+import { ProgressBar } from '@/components/ui/ProgressBar';
 import { GlassCard } from '@/components/ui/GlassCard';
 import { MacroBar } from '@/components/ui/MacroBar';
 import { ConfirmDialog } from '@/components/ui/Modal';
@@ -32,7 +35,9 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/context/AuthContext';
+import { usePlan } from '@/context/PlanContext';
 import { useProfile } from '@/context/ProfileContext';
+import { UpgradeSheet } from '@/features/plan/UpgradeSheet';
 import { formatDayVi } from '@/lib/date';
 import { bmiCategory, calcAge, calcBMI } from '@/lib/energy';
 import { notifyDataChanged, onDataChanged } from '@/lib/events';
@@ -56,6 +61,8 @@ export default function ProfilePage() {
   const weight = useAsync(() => latestWeight(), []);
   const [askOut, setAskOut] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const { plan, isPro, isAdmin, remaining } = usePlan();
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   const saveTarget = async (patch: Pick<FitProfile, 'water_target_ml'> | Pick<FitProfile, 'step_target'>) => {
     const row = await upsertFitProfile(patch);
@@ -94,7 +101,9 @@ export default function ProfilePage() {
       <GlassCard padding="lg" className="mt-6 overflow-hidden animate-fade-slide-up lg:col-start-1 lg:row-start-1 lg:mt-[27px]">
         <div aria-hidden="true" className="pointer-events-none absolute -left-20 -top-24 h-60 w-60 rounded-full bg-[radial-gradient(circle,rgba(237,180,11,0.22),transparent_65%)]" />
         <div className="relative flex items-center gap-4 lg:flex-col lg:py-2 lg:text-center">
-          <Avatar src={shared?.avatar_url} name={displayName} size={72} className="ring-2 !ring-[rgba(237,180,11,0.5)]" />
+          <ProRing pro={isPro}>
+            <Avatar src={shared?.avatar_url} name={displayName} size={72} className={isPro ? '!ring-0' : 'ring-2 !ring-[rgba(237,180,11,0.5)]'} />
+          </ProRing>
           <div className="min-w-0 flex-1 lg:w-full">
             {loading && !shared ? (
               <Skeleton width="70%" height={26} className="lg:mx-auto" />
@@ -105,8 +114,46 @@ export default function ProfilePage() {
               <Mail className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span className="truncate">{user?.email ?? '—'}</span>
             </p>
+            {plan && (
+              <p className="mt-2.5 lg:flex lg:justify-center">
+                <PlanPill pro={isPro} label={plan.name ?? undefined} />
+              </p>
+            )}
           </div>
         </div>
+        {plan && (
+          <div className="relative mt-5 border-t border-line pt-4">
+            <div className="flex items-baseline justify-between gap-3 text-[13px]">
+              <span className="font-semibold text-muted">Lượt quét AI hôm nay</span>
+              <span className="tabular font-bold text-text">
+                {plan.used}/{plan.daily_limit}
+              </span>
+            </div>
+            <ProgressBar className="mt-2" value={plan.used} max={Math.max(1, plan.daily_limit)} color={isPro ? '#8b5cf6' : 'var(--gold)'} label="Lượt quét AI đã dùng hôm nay" />
+            <p className="mt-2 text-[12px] text-muted">
+              {isPro ? 'Tài khoản Pro: ' : 'Tài khoản thường: '}còn {remaining} lượt.
+              {plan.expires_at ? ` Gói hết hạn ${new Date(plan.expires_at).toLocaleDateString('vi-VN')}.` : ''}
+            </p>
+            <div className="mt-3 flex flex-col gap-2">
+              {!isPro && (
+                <Button block onClick={() => setUpgradeOpen(true)} icon={<Sparkles className="h-4 w-4" />}>
+                  Nâng cấp Pro
+                </Button>
+              )}
+              {isPro && (
+                <Button block variant="secondary" size="sm" onClick={() => setUpgradeOpen(true)}>
+                  Thanh toán & lịch sử gói
+                </Button>
+              )}
+              {plan.pending_payments > 0 && <p className="text-center text-[12px] font-semibold text-gold">Có {plan.pending_payments} yêu cầu thanh toán đang chờ duyệt</p>}
+              {isAdmin && (
+                <Link to="/admin" className="glass pill text-[14px] font-semibold text-text">
+                  <ShieldCheck className="h-4 w-4 text-gold" aria-hidden="true" /> Trang quản trị
+                </Link>
+              )}
+            </div>
+          </div>
+        )}
       </GlassCard>
 
       <div className="contents lg:col-start-2 lg:row-span-3 lg:row-start-1 lg:block lg:min-w-0 lg:[&>h2:first-child]:mt-0">
@@ -247,6 +294,7 @@ export default function ProfilePage() {
         onConfirm={doSignOut}
         onCancel={() => setAskOut(false)}
       />
+          <UpgradeSheet open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
     </Page>
   );
 }

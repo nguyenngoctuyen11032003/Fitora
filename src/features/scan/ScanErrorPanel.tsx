@@ -1,4 +1,4 @@
-import { Camera, CloudOff, LogIn, PencilLine, RefreshCw, Search, TriangleAlert, Utensils, WifiOff, type LucideIcon } from 'lucide-react';
+import { Camera, CloudOff, LogIn, PencilLine, RefreshCw, Search, Sparkles, TriangleAlert, Utensils, WifiOff, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
@@ -24,6 +24,8 @@ interface Props {
   onManual: () => void;
   /** False when there is no photo to resend (e.g. a Live Scan session ended). */
   canRetry?: boolean;
+  /** Quota exceeded: opens the upgrade-to-Pro sheet. */
+  onUpgrade?: () => void;
   /** Extra way out shown under the actions (e.g. the saved-foods strip). */
   extra?: ReactNode;
 }
@@ -44,7 +46,7 @@ function useOnline() {
 }
 
 /** Friendly full-screen error after a scan, with the next best action first. */
-export function ScanErrorPanel({ code, message, photoUrl, manualHref, onRetake, onRetry, onManual, canRetry = true, extra }: Props) {
+export function ScanErrorPanel({ code, message, photoUrl, manualHref, onRetake, onRetry, onManual, canRetry = true, extra, onUpgrade }: Props) {
   const online = useOnline();
   const rootRef = useRef<HTMLDivElement>(null);
   // Move focus into the dialog so screen readers announce it and keyboard users land on it.
@@ -81,9 +83,19 @@ export function ScanErrorPanel({ code, message, photoUrl, manualHref, onRetake, 
                 <LogIn className="h-5 w-5" aria-hidden="true" /> Đăng nhập lại
               </Link>
             ) : code === 'quota_exceeded' ? (
-              <Link to={manualHref} className="inline-flex min-h-[56px] items-center justify-center gap-2 rounded-full bg-gold font-bold text-[#1a0e02]">
-                <Search className="h-5 w-5" aria-hidden="true" /> Tìm thủ công
-              </Link>
+              <>
+                {onUpgrade && (
+                  <Button size="lg" block onClick={onUpgrade} icon={<Sparkles className="h-5 w-5" />}>
+                    Nâng cấp Pro · 20 lượt/ngày
+                  </Button>
+                )}
+                <Link
+                  to={manualHref}
+                  className={onUpgrade ? 'glass pill min-h-[52px] text-[15px] font-semibold' : 'inline-flex min-h-[56px] items-center justify-center gap-2 rounded-full bg-gold font-bold text-[#1a0e02]'}
+                >
+                  <Search className="h-5 w-5" aria-hidden="true" /> Tìm thủ công
+                </Link>
+              </>
             ) : canRetrySame ? (
               <Button size="lg" block onClick={onRetry} disabled={offline} icon={<RefreshCw className="h-5 w-5" />}>
                 {offline ? 'Đang chờ mạng…' : 'Thử lại'}

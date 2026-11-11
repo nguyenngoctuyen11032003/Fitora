@@ -25,7 +25,7 @@ export async function sniffImageType(blob: Blob): Promise<'image/jpeg' | 'image/
 }
 
 /** Upload an image to fitora/<uid>/<folder>/<uuid>.<ext>; returns the storage path. */
-export async function uploadImage(blob: Blob, folder: 'meals' | 'progress'): Promise<string> {
+export async function uploadImage(blob: Blob, folder: 'meals' | 'progress' | 'payments'): Promise<string> {
   if (!blob || !blob.size) throw new FitoraError('Ảnh trống hoặc không hợp lệ.', 'invalid');
   if (blob.size > MAX_BYTES) throw new FitoraError('Ảnh quá lớn (tối đa 5 MB).', 'too_large');
   // Trust the bytes over blob.type: labelling a JPEG as webp (the old default) stores a

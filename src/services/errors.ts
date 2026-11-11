@@ -83,6 +83,10 @@ export function toFitError(err: unknown, fallback = 'Đã có lỗi xảy ra. Vu
     case 'PGRST302':
     case 'PGRST303':
       return new FitError('session_expired', SESSION_MSG);
+    case 'P0001':
+      // Rule violations raised by our own RPCs (raise exception 'Tiếng Việt…') are meant to be shown as-is.
+      if (e.message && /[ạảãàáâậầấẩẫăắằặẳẵéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ]/i.test(e.message)) return new FitError('rule', e.message);
+      return new FitError('unknown', fallback);
     case '23505':
       return new FitError('duplicate', 'Dữ liệu này đã tồn tại.');
     case '23503':

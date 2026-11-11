@@ -313,3 +313,67 @@ export const WORKOUT_CATEGORY_LABELS: Record<WorkoutCategory, string> = {
   walking: 'Đi bộ',
   other: 'Khác',
 };
+
+/* ---- Gói dịch vụ · thanh toán · quản trị (docs/backend/20261111000200_*.sql) ---- */
+export interface PlanDef {
+  key: string;
+  name: string;
+  daily_scans: number;
+  price_vnd: number;
+  /** null = không hết hạn. */
+  duration_days: number | null;
+  description: string | null;
+  purchasable: boolean;
+  active: boolean;
+  sort: number;
+}
+
+/** fit_my_plan(): the signed-in user's effective plan today. */
+export interface MyPlan {
+  plan: string;
+  name: string | null;
+  daily_limit: number;
+  used: number;
+  expires_at: string | null;
+  is_admin: boolean;
+  pending_payments: number;
+}
+
+export type PaymentStatus = 'pending' | 'approved' | 'rejected';
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  pending: 'Chờ duyệt',
+  approved: 'Đã duyệt',
+  rejected: 'Từ chối',
+};
+
+export interface Payment {
+  id: string;
+  plan_key: string;
+  amount_vnd: number;
+  proof_path: string;
+  note: string | null;
+  status: PaymentStatus;
+  admin_note: string | null;
+  created_at: string;
+  reviewed_at: string | null;
+}
+
+export interface AdminUser {
+  user_id: string;
+  email: string;
+  display_name: string | null;
+  created_at: string;
+  last_sign_in_at: string | null;
+  banned_until: string | null;
+  plan: string;
+  plan_expires_at: string | null;
+  scans_today: number;
+  is_admin: boolean;
+}
+
+export interface AdminPayment extends Payment {
+  user_id: string;
+  email: string;
+  display_name: string | null;
+  plan_name: string;
+}

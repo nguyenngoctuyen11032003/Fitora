@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Flashlight, FlashlightOff, Radar, X } from 'lucide-react';
+import { Flashlight, FlashlightOff, Radar, Sparkles, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Page } from '@/components/shell/Page';
@@ -7,6 +7,8 @@ import { GlassButton } from '@/components/ui/GlassButton';
 import { ConfirmDialog } from '@/components/ui/Modal';
 import { Spinner } from '@/components/ui/Spinner';
 import { useToast } from '@/components/ui/Toast';
+import { usePlan } from '@/context/PlanContext';
+import { UpgradeSheet } from '@/features/plan/UpgradeSheet';
 import { formatDayVi, todayISO } from '@/lib/date';
 import { notifyDataChanged } from '@/lib/events';
 import { formatNumber } from '@/lib/format';
@@ -53,6 +55,8 @@ export default function ScanPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const toast = useToast();
+  const { plan, isPro, refresh: refreshPlan } = usePlan();
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   const [meal, setMeal] = useState<MealType>(() => parseMealParam(params.get('meal')));
   const [date, setDate] = useState(() => parseDateParam(params.get('date')));
@@ -169,6 +173,12 @@ export default function ScanPage() {
     },
     [toast],
   );
+
+  // Every scan (photo or live) spends a quota unit server-side: re-read it so the banner / profile stay true.
+  useEffect(() => {
+    void refreshPlan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, live.result]);
 
   const cancelAnalyse = () => {
     abortRef.current?.abort();
@@ -404,6 +414,21 @@ export default function ScanPage() {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/70 to-transparent lg:hidden" aria-hidden="true" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[52%] bg-gradient-to-t from-black via-black/75 to-transparent lg:hidden" aria-hidden="true" />
 
+        {/* Free accounts: after 3 scans today, suggest Pro (a scan is a paid AI call). */}
+        {phase === 'capture' && plan && !isPro && plan.used >= 3 && (
+          <button
+            type="button"
+            onClick={() => setUpgradeOpen(true)}
+            className="glass-strong absolute inset-x-4 z-10 flex min-h-[48px] items-center gap-3 rounded-2xl px-4 py-2 text-left lg:left-10 lg:right-[424px] lg:top-[96px]"
+            style={{ top: 'calc(var(--safe-top) + 64px)' }}
+          >
+            <Sparkles className="h-5 w-5 shrink-0 text-gold" aria-hidden="true" />
+            <span className="min-w-0 flex-1 text-[13px] leading-snug text-text">
+              Đã quét <b>{plan.used}/{plan.daily_limit}</b> lượt hôm nay. <span className="text-gold">Nâng cấp Pro</span> để quét 20 lượt/ngày.
+            </span>
+          </button>
+        )}
+
         {/* ---- Top bar ---- */}
         <header className="absolute inset-x-0 top-0 z-10 flex items-center gap-3 px-4 lg:gap-4 lg:px-6 lg:!pt-[22px]" style={{ paddingTop: 'calc(var(--safe-top) + 8px)' }}>
           <GlassButton label="Đóng" onClick={close} className="bg-black/30">
@@ -499,6 +524,7 @@ export default function ScanPage() {
             onRetry={() => shot && void analyse(shot)}
             onManual={manualFromPhoto}
             canRetry={!!shot}
+            onUpgrade={isPro ? undefined : () => setUpgradeOpen(true)}
             extra={error.code === 'quota_exceeded' || error.code === 'network' || error.code === 'ai_unavailable' ? strip('Không cần AI — ăn lại món đã lưu') : null}
           />
         )}
@@ -532,6 +558,8 @@ export default function ScanPage() {
         onCancel={() => setConfirmLeave(false)}
         onConfirm={() => void discardAndLeave()}
       />
+
+      <UpgradeSheet open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
 
       <QuickLogSheet
         food={quickFood}
