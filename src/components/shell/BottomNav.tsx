@@ -57,8 +57,8 @@ function Tab({ item }: { item: Item }) {
           <span
             aria-hidden="true"
             className={clsx(
-              'absolute -top-[9px] h-[3px] rounded-full bg-gold shadow-[0_0_12px_rgba(237,180,11,0.9)] transition-all duration-300',
-              isActive ? 'w-6 opacity-100' : 'w-0 opacity-0',
+              'absolute -top-[9px] h-[3px] w-6 origin-center rounded-full bg-gold shadow-[0_0_12px_rgba(237,180,11,0.9)] transition-[transform,opacity] duration-300',
+              isActive ? 'scale-x-100 opacity-100' : 'scale-x-0 opacity-0',
             )}
           />
         </>

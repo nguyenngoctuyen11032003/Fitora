@@ -94,6 +94,7 @@ export function EntryThumb({ entry, url, size = 48 }: { entry: Pick<MealEntry, '
         src={url}
         alt=""
         loading="lazy"
+        decoding="async"
         onError={() => setFailed(true)}
         className="shrink-0 rounded-2xl border border-line object-cover"
         style={{ width: size, height: size }}
