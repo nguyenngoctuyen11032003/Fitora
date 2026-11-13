@@ -97,7 +97,7 @@ export function PaymentsTab() {
 function Proof({ url, size }: { url?: string; size: number }) {
   const [failed, setFailed] = useState(false);
   if (url && !failed) {
-    return <img src={url} alt="Ảnh chuyển khoản" loading="lazy" onError={() => setFailed(true)} className="shrink-0 rounded-xl border border-line object-cover" style={{ width: size, height: size }} />;
+    return <img src={url} alt="Ảnh chuyển khoản" loading="lazy" decoding="async" onError={() => setFailed(true)} className="shrink-0 rounded-xl border border-line object-cover" style={{ width: size, height: size }} />;
   }
   return (
     <span aria-hidden="true" className="grid shrink-0 place-items-center rounded-xl border border-line bg-white/[0.04] text-muted" style={{ width: size, height: size }}>

@@ -19,7 +19,7 @@ interface Props {
 
 /** Thumbnail of a saved food: its scan photo, or a neutral icon. */
 export function SavedThumb({ food, url, size = 44 }: { food: Pick<CustomFood, 'source'>; url?: string; size?: number }) {
-  if (url) return <img src={url} alt="" className="shrink-0 rounded-[14px] object-cover" style={{ width: size, height: size }} loading="lazy" />;
+  if (url) return <img src={url} alt="" className="shrink-0 rounded-[14px] object-cover" style={{ width: size, height: size }} loading="lazy" decoding="async" />;
   return (
     <span
       aria-hidden="true"
