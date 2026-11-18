@@ -2,6 +2,7 @@ import clsx from 'clsx';
 import { Suspense } from 'react';
 import { Outlet } from 'react-router-dom';
 import { PageSkeleton } from '@/components/ui/Skeleton';
+import { ActiveSessionBar } from '@/features/workout/session/ActiveSessionBar';
 import { BottomNav } from './BottomNav';
 import { ShellContext } from './ShellContext';
 import { Sidebar } from './Sidebar';
@@ -20,6 +21,7 @@ export function ShellLayout({ bottomNav = true, sidebar = true }: { bottomNav?: 
           <Outlet />
         </Suspense>
       </div>
+      {bottomNav && <ActiveSessionBar />}
       {bottomNav && <BottomNav />}
     </ShellContext.Provider>
   );

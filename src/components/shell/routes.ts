@@ -18,6 +18,7 @@ export const ROUTE_LOADERS = {
   '/food/search': () => import('@/features/food/FoodSearchPage'),
   '/scan': () => import('@/features/scan/ScanPage'),
   '/workout': () => import('@/features/workout/WorkoutPage'),
+  '/workout/session': () => import('@/features/workout/session/SessionPage'),
   '/progress': () => import('@/features/reports/ReportsPage'),
   '/body': () => import('@/features/body/BodyPage'),
   '/profile': () => import('@/features/profile/ProfilePage'),

@@ -614,6 +614,39 @@ export function withDbAliases(opt: FoodOption, foods: FoodItem[]): FoodOption {
   return keys.length === opt.searchKeys.length ? opt : { ...opt, searchKeys: keys };
 }
 
+/** A database ("Phổ biến") dish as the starting values of the saved-food form (per serving). */
+export interface CustomFoodSeed {
+  name: string;
+  label: string;
+  grams: number;
+  per: Nutrients;
+}
+
+/** One serving of a database dish: its default household unit ("1 bát"), or 100 g / 100 ml for weight units. */
+export function seedFromDbFood(food: FoodItem): CustomFoodSeed {
+  const weight = food.defaultUnit === 'g' || food.defaultUnit === 'ml';
+  const grams = weight ? 100 : food.units.find((u) => u.unit === food.defaultUnit)?.grams ?? food.units[0]?.grams ?? 100;
+  return {
+    name: food.name,
+    label: weight ? `100 ${food.defaultUnit}` : `1 ${food.defaultUnit}`,
+    grams,
+    per: perServingFromPer100(food.per100g, grams),
+  };
+}
+
+/**
+ * Database dishes the user has replaced with an edited copy of their own (same name):
+ * database id → saved food. Deleting the copy brings the original back.
+ */
+export function dbOverrides(customs: CustomFood[], foods: FoodItem[]): Map<string, CustomFood> {
+  const out = new Map<string, CustomFood>();
+  for (const c of customs) {
+    const db = matchDbFood(c.name, foods);
+    if (db && !out.has(db.id)) out.set(db.id, c);
+  }
+  return out;
+}
+
 /** Option key → times logged, for searchFoods' frequency boost. */
 export function frequencyByKey(recent: RecentFood[]): Map<string, number> {
   return new Map(recent.map((r) => [r.option.key, r.count]));
