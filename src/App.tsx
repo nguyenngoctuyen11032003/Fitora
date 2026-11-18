@@ -13,6 +13,7 @@ import { PlanProvider, usePlan } from '@/context/PlanContext';
 import { ProfileProvider, useProfile } from '@/context/ProfileContext';
 import { Button } from '@/components/ui/Button';
 import { returnPath } from '@/features/auth/redirect';
+import { ActiveSessionProvider } from '@/features/workout/session/SessionContext';
 import { isConfigured } from '@/lib/config';
 import { errorMessage } from '@/services/errors';
 
@@ -29,6 +30,7 @@ const DiaryPage = lazy(ROUTE_LOADERS['/diary']);
 const FoodSearchPage = lazy(ROUTE_LOADERS['/food/search']);
 const ScanPage = lazy(ROUTE_LOADERS['/scan']);
 const WorkoutPage = lazy(ROUTE_LOADERS['/workout']);
+const SessionPage = lazy(ROUTE_LOADERS['/workout/session']);
 const ReportsPage = lazy(ROUTE_LOADERS['/progress']);
 const BodyPage = lazy(ROUTE_LOADERS['/body']);
 const ProfilePage = lazy(ROUTE_LOADERS['/profile']);
@@ -245,6 +247,7 @@ function AppRoutes() {
           <Route element={<ShellLayout bottomNav={false} />}>
             <Route path="/scan" element={<ScanPage />} />
             <Route path="/food/search" element={<FoodSearchPage />} />
+            <Route path="/workout/session" element={<SessionPage />} />
           </Route>
         </Route>
       </Route>
@@ -264,6 +267,7 @@ export default function App() {
         <AuthProvider>
           <ProfileProvider>
            <PlanProvider>
+            <ActiveSessionProvider>
             <AppFrame>
               {isConfigured ? (
                 <ScreenBoundary>
@@ -275,6 +279,7 @@ export default function App() {
                 <NotConfigured />
               )}
             </AppFrame>
+            </ActiveSessionProvider>
            </PlanProvider>
           </ProfileProvider>
         </AuthProvider>

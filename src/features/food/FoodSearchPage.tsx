@@ -18,6 +18,7 @@ import { FoodThumb, useMealPhotoUrls } from './components/parts';
 import { QuickAddSheet } from './components/QuickAddSheet';
 import {
   computePortion,
+  dbOverrides,
   defaultPortion,
   dishesSummary,
   frequencyByKey,
@@ -31,9 +32,11 @@ import {
   parseMeal,
   recentFoods,
   searchFoods,
+  seedFromDbFood,
   templatesForMeal,
   usageLabel,
   withDbAliases,
+  type CustomFoodSeed,
   type FoodListTab,
   type FoodOption,
 } from './lib';
@@ -43,7 +46,16 @@ import { useMealTemplates, useQuickLog, type LogCallbacks } from './useSmartLog'
 type Tab = FoodListTab;
 
 const DB_OPTIONS: FoodOption[] = FOODS.map(fromDbFood);
-const POPULAR: FoodOption[] = POPULAR_FOOD_IDS.map((id) => FOOD_BY_ID[id]).filter(Boolean).map(fromDbFood);
+const POPULAR_FOODS = POPULAR_FOOD_IDS.map((id) => FOOD_BY_ID[id]).filter(Boolean);
+const HIDDEN_POPULAR_KEY = 'fitora.hiddenPopular';
+function readHiddenPopular(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(HIDDEN_POPULAR_KEY) ?? '[]');
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
 const isWeight = (u: string) => u === 'g' || u === 'ml';
 
 export default function FoodSearchPage() {
@@ -94,6 +106,22 @@ export default function FoodSearchPage() {
   const [hiddenFoods, setHiddenFoods] = useState<ReadonlySet<string>>(new Set());
   const savedFoods = useMemo(() => (customs.data ?? []).filter((c) => !hiddenFoods.has(c.id)), [customs.data, hiddenFoods]);
   const customOptions = useMemo(() => savedFoods.map(fromCustomFood), [savedFoods]);
+  // "Phổ biến" dishes the user edited are replaced by their own copy (search and the Popular tab).
+  // Database dishes the user removed from "Phổ biến" (kept on this device).
+  const [hiddenPopular, setHiddenPopular] = useState<ReadonlySet<string>>(() => new Set(readHiddenPopular()));
+  const changeHiddenPopular = useCallback((fn: (s: Set<string>) => void) => {
+    setHiddenPopular((prev) => {
+      const n = new Set(prev);
+      fn(n);
+      try {
+        localStorage.setItem(HIDDEN_POPULAR_KEY, JSON.stringify([...n]));
+      } catch {
+        /* private mode: hidden for this visit only */
+      }
+      return n;
+    });
+  }, []);
+  const overrides = useMemo(() => dbOverrides(savedFoods, FOODS), [savedFoods]);
   const customById = useMemo(() => new Map(savedFoods.map((c) => [c.id, c])), [savedFoods]);
   const recentAll = useMemo(() => recentFoods(history.data ?? [], FOODS, savedFoods, 20), [history.data, savedFoods]);
   const recentByKey = useMemo(() => new Map(recentAll.map((r) => [r.option.key, r])), [recentAll]);
@@ -108,8 +136,8 @@ export default function FoodSearchPage() {
   // Recent / personalised options first (searchFoods keeps the first option per key).
   // Saved foods named like a database dish also answer to its aliases (theirs ranks first).
   const searchPool = useMemo(
-    () => [...recentAll.map((r) => r.option), ...customOptions, ...DB_OPTIONS].map((o) => withDbAliases(o, FOODS)),
-    [recentAll, customOptions],
+    () => [...recentAll.map((r) => r.option), ...customOptions, ...DB_OPTIONS.filter((o) => !overrides.has(o.key.slice(3)) && !hiddenPopular.has(o.key.slice(3)))].map((o) => withDbAliases(o, FOODS)),
+    [recentAll, customOptions, overrides, hiddenPopular],
   );
   const searchOpts = useMemo(() => ({ recentKeys: recentAll.map((r) => r.option.key), frequency: frequencyByKey(recentAll) }), [recentAll]);
   const results = useMemo(() => (q ? searchFoods(q, searchPool, searchOpts) : []), [q, searchPool, searchOpts]);
@@ -134,7 +162,7 @@ export default function FoodSearchPage() {
   // ---- sheets ---------------------------------------------------------------
   const [picked, setPicked] = useState<{ option: FoodOption; quantity: number; unit: string } | null>(null);
   const [quickOpen, setQuickOpen] = useState(false);
-  const [customSheet, setCustomSheet] = useState<{ food: CustomFood | null } | null>(null);
+  const [customSheet, setCustomSheet] = useState<{ food: CustomFood | null; seed?: CustomFoodSeed } | null>(null);
   // ?templates=1 → open the Bữa mẫu sheet straight away.
   const [templatesOpen, setTemplatesOpen] = useState(() => !!params.get('templates'));
   const [added, setAdded] = useState(0);
@@ -254,16 +282,37 @@ export default function FoodSearchPage() {
     } else setQuickOpen(true);
   };
 
+  // Popular tab: database dishes, each swapped for the user's edited copy when there is one.
+  const popular = useMemo(
+    () => POPULAR_FOODS.filter((f) => !hiddenPopular.has(f.id) || overrides.has(f.id)).map((f) => ({ food: f, saved: overrides.get(f.id) })).map((p) => ({ ...p, option: p.saved ? fromCustomFood(p.saved) : fromDbFood(p.food) })),
+    [overrides, hiddenPopular],
+  );
+  const hiddenCount = POPULAR_FOODS.filter((f) => hiddenPopular.has(f.id) && !overrides.has(f.id)).length;
+  const deletePopular = useCallback(
+    (o: FoodOption) => {
+      if (o.origin === 'custom') return deleteSaved(o);
+      const id = o.key.slice(3);
+      changeHiddenPopular((s) => s.add(id));
+      toast.show(`Đã ẩn “${o.name}” khỏi Phổ biến.`, { action: { label: 'Hoàn tác', onClick: () => changeHiddenPopular((s) => s.delete(id)) } });
+    },
+    [deleteSaved, changeHiddenPopular, toast],
+  );
+  const editPopular = useCallback((o: FoodOption) => {
+    if (o.origin === 'custom') return editSaved(o);
+    const f = FOOD_BY_ID[o.key.slice(3)];
+    if (f) setCustomSheet({ food: null, seed: seedFromDbFood(f) });
+  }, [editSaved]);
+
   // Photos of every visible saved / scanned dish.
   const visibleOptions = useMemo(() => {
     if (q) return results;
     if (tab === 'suggest') return [...suggestions.map((s) => s.option), ...recent.map((r) => r.option)];
     if (tab === 'mine') return customOptions;
-    return [];
-  }, [q, results, tab, suggestions, recent, customOptions]);
+    return popular.map((p) => p.option);
+  }, [q, results, tab, suggestions, recent, customOptions, popular]);
   const photos = useMealPhotoUrls(useMemo(() => visibleOptions.map((o) => ({ photo_path: o.photoPath ?? null })), [visibleOptions]));
 
-  const renderRow = (o: FoodOption, over?: { quantity: number; unit: string; count?: number }, opts: { edit?: boolean } = {}) => {
+  const renderRow = (o: FoodOption, over?: { quantity: number; unit: string; count?: number }, opts: { edit?: boolean; popular?: boolean } = {}) => {
     const r = over ? { option: o, ...over } : rowFor(o);
     return (
       <FoodRow
@@ -278,8 +327,8 @@ export default function FoodSearchPage() {
         mealLabel={mealLower}
         onPick={pick}
         onQuick={quick}
-        onEdit={opts.edit && r.option.origin === 'custom' ? editSaved : undefined}
-        onDelete={opts.edit && r.option.origin === 'custom' ? deleteSaved : undefined}
+        onEdit={opts.popular ? editPopular : opts.edit && r.option.origin === 'custom' ? editSaved : undefined}
+        onDelete={opts.popular ? deletePopular : opts.edit && r.option.origin === 'custom' ? deleteSaved : undefined}
       />
     );
   };
@@ -480,7 +529,14 @@ export default function FoodSearchPage() {
             </div>
           )
         ) : (
-          <ul className="flex flex-col gap-1 lg:grid lg:grid-cols-2 lg:gap-x-4 lg:gap-y-2">{POPULAR.map((o) => renderRow(o))}</ul>
+          <>
+            <ul className="flex flex-col gap-1 lg:grid lg:grid-cols-2 lg:gap-x-4 lg:gap-y-2">{popular.map((p) => renderRow(p.option, undefined, { popular: true }))}</ul>
+            {hiddenCount > 0 && (
+              <button type="button" onClick={() => changeHiddenPopular((s) => s.clear())} className="mt-3 min-h-[44px] rounded-full px-3 text-[13px] font-semibold text-gold">
+                Hiện lại {hiddenCount} món đã ẩn
+              </button>
+            )}
+          </>
         )}
       </section>
 
@@ -516,6 +572,7 @@ export default function FoodSearchPage() {
         onClose={() => setCustomSheet(null)}
         initialName={customSheet?.food ? undefined : query.trim()}
         food={customSheet?.food ?? null}
+        seed={customSheet?.seed ?? null}
         onSaved={(food, mode) => {
           customs.setData((list) => [...(list ?? []).filter((x) => x.id !== food.id), food].sort(compareByUse));
           // A new food is opened right away to log it.
@@ -627,6 +684,7 @@ const FoodRow = memo(function FoodRow({ option, quantity, unit, count, highlight
   // Portion first so it is never the part cut off on narrow phones.
   const tag = `${formatNumber(qty, 2)} ${unit} · ${base}${uses >= 2 ? ` · đã ăn ${uses} lần` : ''}`;
   const parts = highlight ? highlightParts(option.name, highlight) : null;
+  const detailed = !!onEdit && saved;
   const kind = option.origin === 'custom' ? (option.savedFrom === 'ai' ? 'ai' : 'saved') : 'food';
   return (
     <li className="flex items-center gap-1 lg:rounded-2xl lg:border lg:border-line lg:bg-white/[0.025] lg:pr-2">
@@ -650,7 +708,7 @@ const FoodRow = memo(function FoodRow({ option, quantity, unit, count, highlight
                 )
               : option.name}
           </span>
-          {onEdit ? (
+          {detailed ? (
             <>
               <span className="block truncate text-[12px] text-muted">
                 {formatNumber(qty, 2)} {unit} · <span className="tabular font-semibold text-text">{formatNumber(kcal)} kcal</span>
@@ -663,7 +721,7 @@ const FoodRow = memo(function FoodRow({ option, quantity, unit, count, highlight
             <span className="block truncate text-[12px] text-muted">{tag}</span>
           )}
         </span>
-        {!onEdit && (
+        {!detailed && (
           <span className="tabular shrink-0 text-[15px] font-bold text-text">
             {formatNumber(kcal)}
             <span className="ml-0.5 text-[11px] font-semibold text-muted">kcal</span>
@@ -674,7 +732,7 @@ const FoodRow = memo(function FoodRow({ option, quantity, unit, count, highlight
         <button
           type="button"
           onClick={() => onEdit(option)}
-          aria-label={`Sửa món đã lưu ${option.name}`}
+          aria-label={saved ? `Sửa món đã lưu ${option.name}` : `Sửa món ${option.name}`}
           className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-muted transition-colors hover:text-text"
         >
           <Pencil className="h-4 w-4" aria-hidden="true" />

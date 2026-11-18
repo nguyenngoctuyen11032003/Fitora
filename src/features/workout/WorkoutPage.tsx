@@ -39,6 +39,7 @@ import {
   workoutFromTemplate,
 } from './lib';
 import { RepeatSheet } from './RepeatSheet';
+import { StartCard } from './session/StartCard';
 import { SessionRow } from './SessionRow';
 import { StepsCard } from './StepsCard';
 import { SuggestionsCard } from './SuggestionsCard';
@@ -431,6 +432,11 @@ export default function WorkoutPage() {
           {weekLabel}: <b className="font-semibold text-text">{weekDoneCount} buổi đã tập</b> · {formatNumber(weekKcal)} kcal từ tập luyện
         </p>
       </section>
+
+      {/* Start a session -------------------------------------------------- */}
+      <div className="mt-6 lg:max-w-[560px]">
+        <StartCard />
+      </div>
 
       {/* Week ------------------------------------------------------------- */}
       <div className="mt-7">

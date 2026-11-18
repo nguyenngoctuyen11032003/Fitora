@@ -550,3 +550,25 @@ describe('saved food serving labels', () => {
     expect(back.protein).toBe(35);
   });
 });
+
+describe('popular dish editing', () => {
+  it('seeds the form with one serving of a database dish', async () => {
+    const { FOOD_BY_ID } = await import('@/data/foods');
+    const { seedFromDbFood } = await import('./lib');
+    const pho = FOOD_BY_ID['pho_bo'];
+    const seed = seedFromDbFood(pho);
+    expect(seed.name).toBe(pho.name);
+    expect(seed.grams).toBeGreaterThan(0);
+    expect(seed.label).toBe(`1 ${pho.defaultUnit}`);
+    expect(seed.per.kcal).toBeCloseTo((pho.per100g.kcal * seed.grams) / 100, 0);
+  });
+  it('maps a database dish to the saved copy with the same name', async () => {
+    const { FOODS, FOOD_BY_ID } = await import('@/data/foods');
+    const { dbOverrides } = await import('./lib');
+    const pho = FOOD_BY_ID['pho_bo'];
+    const copy = { ...custom, id: 'copy-1', name: pho.name.toUpperCase() };
+    const map = dbOverrides([copy, custom], FOODS);
+    expect(map.get('pho_bo')?.id).toBe('copy-1');
+    expect(map.size).toBe(1 + (FOODS.some((f) => f.name === custom.name) ? 1 : 0));
+  });
+});

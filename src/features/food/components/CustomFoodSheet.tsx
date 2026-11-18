@@ -8,7 +8,7 @@ import { createCustomFood, updateCustomFood } from '@/services/foods';
 import { schedulePhotoCleanup, uploadMealPhoto } from '@/services/meals';
 import { signedUrl } from '@/services/storage';
 import { CUSTOM_FOOD_SOURCE_LABELS, type CustomFood } from '@/types/db';
-import { kcalFromMacros, kcalMismatch, per100FromServing, perServingFromPer100, servingProblem, usageLabel } from '../lib';
+import { kcalFromMacros, kcalMismatch, type CustomFoodSeed, per100FromServing, perServingFromPer100, servingProblem, usageLabel } from '../lib';
 
 export interface CustomFoodSheetProps {
   open: boolean;
@@ -17,6 +17,8 @@ export interface CustomFoodSheetProps {
   initialName?: string;
   /** Edit mode: the saved food being changed. */
   food?: CustomFood | null;
+  /** Create mode: start from a database ("Phổ biến") dish — saving makes an editable copy of your own. */
+  seed?: CustomFoodSeed | null;
   onSaved: (food: CustomFood, mode: 'add' | 'edit') => void;
   /** Edit mode delete (parent hides it and offers undo). */
   onDelete?: (food: CustomFood) => void;
@@ -29,7 +31,7 @@ const v1 = (n: number, keepZero = false) => {
 };
 
 /** "Món của tôi": values are typed per serving (as on a label) and stored per 100 g. */
-export function CustomFoodSheet({ open, onClose, initialName, food: editing, onSaved, onDelete }: CustomFoodSheetProps) {
+export function CustomFoodSheet({ open, onClose, initialName, food: editing, seed, onSaved, onDelete }: CustomFoodSheetProps) {
   const toast = useToast();
   const [name, setName] = useState('');
   const [brand, setBrand] = useState('');
@@ -69,6 +71,17 @@ export function CustomFoodSheet({ open, onClose, initialName, food: editing, onS
       setF(v1(per.fat));
       setFiber(v1(per.fiber));
       setPhotoPath(editing.photo_path);
+    } else if (seed) {
+      setPhotoPath(null);
+      setName(seed.name);
+      setBrand('');
+      setLabel(seed.label);
+      setGrams(seed.grams);
+      setKcal(Math.round(seed.per.kcal));
+      setP(v1(seed.per.protein));
+      setC(v1(seed.per.carbs));
+      setF(v1(seed.per.fat));
+      setFiber(v1(seed.per.fiber));
     } else {
       setPhotoPath(null);
       setName(initialName ?? '');
@@ -86,7 +99,7 @@ export function CustomFoodSheet({ open, onClose, initialName, food: editing, onS
     setSaving(false);
     busy.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, initialName, editing?.id]);
+  }, [open, initialName, editing?.id, seed?.name]);
 
   // Preview of the picked photo (object URL) or of the saved one (signed URL).
   useEffect(() => {
@@ -159,9 +172,9 @@ export function CustomFoodSheet({ open, onClose, initialName, food: editing, onS
       const food = editing ? await updateCustomFood(editing.id, values) : await createCustomFood(values);
       // A replaced / removed photo is cleaned up unless something else still uses it.
       if (editing?.photo_path && editing.photo_path !== food.photo_path) schedulePhotoCleanup(editing.photo_path);
-      toast.success(editing ? `Đã cập nhật “${food.name}”.` : `Đã lưu “${food.name}” vào Món của tôi.`);
+      toast.success(editing || seed ? `Đã cập nhật “${food.name}”.` : `Đã lưu “${food.name}” vào Món của tôi.`);
       notifyDataChanged('foods');
-      onSaved(food, editing ? 'edit' : 'add');
+      onSaved(food, editing || seed ? 'edit' : 'add');
       onClose();
     } catch (e) {
       if (uploaded) schedulePhotoCleanup(uploaded, 0);
@@ -175,11 +188,13 @@ export function CustomFoodSheet({ open, onClose, initialName, food: editing, onS
     <BottomSheet
       open={open}
       onClose={onClose}
-      title={editing ? 'Sửa món đã lưu' : 'Tạo món riêng'}
+      title={editing ? 'Sửa món đã lưu' : seed ? 'Sửa món phổ biến' : 'Tạo món riêng'}
       description={
         editing
           ? `${CUSTOM_FOOD_SOURCE_LABELS[editing.source] ?? 'Món của tôi'} · ${usageLabel(editing.use_count, editing.last_used_at)}. Món đã ghi trong nhật ký giữ nguyên số liệu cũ.`
-          : 'Nhập theo một phần ăn (như trên nhãn) — lần sau chỉ cần tìm là có.'
+          : seed
+            ? 'Chỉnh số liệu, thêm ảnh rồi lưu — bản của bạn sẽ thay món gốc trong danh sách. Xóa bản sửa để quay lại món gốc.'
+            : 'Nhập theo một phần ăn (như trên nhãn) — lần sau chỉ cần tìm là có.'
       }
       footer={
         <div className="flex items-center gap-3">
@@ -189,7 +204,7 @@ export function CustomFoodSheet({ open, onClose, initialName, food: editing, onS
             </GlassButton>
           )}
           <Button block size="lg" loading={saving} onClick={save}>
-            {editing ? 'Lưu thay đổi' : 'Lưu món'}
+            {editing || seed ? 'Lưu thay đổi' : 'Lưu món'}
           </Button>
         </div>
       }
